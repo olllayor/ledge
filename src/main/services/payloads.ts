@@ -192,7 +192,8 @@ async function createImageAssetItem(
 ): Promise<ShelfItemRecord> {
   const extension = mimeTypeToExtension(mimeType)
   const id = randomUUID()
-  const assetPath = join(context.assetsDir, `${id}-${sanitizeFileName(filenameHint)}.${extension}`)
+  const storageName = `${id}-${sanitizeFileName(filenameHint)}.${extension}`
+  const assetPath = join(context.assetsDir, storageName)
   const data = Buffer.from(base64, 'base64')
   await fs.writeFile(assetPath, data)
   const bookmarkBase64 = await safeBookmark(assetPath, context)
@@ -202,7 +203,7 @@ async function createImageAssetItem(
     kind: 'imageAsset',
     createdAt: new Date().toISOString(),
     order: 0,
-    title: basename(assetPath),
+    title: displayNameForImportedImage(filenameHint, extension),
     subtitle: formatBytes(data.byteLength),
     preview: {
       summary: mimeType,
@@ -243,6 +244,24 @@ function lookupMimeType(path: string): string {
 
 function sanitizeFileName(name: string): string {
   return name.replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '') || 'drop-image'
+}
+
+function displayNameForImportedImage(filenameHint: string, extension: string): string {
+  const trimmed = basename(filenameHint).trim()
+  if (!trimmed) {
+    return `drop-image.${extension}`
+  }
+
+  const existingExtension = extname(trimmed).replace(/^\./, '').toLowerCase()
+  if (existingExtension === extension.toLowerCase()) {
+    return trimmed
+  }
+
+  if (existingExtension.length > 0) {
+    return trimmed
+  }
+
+  return `${trimmed}.${extension}`
 }
 
 async function safeBookmark(path: string, context: PayloadContext): Promise<string> {

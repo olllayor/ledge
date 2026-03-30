@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AppState, IngestPayload, ShelfItemRecord } from '@shared/schema'
 
 interface ShelfViewProps {
@@ -7,27 +7,8 @@ interface ShelfViewProps {
 
 export function ShelfView({ state }: ShelfViewProps) {
   const liveShelf = state.liveShelf
-  const recentShelves = useDeferredValue(state.recentShelves)
-  const [nameDraft, setNameDraft] = useState(liveShelf?.name ?? 'Untitled Shelf')
   const [isImporting, setIsImporting] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  const shareableCount =
-    liveShelf?.items.filter(
-      (item) => (item.kind === 'file' || item.kind === 'folder' || item.kind === 'imageAsset') && !item.file.isMissing
-    ).length ?? 0
   const primaryItem = liveShelf?.items[0] ?? null
-  const shortcutLabel = !state.preferences.globalShortcut
-    ? 'Shortcut off'
-    : state.permissionStatus.shortcutRegistered
-      ? `Shortcut: ${state.preferences.globalShortcut}`
-      : 'Shortcut unavailable'
-  const helperLabel = !state.permissionStatus.nativeHelperAvailable
-    ? 'Helper unavailable'
-    : state.preferences.shakeEnabled
-      ? state.permissionStatus.shakeReady
-        ? `Shake: ${state.preferences.shakeSensitivity}`
-        : 'Shake blocked'
-      : 'Shake off'
   const banner =
     !state.permissionStatus.nativeHelperAvailable
       ? {
@@ -45,16 +26,6 @@ export function ShelfView({ state }: ShelfViewProps) {
               copy: state.permissionStatus.lastError
             }
           : null
-
-  useEffect(() => {
-    setNameDraft(liveShelf?.name ?? 'Untitled Shelf')
-  }, [liveShelf?.id, liveShelf?.name])
-
-  useEffect(() => {
-    if ((liveShelf?.items.length ?? 0) <= 1) {
-      setDetailsOpen(false)
-    }
-  }, [liveShelf?.id, liveShelf?.items.length])
 
   async function pushPayloads(payloads: IngestPayload[]) {
     if (payloads.length === 0) {
@@ -118,15 +89,9 @@ export function ShelfView({ state }: ShelfViewProps) {
             ×
           </button>
           <div className="shelf-title-group">
-            <div className="shelf-handle" />
+            <div className="shelf-handle" aria-hidden="true" />
           </div>
-          <button
-            className="chrome-button"
-            onClick={() => setDetailsOpen((open) => !open)}
-            aria-label={detailsOpen ? 'Hide shelf details' : 'Show shelf details'}
-          >
-            {detailsOpen ? '⌃' : '⌄'}
-          </button>
+          <div className="chrome-spacer" aria-hidden="true" />
         </header>
 
         <section className={`drop-surface compact ${itemCount === 0 ? 'is-empty' : ''}`}>
@@ -140,8 +105,6 @@ export function ShelfView({ state }: ShelfViewProps) {
               item={primaryItem}
               totalItems={itemCount}
               isImporting={isImporting}
-              helperLabel={helperLabel}
-              shortcutLabel={shortcutLabel}
             />
           ) : (
             <div className="empty-state compact">
@@ -162,30 +125,8 @@ export function ShelfView({ state }: ShelfViewProps) {
           </section>
         ) : null}
 
-        {detailsOpen ? (
+        {liveShelf && itemCount > 1 ? (
           <section className="shelf-drawer">
-            <div className="drawer-controls">
-              <input
-                className="shelf-name compact"
-                value={nameDraft}
-                onChange={(event) => setNameDraft(event.target.value)}
-                onBlur={() => void window.dropover.renameShelf(nameDraft)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.currentTarget.blur()
-                  }
-                }}
-              />
-              <div className="toolbar-actions">
-                <button className="toolbar-button" onClick={() => void window.dropover.shareShelfItems()} disabled={shareableCount === 0}>
-                  Share
-                </button>
-                <button className="toolbar-button" onClick={() => void window.dropover.clearShelf()} disabled={itemCount === 0}>
-                  Clear
-                </button>
-              </div>
-            </div>
-
             <div className="item-list compact">
               {liveShelf?.items.map((item, index) => (
                 <ItemCard
@@ -197,25 +138,6 @@ export function ShelfView({ state }: ShelfViewProps) {
                 />
               ))}
             </div>
-
-            <footer className="shelf-footer">
-              <div className="recent-inline">
-                {recentShelves.length === 0 ? (
-                  <span className="footer-note">No recent shelves yet.</span>
-                ) : (
-                  recentShelves.slice(0, 3).map((shelf) => (
-                    <button key={shelf.id} className="recent-pill" onClick={() => void window.dropover.restoreShelf(shelf.id)}>
-                      {shelf.name} <span>{shelf.items.length}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-
-              <div className="footer-meta">
-                <span className="footer-note">{liveShelf?.origin ?? 'standby'}</span>
-                <span className="footer-note">{state.preferences.excludedBundleIds.length} excluded apps</span>
-              </div>
-            </footer>
           </section>
         ) : null}
       </section>
@@ -313,11 +235,9 @@ interface HeroItemProps {
   item: ShelfItemRecord
   totalItems: number
   isImporting: boolean
-  helperLabel: string
-  shortcutLabel: string
 }
 
-function HeroItem({ item, totalItems, isImporting, helperLabel, shortcutLabel }: HeroItemProps) {
+function HeroItem({ item, totalItems, isImporting }: HeroItemProps) {
   const fileBacked = item.kind === 'file' || item.kind === 'folder' || item.kind === 'imageAsset'
   const missing = fileBacked && item.file.isMissing
   const statusLabel = isImporting ? 'Importing' : missing ? 'Missing on disk' : totalItems > 1 ? `${totalItems} items` : 'Ready'
@@ -337,10 +257,8 @@ function HeroItem({ item, totalItems, isImporting, helperLabel, shortcutLabel }:
           <span className="hero-chip-arrow">›</span>
         </div>
       </div>
-      <div className="meta-strip hero-meta">
+      <div className="hero-status-row">
         <span className="meta-chip">{statusLabel}</span>
-        <span className="meta-chip">{helperLabel}</span>
-        <span className="meta-chip">{shortcutLabel}</span>
       </div>
     </div>
   )
@@ -393,7 +311,7 @@ function getHeroPreviewSource(item: ShelfItemRecord): string | null {
     return null
   }
 
-  return `file://${encodeURI(path)}`
+  return `dropover-asset://preview?path=${encodeURIComponent(path)}`
 }
 
 async function payloadsFromTransfer(transfer: DataTransfer): Promise<IngestPayload[]> {

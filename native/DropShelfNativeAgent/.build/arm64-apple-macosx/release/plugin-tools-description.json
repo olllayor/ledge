@@ -24,6 +24,10 @@
       "inputs" : [
         {
           "kind" : "file",
+          "name" : "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/DragGestureTracker.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/Protocol.swift"
         },
         {
@@ -51,6 +55,7 @@
       "moduleName" : "DropShelfNativeAgent",
       "moduleOutputPath" : "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/.build/arm64-apple-macosx/release/Modules/DropShelfNativeAgent.swiftmodule",
       "objects" : [
+        "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/.build/arm64-apple-macosx/release/DropShelfNativeAgent.build/DragGestureTracker.swift.o",
         "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/.build/arm64-apple-macosx/release/DropShelfNativeAgent.build/Protocol.swift.o",
         "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/.build/arm64-apple-macosx/release/DropShelfNativeAgent.build/SelfTest.swift.o",
         "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/.build/arm64-apple-macosx/release/DropShelfNativeAgent.build/ShakeDetector.swift.o",
@@ -101,6 +106,10 @@
       "outputs" : [
         {
           "kind" : "file",
+          "name" : "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/.build/arm64-apple-macosx/release/DropShelfNativeAgent.build/DragGestureTracker.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/.build/arm64-apple-macosx/release/DropShelfNativeAgent.build/Protocol.swift.o"
         },
         {
@@ -122,6 +131,7 @@
       ],
       "prepareForIndexing" : false,
       "sources" : [
+        "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/DragGestureTracker.swift",
         "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/Protocol.swift",
         "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/SelfTest.swift",
         "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/ShakeDetector.swift",
@@ -142,6 +152,7 @@
       "-package-name",
       "dropshelfnativeagent",
       "-c",
+      "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/DragGestureTracker.swift",
       "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/Protocol.swift",
       "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/SelfTest.swift",
       "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/ShakeDetector.swift",
@@ -217,6 +228,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/DragGestureTracker.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/Sources/DropShelfNativeAgent/Protocol.swift"
         },
         {
@@ -240,6 +255,10 @@
         {
           "kind" : "virtual",
           "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/ollayor/Code/Projects/dropover/native/DropShelfNativeAgent/.build/arm64-apple-macosx/release/DropShelfNativeAgent.build/DragGestureTracker.swift.o"
         },
         {
           "kind" : "file",

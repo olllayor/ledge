@@ -71,24 +71,27 @@ button {
   display: grid;
   place-items: center;
   padding: 12px;
+  -webkit-app-region: no-drag;
 }
 
 .shelf-panel {
-  width: min(228px, 100%);
-  min-height: min(250px, calc(100vh - 24px));
+  width: min(214px, 100%);
+  min-height: min(228px, calc(100vh - 24px));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
-  gap: 10px;
-  padding: 10px;
-  border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  gap: 8px;
+  padding: 8px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.13), transparent 52%),
-    linear-gradient(180deg, rgba(34, 34, 36, 0.98), rgba(22, 22, 24, 0.96));
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.07), transparent 50%),
+    linear-gradient(180deg, rgba(34, 34, 36, 0.98), rgba(22, 22, 24, 0.97));
   box-shadow:
-    0 24px 42px rgba(0, 0, 0, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    0 18px 30px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(22px) saturate(1.05);
+  -webkit-app-region: no-drag;
+  overflow: hidden;
 }
 
 .shelf-topbar,
@@ -108,6 +111,12 @@ button {
   gap: 8px;
 }
 
+.shelf-topbar {
+  -webkit-app-region: drag;
+  min-height: 32px;
+  cursor: move;
+}
+
 .shelf-topbar,
 .shelf-footer {
   justify-content: space-between;
@@ -117,13 +126,40 @@ button {
   display: flex;
   justify-content: center;
   flex: 1;
+  min-width: 0;
 }
 
 .shelf-handle {
-  width: 34px;
+  width: 30px;
   height: 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.chrome-spacer {
+  width: 32px;
+  height: 32px;
+  flex: none;
+}
+
+.chrome-button,
+.toolbar-button,
+.ghost-button,
+.mini-button,
+.recent-pill,
+.toggle,
+.settings-nav-item,
+.settings-cta,
+.shelf-name,
+.item-card,
+.item-actions,
+.drawer-controls,
+.permission-banner,
+.hero-item,
+.drop-surface,
+.empty-state,
+.shelf-drawer {
+  -webkit-app-region: no-drag;
 }
 
 .chrome-button,
@@ -169,11 +205,11 @@ button {
   display: grid;
   align-items: center;
   min-height: 0;
-  padding: 4px 6px 0;
+  padding: 0 4px;
 }
 
 .drop-surface.is-empty {
-  min-height: 138px;
+  min-height: 104px;
 }
 
 .surface-title,
@@ -206,9 +242,9 @@ button {
 
 .empty-state {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   text-align: center;
-  padding: 26px 10px 20px;
+  padding: 18px 8px 14px;
 }
 
 .meta-strip {
@@ -218,29 +254,34 @@ button {
   gap: 6px;
 }
 
+.hero-status-row {
+  display: flex;
+  justify-content: center;
+}
+
 .meta-chip,
 .footer-note,
 .settings-state-pill {
-  padding: 0.3rem 0.52rem;
+  padding: 0.26rem 0.48rem;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.06);
   color: var(--ink-soft);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
 }
 
 .hero-item {
   display: grid;
   justify-items: center;
-  gap: 12px;
-  padding-top: 4px;
+  gap: 8px;
+  padding-top: 2px;
 }
 
 .hero-stage {
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 108px;
+  min-height: 72px;
   width: 100%;
 }
 
@@ -259,12 +300,12 @@ button {
 }
 
 .hero-artwork {
-  width: 88px;
-  height: 88px;
+  width: 72px;
+  height: 72px;
   display: grid;
   place-items: center;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 14px;
 }
 
 .hero-artwork svg {
@@ -296,7 +337,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0.46rem 0.72rem;
+  padding: 0.4rem 0.64rem;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.08));
@@ -304,11 +345,11 @@ button {
 }
 
 .hero-chip span:first-child {
-  max-width: 132px;
+  max-width: 122px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
 }
 
@@ -323,12 +364,12 @@ button {
 
 .shelf-drawer {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .drawer-controls {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .shelf-name {
@@ -340,7 +381,7 @@ button {
 }
 
 .shelf-name.compact {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 600;
 }
 
@@ -356,14 +397,14 @@ button {
 .ghost-button,
 .recent-pill,
 .settings-cta {
-  padding: 0.44rem 0.7rem;
+  padding: 0.36rem 0.62rem;
   border-radius: 999px;
 }
 
 .toolbar-button,
 .ghost-button.small,
 .recent-pill {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
 }
 
 .toolbar-button.destructive,
@@ -373,7 +414,7 @@ button {
 
 .item-list {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   max-height: 100%;
   overflow: auto;
   padding-right: 2px;
@@ -381,9 +422,9 @@ button {
 
 .item-card {
   display: grid;
-  gap: 8px;
-  padding: 10px;
-  border-radius: 14px;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.05);
 }
@@ -403,14 +444,14 @@ button {
 }
 
 .item-badge {
-  padding: 0.24rem 0.5rem;
+  padding: 0.18rem 0.42rem;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
-  font-size: 0.74rem;
+  font-size: 0.68rem;
 }
 
 .item-title.compact {
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -419,6 +460,7 @@ button {
 
 .item-subtitle.compact,
 .item-preview.compact {
+  font-size: 0.72rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -431,8 +473,8 @@ button {
 }
 
 .mini-button {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border-radius: 999px;
 }
@@ -442,13 +484,13 @@ button {
 }
 
 .ghost-button.small {
-  padding: 0.35rem 0.58rem;
+  padding: 0.28rem 0.52rem;
 }
 
 .permission-banner {
   justify-content: space-between;
-  padding: 10px 12px;
-  border-radius: 14px;
+  padding: 8px 10px;
+  border-radius: 12px;
   border: 1px solid rgba(255, 117, 103, 0.22);
   background: rgba(93, 31, 23, 0.34);
 }

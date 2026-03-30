@@ -1,4 +1,4 @@
-import { BrowserWindow, screen } from 'electron'
+import { BrowserWindow, screen, type Rectangle } from 'electron'
 import type { AppState } from '@shared/schema'
 import { IPC_CHANNELS } from '@shared/ipc'
 import { loadRenderer } from './loadRenderer'
@@ -6,6 +6,8 @@ import { resolvePreloadPath } from './preloadPath'
 
 export class ShelfWindow {
   private window: BrowserWindow | null = null
+  private manualBounds: Rectangle | null = null
+  private programmaticMoveDepth = 0
 
   async ensure(): Promise<BrowserWindow> {
     if (this.window && !this.window.isDestroyed()) {
@@ -13,8 +15,8 @@ export class ShelfWindow {
     }
 
     this.window = new BrowserWindow({
-      width: 268,
-      height: 332,
+      width: 252,
+      height: 318,
       show: false,
       frame: false,
       transparent: true,
@@ -39,7 +41,15 @@ export class ShelfWindow {
     this.window.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true
     })
+    this.window.on('move', () => {
+      if (!this.window || this.window.isDestroyed() || this.programmaticMoveDepth > 0) {
+        return
+      }
+
+      this.manualBounds = this.window.getBounds()
+    })
     this.window.on('closed', () => {
+      this.manualBounds = null
       this.window = null
     })
     await loadRenderer(this.window, 'shelf')
@@ -48,21 +58,29 @@ export class ShelfWindow {
 
   async showNear(point: { x: number; y: number }, inactive = false): Promise<void> {
     const window = await this.ensure()
-    const bounds = computeBounds(point, window.getBounds().width, window.getBounds().height)
-    window.setBounds(bounds, false)
+    const bounds = this.manualBounds ?? computeBounds(point, window.getBounds().width, window.getBounds().height)
+    this.withProgrammaticMove(() => {
+      window.setBounds(bounds, false)
+    })
+    this.showWindow(window, inactive)
+  }
 
-    if (inactive) {
-      window.showInactive()
-      return
-    }
+  async show(inactive = false): Promise<void> {
+    const window = await this.ensure()
+    this.showWindow(window, inactive)
+  }
 
-    window.show()
-    window.focus()
+  isVisible(): boolean {
+    return Boolean(this.window && !this.window.isDestroyed() && this.window.isVisible())
   }
 
   hide(): void {
     this.window?.closeFilePreview()
     this.window?.hide()
+  }
+
+  resetPosition(): void {
+    this.manualBounds = null
   }
 
   sendState(state: AppState): void {
@@ -80,6 +98,25 @@ export class ShelfWindow {
 
   getBrowserWindow(): BrowserWindow | null {
     return this.window
+  }
+
+  private showWindow(window: BrowserWindow, inactive: boolean): void {
+    if (inactive) {
+      window.showInactive()
+      return
+    }
+
+    window.show()
+    window.focus()
+  }
+
+  private withProgrammaticMove(callback: () => void): void {
+    this.programmaticMoveDepth += 1
+    try {
+      callback()
+    } finally {
+      this.programmaticMoveDepth -= 1
+    }
   }
 }
 

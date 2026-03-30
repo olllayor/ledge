@@ -1,6 +1,7 @@
-import { app, clipboard, dialog, globalShortcut, Menu, ipcMain, nativeImage, screen, shell } from 'electron'
+import { app, clipboard, dialog, globalShortcut, Menu, ipcMain, nativeImage, net, protocol, screen, shell } from 'electron'
 import { promises as fs } from 'node:fs'
 import { basename, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { IPC_CHANNELS } from '@shared/ipc'
 import {
   appStateSchema,
@@ -35,6 +36,19 @@ let shortcutStatus: Pick<PermissionStatus, 'shortcutRegistered' | 'shortcutError
 const PROJECT_URL = 'https://github.com/olllayor/dropover'
 const WHATS_NEW_URL = `${PROJECT_URL}/releases`
 const QUICK_START_URL = `${PROJECT_URL}#readme`
+const ASSET_PROTOCOL = 'dropover-asset'
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: ASSET_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }
+])
 
 app.whenReady().then(async () => {
   if (process.platform === 'darwin' && app.dock) {
@@ -43,6 +57,16 @@ app.whenReady().then(async () => {
 
   app.setName('Ledge')
   Menu.setApplicationMenu(null)
+  protocol.handle(ASSET_PROTOCOL, (request) => {
+    const url = new URL(request.url)
+    const path = url.searchParams.get('path')
+
+    if (!path) {
+      return new Response('Missing asset path.', { status: 400 })
+    }
+
+    return net.fetch(pathToFileURL(path).toString())
+  })
 
   stateStore = new StateStore(app.getPath('userData'))
   nativeAgent = new NativeAgentClient()
@@ -113,6 +137,7 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC_CHANNELS.closeShelf, async () => {
     stateStore.closeShelf()
+    shelfWindow.resetPosition()
     shelfWindow.hide()
     return broadcastState()
   })
@@ -223,6 +248,7 @@ async function createShelf(
   const liveShelf = stateStore.getLiveShelf()
   if (!liveShelf) {
     stateStore.createShelf(reason)
+    shelfWindow.resetPosition()
   }
 
   await shelfWindow.showNear(point, inactive)
@@ -255,6 +281,7 @@ async function restoreShelf(id: string): Promise<AppState> {
     items: refreshedItems
   })
 
+  shelfWindow.resetPosition()
   await shelfWindow.showNear(currentCursorPoint(), false)
   return broadcastState()
 }
@@ -279,7 +306,11 @@ async function addPayloadToLiveShelf(
 
   stateStore.ensureLiveShelf(options.origin ?? 'manual')
   stateStore.appendItems(items)
-  await shelfWindow.showNear(options.point ?? currentCursorPoint(), options.inactive ?? false)
+  if (shelfWindow.isVisible()) {
+    await shelfWindow.show(options.inactive ?? false)
+  } else {
+    await shelfWindow.showNear(options.point ?? currentCursorPoint(), options.inactive ?? false)
+  }
   broadcastState()
   return true
 }

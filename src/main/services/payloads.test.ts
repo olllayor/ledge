@@ -70,6 +70,33 @@ describe('payloadToItems', () => {
       throw new Error('Expected imported image asset to be file-backed')
     }
     expect(getFileBackedPath(items[0])).toContain(dir)
+    expect(items[0]?.title).toBe('dragged-image.png')
+  })
+
+  it('keeps the original filename for imported images when one exists', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dropshelf-image-name-'))
+    tempDirs.push(dir)
+
+    const items = await payloadToItems(
+      {
+        kind: 'image',
+        mimeType: 'image/jpeg',
+        base64: Buffer.from('jpg-data').toString('base64'),
+        filenameHint: 'screenshot-2026-03-31.jpg'
+      },
+      {
+        assetsDir: dir,
+        createBookmark: async (path) => `bookmark:${path}`,
+        resolveBookmark: async (bookmarkBase64) => ({
+          resolvedPath: bookmarkBase64.replace('bookmark:', ''),
+          isStale: false,
+          isMissing: false
+        })
+      }
+    )
+
+    expect(items[0]?.kind).toBe('imageAsset')
+    expect(items[0]?.title).toBe('screenshot-2026-03-31.jpg')
   })
 
   it('skips invalid dropped paths without failing valid ones', async () => {

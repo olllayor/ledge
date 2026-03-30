@@ -6,8 +6,8 @@ const root = resolve(__dirname, '.')
 const shared = resolve(root, 'src/shared')
 const rendererCspByMode = {
   serve:
-    "default-src 'self' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://localhost:* ws://localhost:*;",
-  build: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self';"
+    "default-src 'self' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: dropover-asset:; connect-src 'self' http://localhost:* ws://localhost:*;",
+  build: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: dropover-asset:; connect-src 'self';"
 } as const
 
 export default defineConfig(({ command }) => ({

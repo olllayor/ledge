@@ -83,6 +83,38 @@ describe('computeShakeReady', () => {
     expect(dragEnded).toHaveBeenCalledTimes(1)
   })
 
+  it('emits shakeDetected notifications from helper stdout', async () => {
+    const child = new MockChildProcess()
+    const agent = new NativeAgentClient({
+      spawnProcess: () => child,
+      resolveBinaryPath: () => process.execPath
+    })
+    const shakeDetected = vi.fn()
+    agent.on('shakeDetected', shakeDetected)
+
+    await agent.start()
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'gesture.shakeDetected',
+        params: {
+          x: 240,
+          y: 120,
+          displayId: 1,
+          sourceBundleId: 'com.apple.finder'
+        }
+      })}\n`
+    )
+
+    expect(shakeDetected).toHaveBeenCalledWith({
+      x: 240,
+      y: 120,
+      displayId: 1,
+      sourceBundleId: 'com.apple.finder'
+    })
+  })
+
   it('rejects pending calls and restarts the helper with the latest preferences', async () => {
     vi.useFakeTimers()
     const firstChild = new MockChildProcess()
