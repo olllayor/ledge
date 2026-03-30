@@ -9,6 +9,12 @@ export function ShelfView({ state }: ShelfViewProps) {
   const liveShelf = state.liveShelf
   const [isImporting, setIsImporting] = useState(false)
   const primaryItem = liveShelf?.items[0] ?? null
+  const itemCount = liveShelf?.items.length ?? 0
+  const useCollageHero =
+    liveShelf !== null &&
+    itemCount > 1 &&
+    itemCount <= 3 &&
+    liveShelf.items.every(isHeroPreviewable)
   const banner =
     !state.permissionStatus.nativeHelperAvailable
       ? {
@@ -79,8 +85,6 @@ export function ShelfView({ state }: ShelfViewProps) {
     await window.dropover.reorderItems(next.map((item) => item.id))
   }
 
-  const itemCount = liveShelf?.items.length ?? 0
-
   return (
     <main className="shelf-shell" onPaste={handlePaste} tabIndex={0}>
       <section className="shelf-panel" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
@@ -102,9 +106,11 @@ export function ShelfView({ state }: ShelfViewProps) {
             </div>
           ) : primaryItem ? (
             <HeroItem
+              items={liveShelf?.items ?? [primaryItem]}
               item={primaryItem}
               totalItems={itemCount}
               isImporting={isImporting}
+              useCollageHero={useCollageHero}
             />
           ) : (
             <div className="empty-state compact">
@@ -125,7 +131,7 @@ export function ShelfView({ state }: ShelfViewProps) {
           </section>
         ) : null}
 
-        {liveShelf && itemCount > 1 ? (
+        {liveShelf && itemCount > 1 && !useCollageHero ? (
           <section className="shelf-drawer">
             <div className="item-list compact">
               {liveShelf?.items.map((item, index) => (
@@ -232,33 +238,62 @@ function ItemCard({ item, isFirst, isLast, onMove }: ItemCardProps) {
 }
 
 interface HeroItemProps {
+  items: ShelfItemRecord[]
   item: ShelfItemRecord
   totalItems: number
   isImporting: boolean
+  useCollageHero: boolean
 }
 
-function HeroItem({ item, totalItems, isImporting }: HeroItemProps) {
+function HeroItem({ items, item, totalItems, isImporting, useCollageHero }: HeroItemProps) {
   const fileBacked = item.kind === 'file' || item.kind === 'folder' || item.kind === 'imageAsset'
   const missing = fileBacked && item.file.isMissing
-  const statusLabel = isImporting ? 'Importing' : missing ? 'Missing on disk' : totalItems > 1 ? `${totalItems} items` : 'Ready'
+  const statusLabel = isImporting
+    ? 'Importing'
+    : missing
+      ? 'Missing on disk'
+      : useCollageHero
+        ? `${totalItems} Images`
+        : totalItems > 1
+          ? `${totalItems} items`
+          : 'Ready'
   const previewSrc = getHeroPreviewSource(item)
+  const collageItems = useCollageHero ? items.slice(0, 3).map((entry, index) => ({ item: entry, index })) : []
 
   return (
-    <div className="hero-item">
-      <div className="hero-stage">
-        {totalItems > 1 ? <span className="hero-count">{totalItems}</span> : null}
-        <div className={`hero-artwork ${missing ? 'is-missing' : ''}`}>
-          {previewSrc ? <img src={previewSrc} alt="" className="hero-image" /> : <HeroGlyph kind={item.kind} />}
-        </div>
+    <div className={`hero-item${useCollageHero ? ' is-collage' : ''}`}>
+      <div className={`hero-stage${useCollageHero ? ' is-collage' : ''}`}>
+        {useCollageHero ? (
+          <div className="hero-collage" aria-hidden="true">
+            {collageItems.map(({ item: collageItem, index }) => {
+              const src = getHeroPreviewSource(collageItem)
+              const stackClassName = heroStackClassName(index, collageItems.length)
+              return (
+                <div key={collageItem.id} className={`hero-stack-card ${stackClassName}`}>
+                  {src ? <img src={src} alt="" className="hero-stack-image" /> : <HeroGlyph kind={collageItem.kind} />}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <>
+            {totalItems > 1 ? <span className="hero-count">{totalItems}</span> : null}
+            <div className={`hero-artwork ${missing ? 'is-missing' : ''}`}>
+              {previewSrc ? <img src={previewSrc} alt="" className="hero-image" /> : <HeroGlyph kind={item.kind} />}
+            </div>
+          </>
+        )}
       </div>
-      <div className="hero-chip-row">
-        <div className="hero-chip" title={item.title}>
-          <span>{item.title}</span>
-          <span className="hero-chip-arrow">›</span>
+      {!useCollageHero ? (
+        <div className="hero-chip-row">
+          <div className="hero-chip" title={item.title}>
+            <span>{item.title}</span>
+            <span className="hero-chip-arrow">›</span>
+          </div>
         </div>
-      </div>
+      ) : null}
       <div className="hero-status-row">
-        <span className="meta-chip">{statusLabel}</span>
+        <span className={`meta-chip${useCollageHero ? ' meta-chip-prominent' : ''}`}>{statusLabel}</span>
       </div>
     </div>
   )
@@ -314,11 +349,45 @@ function getHeroPreviewSource(item: ShelfItemRecord): string | null {
   return `dropover-asset://preview?path=${encodeURIComponent(path)}`
 }
 
+function isHeroPreviewable(item: ShelfItemRecord): boolean {
+  if (item.kind === 'imageAsset') {
+    return !item.file.isMissing
+  }
+
+  if (item.kind === 'file') {
+    return item.mimeType.startsWith('image/') && !item.file.isMissing
+  }
+
+  return false
+}
+
+function heroStackClassName(index: number, count: number): string {
+  if (count === 2) {
+    return index === 0 ? 'hero-stack-card-front' : 'hero-stack-card-back-left'
+  }
+
+  if (index === 0) {
+    return 'hero-stack-card-front'
+  }
+
+  return index === 1 ? 'hero-stack-card-back-left' : 'hero-stack-card-back-right'
+}
+
 async function payloadsFromTransfer(transfer: DataTransfer): Promise<IngestPayload[]> {
   const payloads: IngestPayload[] = []
-  const filePaths = Array.from(transfer.files)
-    .map((file) => (file as File & { path?: string }).path)
-    .filter((path): path is string => Boolean(path))
+  const droppedFiles = Array.from(transfer.files)
+  const droppedItemFiles = Array.from(transfer.items as DataTransferItemList)
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file))
+  const filePaths = [
+    ...droppedFiles
+      .map((file) => window.dropover.getFilePath(file))
+      .filter((path): path is string => Boolean(path)),
+    ...droppedItemFiles
+      .map((file) => window.dropover.getFilePath(file))
+      .filter((path): path is string => Boolean(path)),
+    ...filePathsFromUriList(transfer.getData('text/uri-list'))
+  ]
 
   if (filePaths.length > 0) {
     payloads.push({
@@ -335,7 +404,7 @@ async function payloadsFromTransfer(transfer: DataTransfer): Promise<IngestPaylo
         continue
       }
 
-      const maybePath = (file as File & { path?: string }).path
+      const maybePath = window.dropover.getFilePath(file)
       if (maybePath) {
         continue
       }
@@ -382,6 +451,25 @@ async function payloadsFromTransfer(transfer: DataTransfer): Promise<IngestPaylo
   }
 
   return payloads
+}
+
+function filePathsFromUriList(uriList: string): string[] {
+  return uriList
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0 && !entry.startsWith('#'))
+    .flatMap((entry) => {
+      try {
+        const url = new URL(entry)
+        if (url.protocol !== 'file:') {
+          return []
+        }
+
+        return [decodeURIComponent(url.pathname)]
+      } catch {
+        return []
+      }
+    })
 }
 
 async function imageToPayload(file: File): Promise<IngestPayload> {

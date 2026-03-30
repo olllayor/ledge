@@ -57,5 +57,6 @@ export interface DropoverAPI {
   clearShelf(): Promise<AppState>
   reorderItems(itemIds: string[]): Promise<AppState>
   shareShelfItems(itemIds?: string[]): Promise<boolean>
+  getFilePath(file: File): string
   subscribeState(listener: StateListener): () => void
 }

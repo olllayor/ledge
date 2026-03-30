@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, type DropoverAPI, type StateListener } from '@shared/ipc'
 import {
   appStateSchema,
@@ -73,6 +73,13 @@ const api: DropoverAPI = {
   },
   async shareShelfItems(itemIds) {
     return ipcRenderer.invoke(IPC_CHANNELS.shareShelfItems, itemIds)
+  },
+  getFilePath(file) {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
   },
   subscribeState(listener: StateListener) {
     const wrapped = (_event: Electron.IpcRendererEvent, state: unknown) => {
