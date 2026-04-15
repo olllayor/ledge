@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   getPermissionStatus: 'dropover:get-permission-status',
   openPermissionSettings: 'dropover:open-permission-settings',
   startItemDrag: 'dropover:start-item-drag',
+  startItemsDrag: 'dropover:start-items-drag',
   previewItem: 'dropover:preview-item',
   revealItem: 'dropover:reveal-item',
   openItem: 'dropover:open-item',
@@ -47,6 +48,7 @@ export interface DropoverAPI {
   getPermissionStatus(): Promise<PermissionStatus>
   openPermissionSettings(): Promise<boolean>
   startItemDrag(itemId: string): void
+  startItemsDrag(itemIds: string[]): void
   previewItem(itemId: string): Promise<boolean>
   revealItem(itemId: string): Promise<boolean>
   openItem(itemId: string): Promise<boolean>

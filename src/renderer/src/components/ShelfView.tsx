@@ -1,20 +1,45 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { AppState, IngestPayload, ShelfItemRecord } from '@shared/schema'
+import {
+  getExportableItems,
+  getHeroCountLabel,
+  getHeroMode,
+  type HeroMode,
+  type MenuTarget,
+  type SessionMode
+} from './shelfFlow'
 
 interface ShelfViewProps {
   state: AppState
 }
 
+interface OverflowAction {
+  id: string
+  label: string
+  destructive?: boolean
+  disabled?: boolean
+  onSelect(): Promise<void> | void
+}
+
 export function ShelfView({ state }: ShelfViewProps) {
   const liveShelf = state.liveShelf
+  const items = liveShelf?.items ?? []
+  const primaryItem = items[0] ?? null
+  const itemCount = items.length
+  const heroMode = getHeroMode(items)
+  const exportableItems = getExportableItems(items)
   const [isImporting, setIsImporting] = useState(false)
-  const primaryItem = liveShelf?.items[0] ?? null
-  const itemCount = liveShelf?.items.length ?? 0
-  const useCollageHero =
-    liveShelf !== null &&
-    itemCount > 1 &&
-    itemCount <= 3 &&
-    liveShelf.items.every(isHeroPreviewable)
+  const [sessionMode, setSessionMode] = useState<SessionMode>('idle')
+  const [menuTarget, setMenuTarget] = useState<MenuTarget>('shelf')
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const itemSheetRef = useRef<HTMLDivElement | null>(null)
+  const lastUpdatedAtRef = useRef(liveShelf?.updatedAt ?? '')
+  const dragDepthRef = useRef(0)
+  const isAcceptingDrop = sessionMode === 'acceptingDrop'
+  const isExporting = sessionMode === 'exporting'
+  const isMenuOpen = sessionMode === 'menuOpen'
+  const isItemListOpen = sessionMode === 'itemListOpen'
   const banner =
     !state.permissionStatus.nativeHelperAvailable
       ? {
@@ -33,12 +58,95 @@ export function ShelfView({ state }: ShelfViewProps) {
             }
           : null
 
+  useEffect(() => {
+    dragDepthRef.current = 0
+    setMenuTarget('shelf')
+    setSessionMode('idle')
+  }, [liveShelf?.id])
+
+  useEffect(() => {
+    const nextUpdatedAt = liveShelf?.updatedAt ?? ''
+    const didMutateShelf = lastUpdatedAtRef.current !== '' && lastUpdatedAtRef.current !== nextUpdatedAt
+
+    if (didMutateShelf && sessionMode === 'exporting') {
+      setSessionMode('idle')
+    }
+
+    lastUpdatedAtRef.current = nextUpdatedAt
+  }, [liveShelf?.updatedAt, sessionMode])
+
+  useEffect(() => {
+    if (liveShelf || itemCount !== 0) {
+      return
+    }
+
+    dragDepthRef.current = 0
+    setMenuTarget('shelf')
+    setSessionMode('idle')
+  }, [itemCount, liveShelf])
+
+  useEffect(() => {
+    const handleFocus = () => {
+      setSessionMode((current) => (current === 'exporting' ? 'idle' : current))
+    }
+
+    window.addEventListener('focus', handleFocus)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (sessionMode !== 'menuOpen' && sessionMode !== 'itemListOpen') {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+
+      if (sessionMode === 'menuOpen') {
+        if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) {
+          return
+        }
+      }
+
+      if (sessionMode === 'itemListOpen' && itemSheetRef.current?.contains(target)) {
+        return
+      }
+
+      setMenuTarget('shelf')
+      setSessionMode('idle')
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      setMenuTarget('shelf')
+      setSessionMode('idle')
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [sessionMode])
+
   async function pushPayloads(payloads: IngestPayload[]) {
     if (payloads.length === 0) {
       return
     }
 
     setIsImporting(true)
+    setMenuTarget('shelf')
+    setSessionMode('idle')
+
     try {
       if (!liveShelf) {
         await window.dropover.createShelf({ reason: 'manual' })
@@ -52,8 +160,51 @@ export function ShelfView({ state }: ShelfViewProps) {
     }
   }
 
-  async function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+  function resetDropState() {
+    dragDepthRef.current = 0
+    setSessionMode((current) => (current === 'acceptingDrop' ? 'idle' : current))
+  }
+
+  function handleDragEnter(event: React.DragEvent<HTMLElement>) {
+    if (isExporting || !isExternalTransfer(event.dataTransfer)) {
+      return
+    }
+
+    dragDepthRef.current += 1
+    setMenuTarget('shelf')
+    setSessionMode('acceptingDrop')
+  }
+
+  function handleDragLeave(event: React.DragEvent<HTMLElement>) {
+    if (isExporting || !isExternalTransfer(event.dataTransfer)) {
+      return
+    }
+
+    const nextDepth = Math.max(0, dragDepthRef.current - 1)
+    dragDepthRef.current = nextDepth
+
+    if (nextDepth === 0 && !event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setSessionMode((current) => (current === 'acceptingDrop' ? 'idle' : current))
+    }
+  }
+
+  function handleDragOver(event: React.DragEvent<HTMLElement>) {
+    if (isExporting || !isExternalTransfer(event.dataTransfer)) {
+      return
+    }
+
     event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+
+    if (sessionMode !== 'acceptingDrop') {
+      setMenuTarget('shelf')
+      setSessionMode('acceptingDrop')
+    }
+  }
+
+  async function handleDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault()
+    resetDropState()
     await pushPayloads(await payloadsFromTransfer(event.dataTransfer))
   }
 
@@ -72,22 +223,160 @@ export function ShelfView({ state }: ShelfViewProps) {
       return
     }
 
-    const items = [...liveShelf.items]
-    const index = items.findIndex((item) => item.id === itemId)
+    const currentItems = [...liveShelf.items]
+    const index = currentItems.findIndex((item) => item.id === itemId)
     const targetIndex = index + direction
-    if (index === -1 || targetIndex < 0 || targetIndex >= items.length) {
+    if (index === -1 || targetIndex < 0 || targetIndex >= currentItems.length) {
       return
     }
 
-    const next = [...items]
+    const next = [...currentItems]
     const [entry] = next.splice(index, 1)
     next.splice(targetIndex, 0, entry)
     await window.dropover.reorderItems(next.map((item) => item.id))
   }
 
+  function openOverflowMenu() {
+    if (!liveShelf) {
+      return
+    }
+
+    setMenuTarget(primaryItem ? 'frontItem' : 'shelf')
+    setSessionMode('menuOpen')
+  }
+
+  function openItemSheet() {
+    setMenuTarget('shelf')
+    setSessionMode('itemListOpen')
+  }
+
+  function closeTransientSurface() {
+    dragDepthRef.current = 0
+    setMenuTarget('shelf')
+    setSessionMode('idle')
+  }
+
+  const menuActions: OverflowAction[] = []
+  if (primaryItem) {
+    if (isActionableFileItem(primaryItem)) {
+      const missing = primaryItem.file.isMissing
+      menuActions.push(
+        {
+          id: 'quick-look',
+          label: 'Quick Look',
+          disabled: missing,
+          onSelect: async () => {
+            closeTransientSurface()
+            await window.dropover.previewItem(primaryItem.id)
+          }
+        },
+        {
+          id: 'reveal',
+          label: 'Reveal in Finder',
+          disabled: missing,
+          onSelect: async () => {
+            closeTransientSurface()
+            await window.dropover.revealItem(primaryItem.id)
+          }
+        },
+        {
+          id: 'open',
+          label: 'Open',
+          disabled: missing,
+          onSelect: async () => {
+            closeTransientSurface()
+            await window.dropover.openItem(primaryItem.id)
+          }
+        },
+        {
+          id: 'share-all',
+          label: 'Share All',
+          disabled: exportableItems.length === 0,
+          onSelect: async () => {
+            closeTransientSurface()
+            await window.dropover.shareShelfItems()
+          }
+        }
+      )
+    } else if (primaryItem.kind === 'text' || primaryItem.kind === 'url') {
+      menuActions.push(
+        {
+          id: 'copy',
+          label: 'Copy',
+          onSelect: async () => {
+            closeTransientSurface()
+            await window.dropover.copyItem(primaryItem.id)
+          }
+        },
+        {
+          id: 'save',
+          label: 'Save',
+          onSelect: async () => {
+            closeTransientSurface()
+            await window.dropover.saveItem(primaryItem.id)
+          }
+        }
+      )
+
+      if (primaryItem.kind === 'url') {
+        menuActions.push({
+          id: 'open-url',
+          label: 'Open',
+          onSelect: async () => {
+            closeTransientSurface()
+            await window.dropover.openItem(primaryItem.id)
+          }
+        })
+      }
+    }
+  }
+
+  if (liveShelf) {
+    menuActions.push({
+      id: 'show-items',
+      label: 'Show Items',
+      disabled: itemCount < 2,
+      onSelect: () => {
+        openItemSheet()
+      }
+    })
+
+    menuActions.push(
+      {
+        id: 'clear',
+        label: 'Clear Shelf',
+        destructive: true,
+        disabled: itemCount === 0,
+        onSelect: async () => {
+          closeTransientSurface()
+          await window.dropover.clearShelf()
+        }
+      },
+      {
+        id: 'close',
+        label: 'Close Shelf',
+        onSelect: async () => {
+          closeTransientSurface()
+          await window.dropover.closeShelf()
+        }
+      }
+    )
+  }
+
   return (
     <main className="shelf-shell" onPaste={handlePaste} tabIndex={0}>
-      <section className="shelf-panel" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+      <section
+        className={`shelf-panel${isAcceptingDrop ? ' is-accepting-drop' : ''}${isExporting ? ' is-exporting' : ''}${isItemListOpen ? ' has-item-sheet' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onPointerEnter={() => {
+          if (isExporting) {
+            setSessionMode('idle')
+          }
+        }}
+      >
         <header className="shelf-topbar">
           <button className="chrome-button chrome-button-close" onClick={() => void window.dropover.closeShelf()} aria-label="Close shelf">
             ×
@@ -95,28 +384,59 @@ export function ShelfView({ state }: ShelfViewProps) {
           <div className="shelf-title-group">
             <div className="shelf-handle" aria-hidden="true" />
           </div>
-          <div className="chrome-spacer" aria-hidden="true" />
+          <button
+            ref={menuButtonRef}
+            className="chrome-button chrome-button-menu"
+            onClick={openOverflowMenu}
+            disabled={!liveShelf || isExporting}
+            aria-label="Open shelf actions"
+            aria-haspopup="menu"
+            aria-expanded={isMenuOpen}
+          >
+            <MenuDotsIcon />
+          </button>
         </header>
 
-        <section className={`drop-surface compact ${itemCount === 0 ? 'is-empty' : ''}`}>
+        {isMenuOpen && menuActions.length > 0 ? (
+          <OverflowMenu actions={menuActions} menuRef={menuRef} menuTarget={menuTarget} />
+        ) : null}
+
+        <section className={`drop-surface compact ${itemCount === 0 ? 'is-empty' : ''}${isAcceptingDrop ? ' is-accepting' : ''}`}>
           {itemCount === 0 ? (
             <div className="empty-state compact">
               <p className="surface-title compact">Drop anything here</p>
-              <p className="surface-subtitle compact">A temporary shelf appears near the cursor while you drag.</p>
+              <p className="surface-subtitle compact">Shake opens a temporary shelf near the cursor while you drag.</p>
             </div>
           ) : primaryItem ? (
             <HeroItem
-              items={liveShelf?.items ?? [primaryItem]}
+              items={items}
               item={primaryItem}
-              totalItems={itemCount}
+              heroMode={heroMode}
               isImporting={isImporting}
-              useCollageHero={useCollageHero}
+              isExporting={isExporting}
+              dragLocked={isMenuOpen || isItemListOpen}
+              onExportStart={() => {
+                setMenuTarget('shelf')
+                setSessionMode('exporting')
+              }}
+              onExportEnd={() => {
+                setSessionMode((current) => (current === 'exporting' ? 'idle' : current))
+              }}
             />
           ) : (
             <div className="empty-state compact">
               <p className="surface-title compact">Shelf ready</p>
             </div>
           )}
+
+          {liveShelf && isItemListOpen ? (
+            <ItemSheet
+              items={items}
+              sheetRef={itemSheetRef}
+              onMove={moveItem}
+              onClose={closeTransientSurface}
+            />
+          ) : null}
         </section>
 
         {banner ? (
@@ -130,172 +450,218 @@ export function ShelfView({ state }: ShelfViewProps) {
             </button>
           </section>
         ) : null}
-
-        {liveShelf && itemCount > 1 && !useCollageHero ? (
-          <section className="shelf-drawer">
-            <div className="item-list compact">
-              {liveShelf?.items.map((item, index) => (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  isFirst={index === 0}
-                  isLast={index === liveShelf.items.length - 1}
-                  onMove={moveItem}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
       </section>
     </main>
   )
 }
 
-interface ItemCardProps {
+interface ItemSheetProps {
+  items: ShelfItemRecord[]
+  sheetRef: RefObject<HTMLDivElement | null>
+  onMove(itemId: string, direction: -1 | 1): Promise<void>
+  onClose(): void
+}
+
+function ItemSheet({ items, sheetRef, onMove, onClose }: ItemSheetProps) {
+  return (
+    <section ref={sheetRef} className="item-sheet" aria-label="Shelf items">
+      <header className="item-sheet-header">
+        <div>
+          <p className="item-sheet-title">Items</p>
+          <p className="item-sheet-copy">Reorder or remove without leaving the compact view.</p>
+        </div>
+        <button className="ghost-button small" onClick={onClose}>
+          Done
+        </button>
+      </header>
+      <div className="item-sheet-list">
+        {items.map((item, index) => (
+          <ItemSheetRow
+            key={item.id}
+            item={item}
+            isFirst={index === 0}
+            isLast={index === items.length - 1}
+            onMove={onMove}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+interface ItemSheetRowProps {
   item: ShelfItemRecord
   isFirst: boolean
   isLast: boolean
   onMove(itemId: string, direction: -1 | 1): Promise<void>
 }
 
-function ItemCard({ item, isFirst, isLast, onMove }: ItemCardProps) {
-  const fileBacked = item.kind === 'file' || item.kind === 'folder' || item.kind === 'imageAsset'
-  const badge = fileBacked ? (item.kind === 'folder' ? 'Folder' : item.kind === 'imageAsset' ? 'Image' : 'File') : item.kind === 'url' ? 'Link' : 'Text'
+function ItemSheetRow({ item, isFirst, isLast, onMove }: ItemSheetRowProps) {
+  const fileBacked = isActionableFileItem(item)
   const missing = fileBacked && item.file.isMissing
-  const stale = fileBacked && item.file.isStale && !missing
-  const fileStatus = missing ? 'Missing from disk' : stale ? 'Resolved from bookmark' : ''
-  const previewCopy = missing ? item.file.originalPath : item.preview.summary
-  const actionTitle = missing ? 'This item is no longer available on disk.' : undefined
+  const previewCopy = missing ? 'Missing from disk' : item.subtitle || item.preview.summary
 
   return (
-    <article
-      className={`item-card compact item-${item.kind}${missing ? ' is-missing' : ''}`}
-      draggable={fileBacked && !missing}
-      onDragStart={(event) => {
-        if (!fileBacked || missing) {
-          return
-        }
-
-        event.preventDefault()
-        window.dropover.startItemDrag(item.id)
-      }}
-    >
-      <div className="item-card-main compact">
-        <div className="item-copy">
-          <div className="item-badge">{badge}</div>
-          <div>
-            <p className="item-title compact">{item.title}</p>
-            <p className="item-subtitle compact">{fileStatus || item.subtitle || item.preview.summary}</p>
-          </div>
-        </div>
-        <div className="item-controls">
-          <button className="mini-button compact" onClick={() => void onMove(item.id, -1)} disabled={isFirst} aria-label="Move item up">
-            ↑
-          </button>
-          <button className="mini-button compact" onClick={() => void onMove(item.id, 1)} disabled={isLast} aria-label="Move item down">
-            ↓
-          </button>
-          <button className="mini-button compact destructive" onClick={() => void window.dropover.removeItem(item.id)} aria-label="Remove item">
-            ×
-          </button>
+    <article className={`item-sheet-row${missing ? ' is-missing' : ''}`}>
+      <div className="item-sheet-copy-block">
+        <span className="item-sheet-kind">{itemKindLabel(item)}</span>
+        <div className="item-sheet-text">
+          <p className="item-sheet-row-title">{item.title}</p>
+          <p className="item-sheet-row-copy">{previewCopy}</p>
         </div>
       </div>
-
-      <p className="item-preview compact">{previewCopy}</p>
-
-      <div className="item-actions compact">
-        {fileBacked ? (
-          <>
-            <button className="ghost-button small" onClick={() => void window.dropover.previewItem(item.id)} disabled={missing} title={actionTitle}>
-              Quick Look
-            </button>
-            <button className="ghost-button small" onClick={() => void window.dropover.revealItem(item.id)} disabled={missing} title={actionTitle}>
-              Reveal
-            </button>
-            <button className="ghost-button small" onClick={() => void window.dropover.openItem(item.id)} disabled={missing} title={actionTitle}>
-              Open
-            </button>
-          </>
-        ) : null}
-        {item.kind === 'text' || item.kind === 'url' ? (
-          <>
-            <button className="ghost-button small" onClick={() => void window.dropover.copyItem(item.id)}>
-              Copy
-            </button>
-            <button className="ghost-button small" onClick={() => void window.dropover.saveItem(item.id)}>
-              Save
-            </button>
-            {item.kind === 'url' ? (
-              <button className="ghost-button small" onClick={() => void window.dropover.openItem(item.id)}>
-                Open
-              </button>
-            ) : null}
-          </>
-        ) : null}
+      <div className="item-sheet-controls">
+        <button className="mini-button compact" onClick={() => void onMove(item.id, -1)} disabled={isFirst} aria-label="Move item up">
+          ↑
+        </button>
+        <button className="mini-button compact" onClick={() => void onMove(item.id, 1)} disabled={isLast} aria-label="Move item down">
+          ↓
+        </button>
+        <button className="mini-button compact destructive" onClick={() => void window.dropover.removeItem(item.id)} aria-label="Remove item">
+          ×
+        </button>
       </div>
     </article>
+  )
+}
+
+interface OverflowMenuProps {
+  actions: OverflowAction[]
+  menuRef: RefObject<HTMLDivElement | null>
+  menuTarget: MenuTarget
+}
+
+function OverflowMenu({ actions, menuRef, menuTarget }: OverflowMenuProps) {
+  return (
+    <div ref={menuRef} className="overflow-menu" role="menu" aria-label={menuTarget === 'frontItem' ? 'Front item actions' : 'Shelf actions'}>
+      {actions.map((action) => (
+        <button
+          key={action.id}
+          className={`overflow-menu-item${action.destructive ? ' is-destructive' : ''}`}
+          onClick={() => void action.onSelect()}
+          disabled={action.disabled}
+          role="menuitem"
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
 interface HeroItemProps {
   items: ShelfItemRecord[]
   item: ShelfItemRecord
-  totalItems: number
+  heroMode: HeroMode
   isImporting: boolean
-  useCollageHero: boolean
+  isExporting: boolean
+  dragLocked: boolean
+  onExportStart(): void
+  onExportEnd(): void
 }
 
-function HeroItem({ items, item, totalItems, isImporting, useCollageHero }: HeroItemProps) {
-  const fileBacked = item.kind === 'file' || item.kind === 'folder' || item.kind === 'imageAsset'
-  const missing = fileBacked && item.file.isMissing
-  const statusLabel = isImporting
-    ? 'Importing'
-    : missing
-      ? 'Missing on disk'
-      : useCollageHero
-        ? `${totalItems} Images`
-        : totalItems > 1
-          ? `${totalItems} items`
-          : 'Ready'
+function HeroItem({
+  items,
+  item,
+  heroMode,
+  isImporting,
+  isExporting,
+  dragLocked,
+  onExportStart,
+  onExportEnd
+}: HeroItemProps) {
   const previewSrc = getHeroPreviewSource(item)
-  const collageItems = useCollageHero ? items.slice(0, 3).map((entry, index) => ({ item: entry, index })) : []
+  const exportableItems = getExportableItems(items)
+  const canDragOut = exportableItems.length > 0 && !dragLocked && !isImporting
+  const statusLabel = isImporting ? 'Importing…' : getHeroCountLabel(items, heroMode)
+  const collageItems = heroMode === 'collage' ? items.slice(0, 3).map((entry, index) => ({ item: entry, index })) : []
+  const stackLayers = heroMode === 'stack' ? items.slice(0, Math.min(3, items.length)) : []
+  const dragLabel =
+    exportableItems.length > 1
+      ? `Drag out ${exportableItems.length} items`
+      : exportableItems.length === 1
+        ? `Drag out ${exportableItems[0]!.title}`
+        : undefined
+
+  function handleHeroDragStart(event: React.DragEvent<HTMLDivElement>) {
+    if (!canDragOut) {
+      return
+    }
+
+    event.dataTransfer.setData('text/plain', dragLabel ?? item.title)
+    event.dataTransfer.effectAllowed = 'copy'
+    event.preventDefault()
+    onExportStart()
+
+    if (exportableItems.length === 1) {
+      window.dropover.startItemDrag(exportableItems[0]!.id)
+      return
+    }
+
+    window.dropover.startItemsDrag(exportableItems.map((entry) => entry.id))
+  }
 
   return (
-    <div className={`hero-item${useCollageHero ? ' is-collage' : ''}`}>
-      <div className={`hero-stage${useCollageHero ? ' is-collage' : ''}`}>
-        {useCollageHero ? (
-          <div className="hero-collage" aria-hidden="true">
+    <div
+      className={`hero-item is-${heroMode}${canDragOut ? ' is-draggable' : ''}${isExporting ? ' is-exporting' : ''}`}
+      draggable={canDragOut}
+      onDragStart={handleHeroDragStart}
+      onDragEnd={onExportEnd}
+      title={dragLabel}
+    >
+      <div className={`hero-stage is-${heroMode}${isExporting ? ' is-exporting' : ''}`}>
+        {heroMode === 'collage' ? (
+          <div className={`hero-collage${isExporting ? ' is-muted' : ''}`} aria-hidden="true">
             {collageItems.map(({ item: collageItem, index }) => {
               const src = getHeroPreviewSource(collageItem)
               const stackClassName = heroStackClassName(index, collageItems.length)
               return (
                 <div key={collageItem.id} className={`hero-stack-card ${stackClassName}`}>
-                  {src ? <img src={src} alt="" className="hero-stack-image" /> : <HeroGlyph kind={collageItem.kind} />}
+                  {src ? <img src={src} alt="" className="hero-stack-image" draggable={false} /> : <HeroGlyph kind={collageItem.kind} />}
                 </div>
               )
             })}
           </div>
-        ) : (
-          <>
-            {totalItems > 1 ? <span className="hero-count">{totalItems}</span> : null}
-            <div className={`hero-artwork ${missing ? 'is-missing' : ''}`}>
-              {previewSrc ? <img src={previewSrc} alt="" className="hero-image" /> : <HeroGlyph kind={item.kind} />}
+        ) : heroMode === 'stack' ? (
+          <div className="hero-deck" aria-hidden="true">
+            {stackLayers.slice(1, 3).map((entry, index) => (
+              <div key={entry.id} className={`hero-deck-shadow hero-deck-shadow-${index + 1}`} />
+            ))}
+            <div className={`hero-artwork hero-artwork-deck ${isExporting ? 'is-exporting' : ''}`}>
+              {previewSrc ? <img src={previewSrc} alt="" className="hero-image" draggable={false} /> : <HeroGlyph kind={item.kind} />}
             </div>
-          </>
+          </div>
+        ) : (
+          <div className={`hero-artwork ${isExporting ? 'is-exporting' : ''}`}>
+            {previewSrc ? <img src={previewSrc} alt="" className="hero-image" draggable={false} /> : <HeroGlyph kind={item.kind} />}
+          </div>
         )}
+
+        {isExporting ? <div className="hero-export-veil" aria-hidden="true" /> : null}
       </div>
-      {!useCollageHero ? (
+
+      {heroMode !== 'collage' && !isExporting ? (
         <div className="hero-chip-row">
           <div className="hero-chip" title={item.title}>
             <span>{item.title}</span>
-            <span className="hero-chip-arrow">›</span>
           </div>
         </div>
       ) : null}
+
       <div className="hero-status-row">
-        <span className={`meta-chip${useCollageHero ? ' meta-chip-prominent' : ''}`}>{statusLabel}</span>
+        <span className={`meta-chip meta-chip-prominent hero-count-pill${isExporting ? ' is-exporting' : ''}`}>{statusLabel}</span>
       </div>
     </div>
+  )
+}
+
+function MenuDotsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="6" cy="12" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="18" cy="12" r="1.75" />
+    </svg>
   )
 }
 
@@ -349,18 +715,6 @@ function getHeroPreviewSource(item: ShelfItemRecord): string | null {
   return `dropover-asset://preview?path=${encodeURIComponent(path)}`
 }
 
-function isHeroPreviewable(item: ShelfItemRecord): boolean {
-  if (item.kind === 'imageAsset') {
-    return !item.file.isMissing
-  }
-
-  if (item.kind === 'file') {
-    return item.mimeType.startsWith('image/') && !item.file.isMissing
-  }
-
-  return false
-}
-
 function heroStackClassName(index: number, count: number): string {
   if (count === 2) {
     return index === 0 ? 'hero-stack-card-front' : 'hero-stack-card-back-left'
@@ -371,6 +725,39 @@ function heroStackClassName(index: number, count: number): string {
   }
 
   return index === 1 ? 'hero-stack-card-back-left' : 'hero-stack-card-back-right'
+}
+
+function isActionableFileItem(item: ShelfItemRecord): item is Extract<ShelfItemRecord, { kind: 'file' | 'folder' | 'imageAsset' }> {
+  return item.kind === 'file' || item.kind === 'folder' || item.kind === 'imageAsset'
+}
+
+function itemKindLabel(item: ShelfItemRecord): string {
+  if (item.kind === 'imageAsset') {
+    return 'Image'
+  }
+
+  if (item.kind === 'folder') {
+    return 'Folder'
+  }
+
+  if (item.kind === 'file') {
+    return 'File'
+  }
+
+  if (item.kind === 'url') {
+    return 'Link'
+  }
+
+  return 'Text'
+}
+
+function isExternalTransfer(transfer: DataTransfer | null): boolean {
+  if (!transfer) {
+    return false
+  }
+
+  const types = Array.from(transfer.types)
+  return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/plain')
 }
 
 async function payloadsFromTransfer(transfer: DataTransfer): Promise<IngestPayload[]> {

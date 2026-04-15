@@ -1,4 +1,4 @@
-import { app, clipboard, dialog, globalShortcut, Menu, ipcMain, nativeImage, net, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, Menu, ipcMain, nativeImage, net, protocol, screen, shell } from 'electron'
 import { promises as fs } from 'node:fs'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -175,20 +175,20 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC_CHANNELS.shareShelfItems, async (_event, itemIds?: string[]) => shareItems(itemIds))
   ipcMain.on(IPC_CHANNELS.startItemDrag, (event, itemId: string) => {
-    const item = liveShelfItems().find((entry) => entry.id === itemId)
-    if (!item || !isFileBackedItem(item)) {
+    const paths = draggablePathsForItemIds([itemId])
+    if (paths.length === 0) {
       return
     }
 
-    const path = getFileBackedPath(item)
-    if (!path) {
+    startNativeDrag(event.sender, paths)
+  })
+  ipcMain.on(IPC_CHANNELS.startItemsDrag, (event, itemIds: string[]) => {
+    const paths = draggablePathsForItemIds(itemIds)
+    if (paths.length === 0) {
       return
     }
 
-    event.sender.startDrag({
-      file: path,
-      icon: dragIconImage()
-    })
+    startNativeDrag(event.sender, paths)
   })
 }
 
@@ -549,7 +549,120 @@ function sanitizeName(value: string): string {
   return value.replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '') || 'drop-item'
 }
 
-function dragIconImage() {
+function draggablePathsForItemIds(itemIds: string[]): string[] {
+  if (itemIds.length === 0) {
+    return []
+  }
+
+  const ids = new Set(itemIds)
+  const paths: string[] = []
+
+  for (const entry of liveShelfItems()) {
+    if (!ids.has(entry.id) || !isFileBackedItem(entry)) {
+      continue
+    }
+
+    const path = getFileBackedPath(entry)
+    if (path) {
+      paths.push(path)
+    }
+  }
+
+  return paths
+}
+
+function startNativeDrag(webContents: Electron.WebContents, paths: string[]): void {
+  const [firstPath] = paths
+  if (!firstPath) {
+    return
+  }
+
+  const ownerWindow = BrowserWindow.fromWebContents(webContents)
+  if (ownerWindow && !ownerWindow.isDestroyed()) {
+    ownerWindow.show()
+    ownerWindow.focus()
+  }
+
+  const icon = dragIconImage(paths)
+
+  webContents.startDrag(
+    paths.length > 1
+      ? {
+          file: firstPath,
+          files: paths,
+          icon
+        }
+      : {
+          file: firstPath,
+          icon
+        }
+  )
+}
+
+function dragIconImage(paths: string[]) {
+  const previews = paths
+    .slice(0, 3)
+    .map((path) => nativeImage.createFromPath(path))
+    .filter((image) => !image.isEmpty())
+    .map((image) => image.resize({ width: 72, height: 72, quality: 'best' }))
+
+  if (previews.length > 0) {
+    const placements =
+      previews.length === 1
+        ? [{ x: 14, y: 12, rotation: 0 }]
+        : previews.length === 2
+          ? [
+              { x: 10, y: 12, rotation: -8 },
+              { x: 28, y: 18, rotation: 8 }
+            ]
+          : [
+              { x: 12, y: 10, rotation: -10 },
+              { x: 24, y: 12, rotation: 8 },
+              { x: 18, y: 24, rotation: 0 }
+            ]
+
+    const cards = previews
+      .map((preview, index) => {
+        const placement = placements[index]
+        if (!placement) {
+          return ''
+        }
+
+        return `
+          <g transform="translate(${placement.x} ${placement.y}) rotate(${placement.rotation} 36 36)">
+            <rect x="0" y="0" width="72" height="72" rx="14" fill="rgba(255,255,255,0.98)"/>
+            <rect x="0.75" y="0.75" width="70.5" height="70.5" rx="13.25" fill="none" stroke="rgba(255,255,255,0.82)" stroke-width="1.5"/>
+            <image href="${escapeSvgAttribute(preview.toDataURL())}" x="6" y="6" width="60" height="60" preserveAspectRatio="xMidYMid slice" clip-path="url(#drag-card-${index})"/>
+          </g>
+        `
+      })
+      .join('')
+    const defs = previews
+      .map(
+        (_preview, index) => `
+          <clipPath id="drag-card-${index}">
+            <rect x="6" y="6" width="60" height="60" rx="10"/>
+          </clipPath>
+        `
+      )
+      .join('')
+
+    const composed = nativeImage.createFromDataURL(
+      `data:image/svg+xml;base64,${Buffer.from(
+        `
+          <svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+            <defs>${defs}</defs>
+            ${cards}
+          </svg>
+        `
+      ).toString('base64')}`
+    )
+
+    if (!composed.isEmpty()) {
+      return composed
+    }
+  }
+
   const svg = `
     <svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
       <rect x="8" y="14" width="48" height="36" rx="12" fill="#16120F" opacity="0.92"/>
@@ -559,4 +672,8 @@ function dragIconImage() {
   `
 
   return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
+}
+
+function escapeSvgAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 }
