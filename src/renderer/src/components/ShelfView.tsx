@@ -613,6 +613,14 @@ function HeroItem({
 
     if (didStartDrag) {
       onExportStart()
+      console.info('[DragDebug][Renderer] Drag started, clearing shelf...')
+      window.dropover.clearShelf().then((newState) => {
+        console.info('[DragDebug][Renderer] Shelf cleared after drag start.', {
+          itemCount: newState.liveShelf?.items.length ?? 0
+        })
+      }).catch((err) => {
+        console.error('[DragDebug][Renderer] clearShelf after drag failed.', err)
+      })
     } else {
       console.warn('[DragDebug][Renderer] Native drag did not start.')
       onExportEnd()
@@ -636,7 +644,14 @@ function HeroItem({
         })
 
         if (didDropOut) {
-          void window.dropover.clearShelf()
+          console.info('[DragDebug][Renderer] Calling clearShelf()...')
+          window.dropover.clearShelf().then((newState) => {
+            console.info('[DragDebug][Renderer] clearShelf completed.', {
+              itemCount: newState.liveShelf?.items.length ?? 0
+            })
+          }).catch((err) => {
+            console.error('[DragDebug][Renderer] clearShelf failed.', err)
+          })
         }
 
         onExportEnd()
