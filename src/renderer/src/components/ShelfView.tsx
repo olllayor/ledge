@@ -585,20 +585,8 @@ function HeroItem({
 
   function handleHeroDragStart(event: React.DragEvent<HTMLDivElement>) {
     if (!canDragOut) {
-      console.info('[DragDebug][Renderer] Drag start ignored: cannot drag out.', {
-        itemId: item.id,
-        dragLocked,
-        isImporting,
-        exportableCount: exportableItems.length
-      })
       return
     }
-
-    console.info('[DragDebug][Renderer] Drag start received.', {
-      itemId: item.id,
-      exportableCount: exportableItems.length,
-      exportableItemIds: exportableItems.map((entry) => entry.id)
-    })
 
     event.preventDefault()
     const didStartDrag =
@@ -606,23 +594,10 @@ function HeroItem({
         ? window.dropover.startItemDrag(exportableItems[0]!.id)
         : window.dropover.startItemsDrag(exportableItems.map((entry) => entry.id))
 
-    console.info('[DragDebug][Renderer] Native drag handshake result.', {
-      didStartDrag,
-      exportableCount: exportableItems.length
-    })
-
     if (didStartDrag) {
       onExportStart()
-      console.info('[DragDebug][Renderer] Drag started, clearing shelf...')
-      window.dropover.clearShelf().then((newState) => {
-        console.info('[DragDebug][Renderer] Shelf cleared after drag start.', {
-          itemCount: newState.liveShelf?.items.length ?? 0
-        })
-      }).catch((err) => {
-        console.error('[DragDebug][Renderer] clearShelf after drag failed.', err)
-      })
+      window.dropover.clearShelf()
     } else {
-      console.warn('[DragDebug][Renderer] Native drag did not start.')
       onExportEnd()
     }
   }
@@ -632,28 +607,7 @@ function HeroItem({
       className={`hero-item is-${heroMode}${canDragOut ? ' is-draggable' : ''}${isExporting ? ' is-exporting' : ''}`}
       draggable={canDragOut}
       onDragStart={handleHeroDragStart}
-      onDragEnd={(event) => {
-        const dropEffect = event.dataTransfer.dropEffect
-        const didDropOut = dropEffect !== 'none'
-
-        console.info('[DragDebug][Renderer] Drag end fired.', {
-          itemId: item.id,
-          exportableCount: exportableItems.length,
-          dropEffect,
-          didDropOut
-        })
-
-        if (didDropOut) {
-          console.info('[DragDebug][Renderer] Calling clearShelf()...')
-          window.dropover.clearShelf().then((newState) => {
-            console.info('[DragDebug][Renderer] clearShelf completed.', {
-              itemCount: newState.liveShelf?.items.length ?? 0
-            })
-          }).catch((err) => {
-            console.error('[DragDebug][Renderer] clearShelf failed.', err)
-          })
-        }
-
+      onDragEnd={() => {
         onExportEnd()
       }}
       title={dragLabel}
