@@ -123,10 +123,10 @@ app.whenReady().then(async () => {
       void restoreShelf(id);
     },
     onDropFiles: (paths) => {
-      void handleExternalPayload({ kind: 'fileDrop', paths }, 'tray');
+      void handleExternalPayloads([{ kind: 'fileDrop', paths }], 'tray');
     },
     onDropText: (text) => {
-      void handleExternalPayload(detectPayloadFromText(text), 'tray');
+      void handleExternalPayloads([detectPayloadFromText(text)], 'tray');
     },
     onQuit: () => {
       app.quit();
@@ -160,7 +160,12 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC_CHANNELS.restoreShelf, async (_event, id: string) => restoreShelf(id));
   ipcMain.handle(IPC_CHANNELS.addPayload, async (_event, payload: unknown) => {
-    await addPayloadToLiveShelf(ingestPayloadSchema.parse(payload));
+    await addPayloadsToLiveShelf([ingestPayloadSchema.parse(payload)]);
+    return broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.addPayloads, async (_event, payloads: unknown[]) => {
+    const parsedPayloads = payloads.map((p) => ingestPayloadSchema.parse(p));
+    await addPayloadsToLiveShelf(parsedPayloads);
     return broadcastState();
   });
   ipcMain.handle(IPC_CHANNELS.closeShelf, async () => {
@@ -302,9 +307,9 @@ function registerIpc(): void {
   });
 }
 
-async function handleExternalPayload(payload: IngestPayload, reason: ShelfRecord['origin']): Promise<void> {
+async function handleExternalPayloads(payloads: IngestPayload[], reason: ShelfRecord['origin']): Promise<void> {
   const point = currentCursorPoint();
-  await addPayloadToLiveShelf(payload, {
+  await addPayloadsToLiveShelf(payloads, {
     origin: reason,
     point,
     inactive: reason === 'tray',
@@ -314,13 +319,15 @@ async function handleExternalPayload(payload: IngestPayload, reason: ShelfRecord
 async function createShelfFromClipboard(): Promise<void> {
   const image = clipboard.readImage();
   if (!image.isEmpty()) {
-    await handleExternalPayload(
-      {
-        kind: 'image',
-        mimeType: 'image/png',
-        base64: image.toPNG().toString('base64'),
-        filenameHint: 'clipboard-image',
-      },
+    await handleExternalPayloads(
+      [
+        {
+          kind: 'image',
+          mimeType: 'image/png',
+          base64: image.toPNG().toString('base64'),
+          filenameHint: 'clipboard-image',
+        },
+      ],
       'tray',
     );
     return;
@@ -328,7 +335,7 @@ async function createShelfFromClipboard(): Promise<void> {
 
   const text = clipboard.readText().trim();
   if (text) {
-    await handleExternalPayload(detectPayloadFromText(text), 'tray');
+    await handleExternalPayloads([detectPayloadFromText(text)], 'tray');
     return;
   }
 
@@ -397,26 +404,31 @@ async function restoreShelf(id: string): Promise<AppState> {
   return broadcastState();
 }
 
-async function addPayloadToLiveShelf(
-  payload: IngestPayload,
+async function addPayloadsToLiveShelf(
+  payloads: IngestPayload[],
   options: {
     origin?: ShelfRecord['origin'];
     point?: { x: number; y: number };
     inactive?: boolean;
   } = {},
 ): Promise<boolean> {
-  const items = await payloadToItems(payload, {
-    assetsDir: stateStore.assetsDir,
-    createBookmark: (path) => nativeAgent.createBookmark(path),
-    resolveBookmark: (bookmarkBase64, originalPath) => nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
-  });
+  const allItems: ShelfItemRecord[] = [];
 
-  if (items.length === 0) {
+  for (const payload of payloads) {
+    const items = await payloadToItems(payload, {
+      assetsDir: stateStore.assetsDir,
+      createBookmark: (path) => nativeAgent.createBookmark(path),
+      resolveBookmark: (bookmarkBase64, originalPath) => nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
+    });
+    allItems.push(...items);
+  }
+
+  if (allItems.length === 0) {
     return false;
   }
 
   stateStore.ensureLiveShelf(options.origin ?? 'manual');
-  stateStore.appendItems(items);
+  stateStore.appendItems(allItems);
   if (shelfWindow.isVisible()) {
     await shelfWindow.show(options.inactive ?? false);
   } else {

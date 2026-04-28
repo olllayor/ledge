@@ -13,6 +13,7 @@ export const IPC_CHANNELS = {
   createShelf: 'ledge:create-shelf',
   restoreShelf: 'ledge:restore-shelf',
   addPayload: 'ledge:add-payload',
+  addPayloads: 'ledge:add-payloads',
   closeShelf: 'ledge:close-shelf',
   getPreferences: 'ledge:get-preferences',
   setPreferences: 'ledge:set-preferences',
@@ -42,6 +43,7 @@ export interface LedgeAPI {
   createShelf(input: CreateShelfInput): Promise<AppState>;
   restoreShelf(id: string): Promise<AppState>;
   addPayload(payload: IngestPayload): Promise<AppState>;
+  addPayloads(payloads: IngestPayload[]): Promise<AppState>;
   closeShelf(): Promise<AppState>;
   getPreferences(): Promise<PreferencesRecord>;
   setPreferences(patch: PreferencePatch): Promise<PreferencesRecord>;

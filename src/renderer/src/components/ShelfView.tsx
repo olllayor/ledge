@@ -151,9 +151,7 @@ export function ShelfView({ state }: ShelfViewProps) {
         await window.ledge.createShelf({ reason: 'manual' });
       }
 
-      for (const payload of payloads) {
-        await window.ledge.addPayload(payload);
-      }
+      await window.ledge.addPayloads(payloads);
     } finally {
       setIsImporting(false);
     }
@@ -858,9 +856,7 @@ async function payloadsFromTransfer(transfer: DataTransfer): Promise<IngestPaylo
     .filter((file): file is File => Boolean(file));
   const filePaths = [
     ...droppedFiles.map((file) => window.ledge.getFilePath(file)).filter((path): path is string => Boolean(path)),
-    ...droppedItemFiles
-      .map((file) => window.ledge.getFilePath(file))
-      .filter((path): path is string => Boolean(path)),
+    ...droppedItemFiles.map((file) => window.ledge.getFilePath(file)).filter((path): path is string => Boolean(path)),
     ...filePathsFromUriList(transfer.getData('text/uri-list')),
   ];
 
