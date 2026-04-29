@@ -52,3 +52,5 @@ jobs:
           files: |
             dist/mac-arm64/Ledge-*.dmg
             dist/mac-arm64/Ledge-*.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
