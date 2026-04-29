@@ -123,10 +123,10 @@ app.whenReady().then(async () => {
       void restoreShelf(id);
     },
     onDropFiles: (paths) => {
-      void handleExternalPayload({ kind: 'fileDrop', paths }, 'tray');
+      void handleExternalPayloads([{ kind: 'fileDrop', paths }], 'tray');
     },
     onDropText: (text) => {
-      void handleExternalPayload(detectPayloadFromText(text), 'tray');
+      void handleExternalPayloads([detectPayloadFromText(text)], 'tray');
     },
     onQuit: () => {
       app.quit();
@@ -160,7 +160,12 @@ function registerIpc(): void {
   });
   ipcMain.handle(IPC_CHANNELS.restoreShelf, async (_event, id: string) => restoreShelf(id));
   ipcMain.handle(IPC_CHANNELS.addPayload, async (_event, payload: unknown) => {
-    await addPayloadToLiveShelf(ingestPayloadSchema.parse(payload));
+    await addPayloadsToLiveShelf([ingestPayloadSchema.parse(payload)]);
+    return broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.addPayloads, async (_event, payloads: unknown[]) => {
+    const parsedPayloads = payloads.map((p) => ingestPayloadSchema.parse(p));
+    await addPayloadsToLiveShelf(parsedPayloads);
     return broadcastState();
   });
   ipcMain.handle(IPC_CHANNELS.closeShelf, async () => {
@@ -242,16 +247,55 @@ function registerIpc(): void {
     menu.popup({ window: shelfWindow.getBrowserWindow() ?? undefined });
     return true;
   });
+  ipcMain.handle(IPC_CHANNELS.showShelfContextMenu, async () => {
+    const items = liveShelfItems();
+    const template: Electron.MenuItemConstructorOptions[] = [];
+
+    if (items.length > 0) {
+      const primaryItem = items[0];
+      const missing = isFileBackedItem(primaryItem) && primaryItem.file.isMissing;
+
+      template.push(
+        { label: 'Quick Look', enabled: !missing, click: () => previewItem(primaryItem.id) },
+        { label: 'Reveal in Finder', enabled: !missing, click: () => revealItem(primaryItem.id) },
+        { label: 'Open', enabled: !missing, click: () => openItem(primaryItem.id) },
+        { label: 'Copy', click: () => copyItem(primaryItem.id) },
+        { label: 'Save', click: () => saveItem(primaryItem.id) },
+        { type: 'separator' },
+      );
+    }
+
+    template.push(
+      { label: 'Share All', enabled: items.length > 0, click: () => shareItems() },
+      { type: 'separator' },
+      {
+        label: 'Clear Shelf',
+        enabled: items.length > 0,
+        click: () => {
+          stateStore.clearLiveShelf();
+          broadcastState();
+        },
+      },
+      {
+        label: 'Close Shelf',
+        click: () => {
+          stateStore.closeShelf();
+          shelfWindow.resetPosition();
+          shelfWindow.hide();
+          broadcastState();
+        },
+      },
+    );
+
+    const menu = Menu.buildFromTemplate(template);
+    menu.popup({ window: shelfWindow.getBrowserWindow() ?? undefined });
+    return true;
+  });
+
   ipcMain.on(IPC_CHANNELS.startItemDrag, (event, itemId: string) => {
     const paths = draggablePathsForItemIds([itemId]);
-    console.info('[DragDebug][Main] startItemDrag request.', {
-      itemId,
-      pathCount: paths.length,
-      firstPath: paths[0] ?? null,
-    });
 
     if (paths.length === 0) {
-      console.warn('[Drag] No draggable paths found for item:', itemId);
       event.returnValue = false;
       return;
     }
@@ -259,28 +303,14 @@ function registerIpc(): void {
     try {
       startNativeDrag(event.sender, paths);
       event.returnValue = true;
-      console.info('[DragDebug][Main] startItemDrag succeeded.', {
-        itemId,
-        pathCount: paths.length,
-      });
-    } catch (error) {
-      console.error('[DragDebug][Main] startItemDrag failed.', {
-        itemId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    } catch {
       event.returnValue = false;
     }
   });
   ipcMain.on(IPC_CHANNELS.startItemsDrag, (event, itemIds: string[]) => {
     const paths = draggablePathsForItemIds(itemIds);
-    console.info('[DragDebug][Main] startItemsDrag request.', {
-      itemIds,
-      pathCount: paths.length,
-      pathsPreview: paths.slice(0, 3),
-    });
 
     if (paths.length === 0) {
-      console.warn('[Drag] No draggable paths found for items:', itemIds);
       event.returnValue = false;
       return;
     }
@@ -288,23 +318,15 @@ function registerIpc(): void {
     try {
       startNativeDrag(event.sender, paths);
       event.returnValue = true;
-      console.info('[DragDebug][Main] startItemsDrag succeeded.', {
-        itemCount: itemIds.length,
-        pathCount: paths.length,
-      });
-    } catch (error) {
-      console.error('[DragDebug][Main] startItemsDrag failed.', {
-        itemIds,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    } catch {
       event.returnValue = false;
     }
   });
 }
 
-async function handleExternalPayload(payload: IngestPayload, reason: ShelfRecord['origin']): Promise<void> {
+async function handleExternalPayloads(payloads: IngestPayload[], reason: ShelfRecord['origin']): Promise<void> {
   const point = currentCursorPoint();
-  await addPayloadToLiveShelf(payload, {
+  await addPayloadsToLiveShelf(payloads, {
     origin: reason,
     point,
     inactive: reason === 'tray',
@@ -314,13 +336,15 @@ async function handleExternalPayload(payload: IngestPayload, reason: ShelfRecord
 async function createShelfFromClipboard(): Promise<void> {
   const image = clipboard.readImage();
   if (!image.isEmpty()) {
-    await handleExternalPayload(
-      {
-        kind: 'image',
-        mimeType: 'image/png',
-        base64: image.toPNG().toString('base64'),
-        filenameHint: 'clipboard-image',
-      },
+    await handleExternalPayloads(
+      [
+        {
+          kind: 'image',
+          mimeType: 'image/png',
+          base64: image.toPNG().toString('base64'),
+          filenameHint: 'clipboard-image',
+        },
+      ],
       'tray',
     );
     return;
@@ -328,7 +352,7 @@ async function createShelfFromClipboard(): Promise<void> {
 
   const text = clipboard.readText().trim();
   if (text) {
-    await handleExternalPayload(detectPayloadFromText(text), 'tray');
+    await handleExternalPayloads([detectPayloadFromText(text)], 'tray');
     return;
   }
 
@@ -397,26 +421,31 @@ async function restoreShelf(id: string): Promise<AppState> {
   return broadcastState();
 }
 
-async function addPayloadToLiveShelf(
-  payload: IngestPayload,
+async function addPayloadsToLiveShelf(
+  payloads: IngestPayload[],
   options: {
     origin?: ShelfRecord['origin'];
     point?: { x: number; y: number };
     inactive?: boolean;
   } = {},
 ): Promise<boolean> {
-  const items = await payloadToItems(payload, {
-    assetsDir: stateStore.assetsDir,
-    createBookmark: (path) => nativeAgent.createBookmark(path),
-    resolveBookmark: (bookmarkBase64, originalPath) => nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
-  });
+  const allItems: ShelfItemRecord[] = [];
 
-  if (items.length === 0) {
+  for (const payload of payloads) {
+    const items = await payloadToItems(payload, {
+      assetsDir: stateStore.assetsDir,
+      createBookmark: (path) => nativeAgent.createBookmark(path),
+      resolveBookmark: (bookmarkBase64, originalPath) => nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
+    });
+    allItems.push(...items);
+  }
+
+  if (allItems.length === 0) {
     return false;
   }
 
   stateStore.ensureLiveShelf(options.origin ?? 'manual');
-  stateStore.appendItems(items);
+  stateStore.appendItems(allItems);
   if (shelfWindow.isVisible()) {
     await shelfWindow.show(options.inactive ?? false);
   } else {
@@ -741,23 +770,10 @@ function draggablePathsForItemIds(itemIds: string[]): string[] {
 function startNativeDrag(webContents: Electron.WebContents, paths: string[]): void {
   const [firstPath] = paths;
   if (!firstPath) {
-    console.warn('[DragDebug][Main] startNativeDrag aborted: no firstPath.', {
-      pathCount: paths.length,
-    });
     return;
   }
 
-  console.info('[DragDebug][Main] startNativeDrag begin.', {
-    webContentsId: webContents.id,
-    pathCount: paths.length,
-    firstPath,
-  });
-
   const icon = dragIconImage(paths);
-  console.info('[DragDebug][Main] drag icon prepared.', {
-    isEmpty: icon.isEmpty(),
-    size: icon.getSize(),
-  });
 
   const dragPayload =
     paths.length > 1
@@ -771,15 +787,7 @@ function startNativeDrag(webContents: Electron.WebContents, paths: string[]): vo
           icon,
         };
 
-  console.info('[DragDebug][Main] invoking webContents.startDrag.', {
-    hasFilesArray: 'files' in dragPayload,
-    payloadFile: dragPayload.file,
-    payloadFileCount: paths.length,
-  });
-
   webContents.startDrag(dragPayload);
-
-  console.info('[DragDebug][Main] webContents.startDrag returned normally.');
 }
 
 function dragIconImage(paths: string[]) {

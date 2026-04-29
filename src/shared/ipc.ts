@@ -13,6 +13,7 @@ export const IPC_CHANNELS = {
   createShelf: 'ledge:create-shelf',
   restoreShelf: 'ledge:restore-shelf',
   addPayload: 'ledge:add-payload',
+  addPayloads: 'ledge:add-payloads',
   closeShelf: 'ledge:close-shelf',
   getPreferences: 'ledge:get-preferences',
   setPreferences: 'ledge:set-preferences',
@@ -32,6 +33,7 @@ export const IPC_CHANNELS = {
   reorderItems: 'ledge:reorder-items',
   shareShelfItems: 'ledge:share-shelf-items',
   showItemContextMenu: 'ledge:show-item-context-menu',
+  showShelfContextMenu: 'ledge:show-shelf-context-menu',
   stateUpdated: 'ledge:state-updated',
 } as const;
 
@@ -42,6 +44,7 @@ export interface LedgeAPI {
   createShelf(input: CreateShelfInput): Promise<AppState>;
   restoreShelf(id: string): Promise<AppState>;
   addPayload(payload: IngestPayload): Promise<AppState>;
+  addPayloads(payloads: IngestPayload[]): Promise<AppState>;
   closeShelf(): Promise<AppState>;
   getPreferences(): Promise<PreferencesRecord>;
   setPreferences(patch: PreferencePatch): Promise<PreferencesRecord>;
@@ -61,6 +64,7 @@ export interface LedgeAPI {
   reorderItems(itemIds: string[]): Promise<AppState>;
   shareShelfItems(itemIds?: string[]): Promise<boolean>;
   showItemContextMenu(itemId: string): Promise<boolean>;
+  showShelfContextMenu(): Promise<boolean>;
   getFilePath(file: File): string;
   subscribeState(listener: StateListener): () => void;
 }
