@@ -1,64 +1,76 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import type { AppState } from '@shared/schema'
-import { normalizeExcludedBundleIds } from '@shared/preferences'
+import { useEffect, useState, type ReactNode } from 'react';
+import type { AppState } from '@shared/schema';
+import { normalizeExcludedBundleIds } from '@shared/preferences';
+import {
+  IconArrowUpRight,
+  IconSparkles,
+  IconGear,
+  IconCloud,
+  IconWrench,
+  IconZap,
+  IconFolderOpen,
+  IconStar,
+  IconApp,
+  IconChevronDown,
+} from './Icons';
 
 interface PreferencesViewProps {
-  state: AppState
+  state: AppState;
 }
 
-const sidebarItems = [
-  ['↗', 'Shelf Activation'],
-  ['✦', 'Shelf Interaction'],
-  ['◎', 'General'],
-  ['☁', 'Cloud Sharing'],
-  ['⚙', 'Custom Actions'],
-  ['⚡', 'Instant Actions'],
-  ['◔', 'Folder Monitoring'],
-  ['★', 'Ledge Pro']
-] as const
+const sidebarItems: { label: string; icon: ReactNode }[] = [
+  { label: 'Shelf Activation', icon: <IconArrowUpRight /> },
+  { label: 'Shelf Interaction', icon: <IconSparkles /> },
+  { label: 'General', icon: <IconGear /> },
+  { label: 'Cloud Sharing', icon: <IconCloud /> },
+  { label: 'Custom Actions', icon: <IconWrench /> },
+  { label: 'Instant Actions', icon: <IconZap /> },
+  { label: 'Folder Monitoring', icon: <IconFolderOpen /> },
+  { label: 'Ledge Pro', icon: <IconStar /> },
+];
 
 export function PreferencesView({ state }: PreferencesViewProps) {
-  const preferences = state.preferences
-  const [excludedText, setExcludedText] = useState(preferences.excludedBundleIds.join('\n'))
-  const [excludedError, setExcludedError] = useState('')
-  const [shortcutDraft, setShortcutDraft] = useState(preferences.globalShortcut)
-  const appVersion = '0.1.0'
+  const preferences = state.preferences;
+  const [excludedText, setExcludedText] = useState(preferences.excludedBundleIds.join('\n'));
+  const [excludedError, setExcludedError] = useState('');
+  const [shortcutDraft, setShortcutDraft] = useState(preferences.globalShortcut);
+  const appVersion = '0.1.0';
 
   useEffect(() => {
-    setExcludedText(preferences.excludedBundleIds.join('\n'))
-    setExcludedError('')
-  }, [preferences.excludedBundleIds])
+    setExcludedText(preferences.excludedBundleIds.join('\n'));
+    setExcludedError('');
+  }, [preferences.excludedBundleIds]);
 
   useEffect(() => {
-    setShortcutDraft(preferences.globalShortcut)
-  }, [preferences.globalShortcut])
+    setShortcutDraft(preferences.globalShortcut);
+  }, [preferences.globalShortcut]);
 
   const shortcutStatus = !preferences.globalShortcut
     ? 'Shortcut disabled'
     : state.permissionStatus.shortcutRegistered
       ? 'Shortcut active'
-      : 'Shortcut unavailable'
+      : 'Shortcut unavailable';
 
   async function saveExcludedApps() {
-    const { normalized, invalid } = normalizeExcludedBundleIds(excludedText.split('\n'))
+    const { normalized, invalid } = normalizeExcludedBundleIds(excludedText.split('\n'));
     if (invalid.length > 0) {
       setExcludedError(
         invalid.length === 1
           ? `Invalid bundle identifier: ${invalid[0]}`
-          : `Invalid bundle identifiers: ${invalid.join(', ')}`
-      )
-      return
+          : `Invalid bundle identifiers: ${invalid.join(', ')}`,
+      );
+      return;
     }
 
-    setExcludedError('')
-    setExcludedText(normalized.join('\n'))
+    setExcludedError('');
+    setExcludedText(normalized.join('\n'));
 
     try {
-      await window.dropover.setPreferences({
-        excludedBundleIds: normalized
-      })
+      await window.ledge.setPreferences({
+        excludedBundleIds: normalized,
+      });
     } catch (error) {
-      setExcludedError(error instanceof Error ? error.message : 'Failed to save excluded apps.')
+      setExcludedError(error instanceof Error ? error.message : 'Failed to save excluded apps.');
     }
   }
 
@@ -70,7 +82,7 @@ export function PreferencesView({ state }: PreferencesViewProps) {
         </div>
 
         <nav className="settings-nav" aria-label="Preference groups">
-          {sidebarItems.map(([icon, label]) => (
+          {sidebarItems.map(({ label, icon }) => (
             <button
               key={label}
               className={`settings-nav-item ${label === 'General' ? 'is-active' : 'is-idle'}`}
@@ -84,7 +96,9 @@ export function PreferencesView({ state }: PreferencesViewProps) {
         </nav>
 
         <div className="settings-sidebar-foot">
-          <div className="settings-app-mark">▣</div>
+          <div className="settings-app-mark">
+            <IconApp />
+          </div>
           <p>Ledge {appVersion}</p>
         </div>
       </aside>
@@ -95,46 +109,51 @@ export function PreferencesView({ state }: PreferencesViewProps) {
         </header>
 
         <div className="settings-stack">
-          <section className="settings-card">
-            <SettingsLine icon="▣" title="Show in menu bar" trailing={<Toggle checked={true} onChange={() => {}} disabled />} />
-
-            <div className="settings-divider" />
-
+          <section className="settings-group">
+            <SettingsLine title="Show in menu bar" trailing={<Toggle checked={true} onChange={() => {}} disabled />} />
             <SettingsLine
-              icon="◌"
               title="Menu bar icon"
               trailing={
                 <button className="settings-picker" type="button" disabled>
                   <span>Traditional</span>
-                  <span className="settings-picker-caret">⌄</span>
+                  <span className="settings-picker-caret">
+                    <IconChevronDown />
+                  </span>
                 </button>
               }
             />
           </section>
 
-          <section className="settings-card">
+          <section className="settings-group">
             <SettingsLine
-              icon="◔"
               title="Launch at login"
-              trailing={<Toggle checked={preferences.launchAtLogin} onChange={(checked) => void window.dropover.setPreferences({ launchAtLogin: checked })} />}
+              trailing={
+                <Toggle
+                  checked={preferences.launchAtLogin}
+                  onChange={(checked) => void window.ledge.setPreferences({ launchAtLogin: checked })}
+                />
+              }
             />
-
-            <div className="settings-divider" />
-
-            <SettingsLine icon="▭" title="Show in Dock" trailing={<Toggle checked={false} onChange={() => {}} disabled />} />
+            <SettingsLine title="Show in Dock" trailing={<Toggle checked={false} onChange={() => {}} disabled />} />
           </section>
 
-          <section className="settings-card">
-            <SettingsLine icon="⌂" title="Application data" trailing={<button className="settings-cta" disabled>Manage…</button>} />
-
-            <div className="settings-divider" />
-
-            <SettingsLine icon="◎" title="Disable online features" trailing={<Toggle checked={false} onChange={() => {}} disabled />} />
-          </section>
-
-          <section className="settings-card">
+          <section className="settings-group">
             <SettingsLine
-              icon="↪"
+              title="Application data"
+              trailing={
+                <button className="settings-cta" disabled>
+                  Manage…
+                </button>
+              }
+            />
+            <SettingsLine
+              title="Disable online features"
+              trailing={<Toggle checked={false} onChange={() => {}} disabled />}
+            />
+          </section>
+
+          <section className="settings-group">
+            <SettingsLine
               title="Third party extensions"
               trailing={
                 <div className="settings-actions">
@@ -149,15 +168,15 @@ export function PreferencesView({ state }: PreferencesViewProps) {
             />
           </section>
 
-          <section className="settings-card">
+          <section className="settings-group">
             <div className="settings-row settings-row-stack">
               <div>
                 <p className="settings-row-title">Shelf activation</p>
-                <p className="settings-row-copy">Configure the shortcut and shake gesture used to reveal the floating shelf.</p>
+                <p className="settings-row-copy">
+                  Configure the shortcut and shake gesture used to reveal the floating shelf.
+                </p>
               </div>
             </div>
-
-            <div className="settings-divider" />
 
             <div className="settings-field">
               <label className="pref-label" htmlFor="shortcut-input">
@@ -168,10 +187,10 @@ export function PreferencesView({ state }: PreferencesViewProps) {
                 className="pref-input"
                 value={shortcutDraft}
                 onChange={(event) => setShortcutDraft(event.target.value)}
-                onBlur={() => void window.dropover.setPreferences({ globalShortcut: shortcutDraft })}
+                onBlur={() => void window.ledge.setPreferences({ globalShortcut: shortcutDraft })}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
-                    event.currentTarget.blur()
+                    event.currentTarget.blur();
                   }
                 }}
               />
@@ -180,16 +199,16 @@ export function PreferencesView({ state }: PreferencesViewProps) {
               </p>
             </div>
 
-            <div className="settings-divider" />
-
             <SettingsLine
-              icon="✦"
               title="Shake gesture"
               copy="Reveal the shelf with a cursor shake while dragging."
-              trailing={<Toggle checked={preferences.shakeEnabled} onChange={(checked) => void window.dropover.setPreferences({ shakeEnabled: checked })} />}
+              trailing={
+                <Toggle
+                  checked={preferences.shakeEnabled}
+                  onChange={(checked) => void window.ledge.setPreferences({ shakeEnabled: checked })}
+                />
+              }
             />
-
-            <div className="settings-divider" />
 
             <div className="settings-field">
               <label className="pref-label" htmlFor="sensitivity">
@@ -200,8 +219,8 @@ export function PreferencesView({ state }: PreferencesViewProps) {
                 className="pref-input"
                 value={preferences.shakeSensitivity}
                 onChange={(event) =>
-                  void window.dropover.setPreferences({
-                    shakeSensitivity: event.target.value as AppState['preferences']['shakeSensitivity']
+                  void window.ledge.setPreferences({
+                    shakeSensitivity: event.target.value as AppState['preferences']['shakeSensitivity'],
                   })
                 }
               >
@@ -210,8 +229,6 @@ export function PreferencesView({ state }: PreferencesViewProps) {
                 <option value="firm">Firm</option>
               </select>
             </div>
-
-            <div className="settings-divider" />
 
             <div className="settings-field">
               <label className="pref-label" htmlFor="excluded-apps">
@@ -222,9 +239,9 @@ export function PreferencesView({ state }: PreferencesViewProps) {
                 className="pref-textarea"
                 value={excludedText}
                 onChange={(event) => {
-                  setExcludedText(event.target.value)
+                  setExcludedText(event.target.value);
                   if (excludedError) {
-                    setExcludedError('')
+                    setExcludedError('');
                   }
                 }}
                 onBlur={() => void saveExcludedApps()}
@@ -235,49 +252,56 @@ export function PreferencesView({ state }: PreferencesViewProps) {
             </div>
           </section>
 
-          <section className="settings-card">
+          <section className="settings-group">
             <SettingsLine
-              icon="◉"
               title="Native helper"
               copy={state.permissionStatus.nativeHelperAvailable ? 'Connected and ready.' : 'Unavailable right now.'}
               trailing={
-                <span className={`settings-state-pill ${state.permissionStatus.nativeHelperAvailable ? 'is-good' : 'is-warn'}`}>
+                <span
+                  className={`settings-state-pill ${state.permissionStatus.nativeHelperAvailable ? 'is-good' : 'is-warn'}`}
+                >
                   {state.permissionStatus.nativeHelperAvailable ? 'Online' : 'Missing'}
                 </span>
               }
             />
 
-            <div className="settings-divider" />
-
             <SettingsLine
-              icon="⌘"
               title="Accessibility"
-              copy={state.permissionStatus.accessibilityTrusted ? 'Granted for shake detection.' : 'Required if you want shake-to-open.'}
+              copy={
+                state.permissionStatus.accessibilityTrusted
+                  ? 'Granted for shake detection.'
+                  : 'Required if you want shake-to-open.'
+              }
               trailing={
-                <button className="settings-cta" onClick={() => void window.dropover.openPermissionSettings()}>
+                <button className="settings-cta" onClick={() => void window.ledge.openPermissionSettings()}>
                   Open Settings…
                 </button>
               }
             />
 
-            <div className="settings-divider" />
-
             <div className="settings-meta">
-              <span>Shake status: {preferences.shakeEnabled ? (state.permissionStatus.shakeReady ? 'ready' : 'blocked') : 'disabled'}</span>
+              <span>
+                Shake status:{' '}
+                {preferences.shakeEnabled ? (state.permissionStatus.shakeReady ? 'ready' : 'blocked') : 'disabled'}
+              </span>
               <span>{state.preferences.excludedBundleIds.length} excluded apps</span>
             </div>
-            {state.permissionStatus.lastError ? <p className="pref-status is-error">{state.permissionStatus.lastError}</p> : null}
+            {state.permissionStatus.lastError ? (
+              <p className="pref-status is-error">{state.permissionStatus.lastError}</p>
+            ) : null}
           </section>
         </div>
       </section>
     </main>
-  )
+  );
 }
 
+/* ── Components ── */
+
 interface ToggleProps {
-  checked: boolean
-  onChange(checked: boolean): void
-  disabled?: boolean
+  checked: boolean;
+  onChange(checked: boolean): void;
+  disabled?: boolean;
 }
 
 function Toggle({ checked, onChange, disabled = false }: ToggleProps) {
@@ -291,21 +315,19 @@ function Toggle({ checked, onChange, disabled = false }: ToggleProps) {
     >
       <span />
     </button>
-  )
+  );
 }
 
 interface SettingsLineProps {
-  icon: string
-  title: string
-  copy?: string
-  trailing: ReactNode
+  title: string;
+  copy?: string;
+  trailing: ReactNode;
 }
 
-function SettingsLine({ icon, title, copy, trailing }: SettingsLineProps) {
+function SettingsLine({ title, copy, trailing }: SettingsLineProps) {
   return (
     <div className="settings-row">
       <div className="settings-row-main">
-        <span className="settings-row-icon">{icon}</span>
         <div>
           <p className="settings-row-title">{title}</p>
           {copy ? <p className="settings-row-copy">{copy}</p> : null}
@@ -313,5 +335,5 @@ function SettingsLine({ icon, title, copy, trailing }: SettingsLineProps) {
       </div>
       {trailing}
     </div>
-  )
+  );
 }

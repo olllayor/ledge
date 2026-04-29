@@ -1,9 +1,9 @@
 import { PreferencesView } from './components/PreferencesView'
 import { ShelfView } from './components/ShelfView'
-import { useDropoverState } from './hooks/useDropoverState'
+import { useLedgeState } from './hooks/useLedgeState'
 
 export function App() {
-  const { state, error } = useDropoverState()
+  const { state, error } = useLedgeState()
   const view = new URLSearchParams(window.location.search).get('view') ?? 'shelf'
 
   if (error) {
