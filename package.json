@@ -1,6 +1,7 @@
 {
   "name": "ledge-app",
   "version": "0.1.1",
+  "author": "olllayor",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.11.1",
@@ -36,7 +37,7 @@
     "vitest": "4.1.2"
   },
   "build": {
-    "publish": "always",
+    "publish": "onTagOrDraft",
     "appId": "com.ollayor.ledge",
     "productName": "Ledge",
     "executableName": "Ledge",
