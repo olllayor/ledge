@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '..')
@@ -27,7 +27,13 @@ const env = {
   ELECTRON_MIRROR:
     process.env.ELECTRON_MIRROR ??
     'https://github.com/electron/electron/releases/download/',
-  ELECTRON_CUSTOM_DIR: process.env.ELECTRON_CUSTOM_DIR ?? `v${electronVersion}`,
+  // Use local electron installation if available, otherwise fall back to download
+  ELECTRON_CUSTOM_DIR:
+    process.env.ELECTRON_CUSTOM_DIR ??
+    (process.platform === 'darwin' && process.arch === 'arm64' &&
+     existsSync('node_modules/electron/dist/Electron.app')
+      ? 'node_modules/electron'
+      : `v${electronVersion}`),
   ELECTRON_CUSTOM_FILENAME:
     process.env.ELECTRON_CUSTOM_FILENAME ??
     `electron-${electronVersion}-darwin-${requestedArch}.zip`

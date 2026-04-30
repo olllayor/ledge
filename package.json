@@ -41,7 +41,6 @@
     "productName": "Ledge",
     "executableName": "Ledge",
     "electronVersion": "41.2.0",
-    "electronDist": "node_modules/electron/dist",
     "files": [
       "out/**/*",
       "package.json",
