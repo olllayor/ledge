@@ -20,7 +20,8 @@ export default defineConfig(({ command }) => ({
     },
     build: {
       outDir: 'out/main',
-      sourcemap: true,
+      sourcemap: command === 'serve',
+      minify: command === 'build',
       lib: {
         entry: resolve(root, 'src/main/index.ts'),
         formats: ['cjs'],
@@ -41,7 +42,8 @@ export default defineConfig(({ command }) => ({
     },
     build: {
       outDir: 'out/preload',
-      sourcemap: 'inline',
+      sourcemap: command === 'serve',
+      minify: command === 'build',
       rollupOptions: {
         input: resolve(root, 'src/preload/index.ts'),
         external: ['electron'],
@@ -58,6 +60,7 @@ export default defineConfig(({ command }) => ({
     },
     build: {
       outDir: '../../out/renderer',
+      minify: command === 'build',
     },
     plugins: [
       react(),

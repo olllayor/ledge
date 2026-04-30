@@ -1,0 +1,16 @@
+# Source maps
+**/*.map
+
+# Tests
+**/*.test.*
+**/*.spec.*
+**/tests/**
+**/__tests__/**
+/test-data/**
+
+# Source (ship compiled output only)
+/src/**
+
+# Docs / readmes
+/docs/**
+/README*

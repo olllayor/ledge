@@ -17,7 +17,7 @@
     "brand:build": "node scripts/build-brand.mjs",
     "native:build": "node scripts/build-native.mjs",
     "native:test": "swift run --package-path native/DropShelfNativeAgent DropShelfNativeAgent --self-test",
-    "dist": "pnpm build && electron-builder"
+    "dist": "pnpm build && node scripts/build-electron-lean.mjs"
   },
   "dependencies": {
     "react": "19.2.4",
@@ -42,7 +42,16 @@
     "executableName": "Ledge",
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.map",
+      "!**/*.test.*",
+      "!**/*.spec.*",
+      "!**/tests/**",
+      "!**/__tests__/**",
+      "!**/test-data/**",
+      "!**/docs/**",
+      "!**/README*",
+      "!**/src/**"
     ],
     "extraResources": [
       {
@@ -62,7 +71,20 @@
       "extendInfo": {
         "CFBundleDisplayName": "Ledge",
         "CFBundleName": "Ledge"
-      }
-    }
+      },
+      "electronLanguages": [
+        "en"
+      ]
+    },
+    "compression": "maximum",
+    "asar": {
+      "smart": true,
+      "compression": "maximum"
+    },
+    "asarUnpack": [
+      "**/native/DropShelfNativeAgent"
+    ],
+    "npmRebuild": false,
+    "nodeGypRebuild": false
   }
 }

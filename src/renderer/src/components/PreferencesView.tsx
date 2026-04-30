@@ -1,18 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { AppState } from '@shared/schema';
 import { normalizeExcludedBundleIds } from '@shared/preferences';
-import {
-  IconArrowUpRight,
-  IconSparkles,
-  IconGear,
-  IconCloud,
-  IconWrench,
-  IconZap,
-  IconFolderOpen,
-  IconStar,
-  IconApp,
-  IconChevronDown,
-} from './Icons';
+import { IconArrowUpRight, IconChevronDown, IconGear } from './Icons';
+import { IconApp, IconCloud, IconFolderOpen, IconSparkles, IconStar, IconWrench, IconZap } from './PreferencesIcons';
 
 interface PreferencesViewProps {
   state: AppState;
