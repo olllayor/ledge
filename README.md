@@ -6,6 +6,14 @@ Ledge is a macOS-only Electron utility inspired by the core Dropover shelf workf
 
 This project currently targets Apple Silicon Macs running macOS 12 or newer. It is optimized for local development and direct-download distribution rather than the Mac App Store.
 
+## Download
+
+**Download the latest version for macOS:**
+
+- [**Latest Release (DMG or ZIP)**](../../releases/latest)
+
+Simply download the `.dmg` file, open it, and drag Ledge to your Applications folder. Alternatively, you can download the `.zip` version for a portable execution.
+
 ## Included in this repo
 
 - One live shelf plus recent shelf restore
