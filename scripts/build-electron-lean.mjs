@@ -22,6 +22,9 @@ const requestedArch = cliArgs.includes('--x64')
     ? 'arm64'
     : process.arch
 
+const hasPublishArg = cliArgs.some((arg) => arg === '--publish' || arg.startsWith('--publish='))
+const publishArgs = hasPublishArg ? [] : ['--publish', 'never']
+
 const env = {
   ...process.env,
   ELECTRON_MIRROR:
@@ -36,10 +39,10 @@ const env = {
       : `v${electronVersion}`),
   ELECTRON_CUSTOM_FILENAME:
     process.env.ELECTRON_CUSTOM_FILENAME ??
-    `electron-${electronVersion}-darwin-${requestedArch}.zip`
+    `electron-v${electronVersion}-darwin-${requestedArch}.zip`
 }
 
-execFileSync('pnpm', ['exec', 'electron-builder', ...cliArgs], {
+execFileSync('pnpm', ['exec', 'electron-builder', ...cliArgs, ...publishArgs], {
   cwd: repoRoot,
   stdio: 'inherit',
   env
