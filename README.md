@@ -57,13 +57,39 @@ pnpm test
 pnpm build
 ```
 
+## Release demo video
+
+This repo includes a Remotion composition for a 36-second release demo. Preview it in Remotion Studio or render the release assets with:
+
+```bash
+pnpm video:studio
+pnpm video:still
+pnpm video:render
+```
+
+Rendered assets are written to `dist/release/`.
+
+## Landing page
+
+The static release landing page lives in `landing/` and reuses the rendered demo video.
+
+```bash
+pnpm landing:dev
+pnpm landing:build
+pnpm landing:preview
+```
+
+The production build is written to `dist/landing/`.
+
 ## Repository layout
 
+- `landing`: static release landing page and media assets
 - `src/main`: Electron main process, tray, windows, persistence, and native bridge
 - `src/preload`: secure preload bridge exposed to the renderer
 - `src/renderer`: React UI for the shelf and preferences windows
 - `src/shared`: shared schemas and IPC contracts
 - `native/DropShelfNativeAgent`: Swift helper for shake detection and bookmark resolution
+- `release-video`: release demo video composition and Remotion entrypoint
 - `scripts`: local build helpers for branding and the native agent
 
 ## License

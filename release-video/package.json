@@ -1,0 +1,22 @@
+{
+  "name": "ledge-release-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "video:studio": "remotion studio index.ts",
+    "video:render": "remotion render index.ts LedgeReleaseDemo ../dist/release/ledge-demo.mp4 --codec=h264 --overwrite",
+    "video:still": "remotion still index.ts LedgeReleaseDemo ../dist/release/ledge-demo-poster.png --frame=90 --overwrite"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.455",
+    "remotion": "^4.0.455"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "typescript": "6.0.2"
+  },
+  "peerDependencies": {
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}

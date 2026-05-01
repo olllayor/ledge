@@ -13,6 +13,9 @@ const rendererCspByMode = {
 
 export default defineConfig(({ command }) => ({
   main: {
+    ssr: {
+      noExternal: ['zod'],
+    },
     resolve: {
       alias: {
         '@shared': shared,
@@ -35,6 +38,9 @@ export default defineConfig(({ command }) => ({
     },
   },
   preload: {
+    ssr: {
+      noExternal: ['zod'],
+    },
     resolve: {
       alias: {
         '@shared': shared,
@@ -59,7 +65,7 @@ export default defineConfig(({ command }) => ({
       },
     },
     build: {
-      outDir: '../../out/renderer',
+      outDir: resolve(root, 'out/renderer'),
       minify: command === 'build',
     },
     plugins: [

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Ledge is a fast macOS shelf for moving files, folders, snippets, links, and screenshots between apps."
+    />
+    <meta name="theme-color" content="#efe1d0" />
+    <meta property="og:title" content="Ledge for macOS" />
+    <meta property="og:description" content="A temporary shelf for everything in motion." />
+    <meta property="og:image" content="/assets/ledge-demo-poster.jpg" />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="/assets/icon.svg" />
+    <link rel="preload" href="/assets/ledge-demo-poster.jpg" as="image" fetchpriority="high" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>Ledge - A macOS Shelf for Everything in Motion</title>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="cursor-light" aria-hidden="true"></div>
+
+    <header class="site-header" data-reveal>
+      <a class="brand" href="#top" aria-label="Ledge home">
+        <img src="/assets/icon.svg" width="34" height="34" alt="" />
+        <span>Ledge</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#demo">Demo</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#download">Download</a>
+      </nav>
+      <a class="header-cta" href="https://github.com/olllayor/ledge/releases/latest">Get Ledge</a>
+    </header>
+
+    <main id="top">
+      <section class="hero section-grid" aria-labelledby="hero-title">
+        <div class="hero-copy" data-reveal>
+          <p class="eyebrow">macOS 12+ · Apple Silicon · MIT</p>
+          <h1 id="hero-title">A shelf for everything in motion.</h1>
+          <p class="hero-lede">
+            Ledge gives your cursor a temporary place to hold files, folders, snippets, links, and screenshots while you
+            move between apps.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="https://github.com/olllayor/ledge/releases/latest">Download latest</a>
+            <a class="button secondary" href="#demo">Watch demo</a>
+          </div>
+          <dl class="hero-metrics" aria-label="Release highlights">
+            <div>
+              <dt>36s</dt>
+              <dd>product tour</dd>
+            </div>
+            <div>
+              <dt>0.1.5</dt>
+              <dd>release build</dd>
+            </div>
+            <div>
+              <dt>0</dt>
+              <dd>cloud required</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="hero-media" id="demo" data-reveal>
+          <div class="video-shell" data-tilt>
+            <video
+              id="demo-video"
+              class="demo-video"
+              poster="/assets/ledge-demo-poster.jpg"
+              preload="metadata"
+              autoplay
+              playsinline
+              muted
+              loop
+              aria-label="Ledge product demo video"
+            >
+              <source src="/assets/ledge-demo.mp4" type="video/mp4" />
+            </video>
+          </div>
+          <p class="media-caption">Drop anything into a shelf, keep moving, then drag it back out when ready.</p>
+        </div>
+      </section>
+
+      <section class="feature-strip" aria-label="Core capabilities">
+        <article data-reveal>
+          <span class="feature-index">01</span>
+          <h2>Capture without context switching</h2>
+          <p>Open a shelf from the tray, shortcut, or cursor shake while dragging.</p>
+        </article>
+        <article data-reveal>
+          <span class="feature-index">02</span>
+          <h2>Hold mixed input</h2>
+          <p>Files, folders, URLs, text, and pasted images live together in one compact stack.</p>
+        </article>
+        <article data-reveal>
+          <span class="feature-index">03</span>
+          <h2>Move it back out</h2>
+          <p>Quick Look, reveal, open, copy, save, share, or drag items out when ready.</p>
+        </article>
+      </section>
+
+      <section class="workflow section-grid" id="workflow" aria-labelledby="workflow-title">
+        <div class="workflow-card" data-reveal>
+          <p class="eyebrow">Native where it counts</p>
+          <h2 id="workflow-title">A tiny Electron surface backed by a Swift helper.</h2>
+          <p>
+            The renderer stays focused on the shelf. The native helper handles shake detection and bookmark-backed file
+            references, so the release build feels like a macOS utility instead of a web page in a window.
+          </p>
+        </div>
+        <div class="stack-diagram" data-reveal>
+          <div class="stack-node active">React shelf UI</div>
+          <div class="stack-node">Electron tray + IPC</div>
+          <div class="stack-node">Swift native helper</div>
+          <div class="stack-node">Local JSON state</div>
+        </div>
+      </section>
+
+      <section class="release-panel" id="download" data-reveal>
+        <div>
+          <p class="eyebrow">Ready for release</p>
+          <h2>Download the latest macOS build.</h2>
+          <p>
+            Grab the DMG or ZIP, move Ledge to Applications, and grant Accessibility only if you want shake-to-open.
+          </p>
+        </div>
+        <div class="release-actions">
+          <a class="button primary" href="https://github.com/olllayor/ledge/releases/latest">Latest release</a>
+          <a class="button secondary" href="https://github.com/olllayor/ledge">View source</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Built for fast local workflows.</span>
+      <a href="https://github.com/olllayor/ledge">GitHub</a>
+    </footer>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
