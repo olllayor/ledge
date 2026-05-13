@@ -6,6 +6,7 @@ import type {
   PreferencePatch,
   PreferencesRecord,
   ShelfRecord,
+  SyncStatePatch,
 } from './schema';
 
 export const IPC_CHANNELS = {
@@ -17,6 +18,10 @@ export const IPC_CHANNELS = {
   closeShelf: 'ledge:close-shelf',
   getPreferences: 'ledge:get-preferences',
   setPreferences: 'ledge:set-preferences',
+  setSyncState: 'ledge:set-sync-state',
+  getSyncBackfillCandidates: 'ledge:get-sync-backfill-candidates',
+  applyRemoteShelf: 'ledge:apply-remote-shelf',
+  relinkItem: 'ledge:relink-item',
   getRecentShelves: 'ledge:get-recent-shelves',
   getPermissionStatus: 'ledge:get-permission-status',
   openPermissionSettings: 'ledge:open-permission-settings',
@@ -48,6 +53,10 @@ export interface LedgeAPI {
   closeShelf(): Promise<AppState>;
   getPreferences(): Promise<PreferencesRecord>;
   setPreferences(patch: PreferencePatch): Promise<PreferencesRecord>;
+  setSyncState(patch: SyncStatePatch): Promise<AppState>;
+  getSyncBackfillCandidates(): Promise<ShelfRecord[]>;
+  applyRemoteShelf(shelf: ShelfRecord): Promise<AppState>;
+  relinkItem(itemId: string): Promise<AppState>;
   getRecentShelves(): Promise<ShelfRecord[]>;
   getPermissionStatus(): Promise<PermissionStatus>;
   openPermissionSettings(): Promise<boolean>;

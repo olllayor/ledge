@@ -27,7 +27,9 @@
     "native:test": "swift run --package-path native/DropShelfNativeAgent DropShelfNativeAgent --self-test",
     "size:report": "node scripts/size-report.mjs",
     "dist": "pnpm clean:dist && pnpm build && node scripts/build-electron-lean.mjs && pnpm size:report",
-    "dist:release": "pnpm clean:dist && pnpm build && node scripts/build-electron-lean.mjs --dir && node scripts/build-dmg.mjs && pnpm size:report"
+    "dist:release": "pnpm clean:dist && pnpm build && node scripts/build-electron-lean.mjs --dir && node scripts/build-dmg.mjs && pnpm size:report",
+    "convex:dev": "convex dev",
+    "convex:codegen": "convex codegen"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",
@@ -96,5 +98,8 @@
     ],
     "npmRebuild": false,
     "nodeGypRebuild": false
+  },
+  "dependencies": {
+    "convex": "^1.38.0"
   }
 }

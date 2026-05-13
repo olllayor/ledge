@@ -17,6 +17,10 @@ export class PreferencesWindow {
     this.window?.webContents.send(IPC_CHANNELS.stateUpdated, state);
   }
 
+  getBrowserWindow(): BrowserWindow | null {
+    return this.window;
+  }
+
   private async ensure(): Promise<BrowserWindow> {
     if (this.window && !this.window.isDestroyed()) {
       return this.window;

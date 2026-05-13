@@ -21,8 +21,12 @@ export class TrayController {
   constructor(private readonly callbacks: TrayCallbacks) {
     this.tray = new Tray(createTrayImage())
     this.tray.setIgnoreDoubleClickEvents(true)
+    this.tray.setTitle('Ledge')
     this.tray.setToolTip('Ledge')
     this.tray.on('click', () => {
+      this.tray.popUpContextMenu(this.buildMenu())
+    })
+    this.tray.on('right-click', () => {
       this.tray.popUpContextMenu(this.buildMenu())
     })
     this.tray.on('drop-files', (_event, files) => {

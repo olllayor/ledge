@@ -31,6 +31,21 @@ pnpm install
 pnpm dev
 ```
 
+## Cloud sync development
+
+Cloud sync is optional at runtime. Local shelf behavior works without a backend.
+
+```bash
+pnpm convex:dev
+VITE_CONVEX_URL="https://<deployment>.convex.cloud" pnpm dev
+```
+
+Convex environment variables used by the paid-sync backend:
+
+- `RESEND_API_KEY` and `LEDGE_AUTH_EMAIL_FROM` for email OTP delivery
+- `LEMON_SQUEEZY_API_KEY` for manual entitlement refresh
+- `LEMON_SQUEEZY_WEBHOOK_SECRET` for webhook signature verification
+
 If Electron does not finish downloading during install, run:
 
 ```bash

@@ -90,11 +90,49 @@ export const permissionStatusSchema = z.object({
   shortcutError: z.string().default(''),
 });
 
+export const syncStatusSchema = z.enum([
+  'signedOut',
+  'setupRequired',
+  'syncing',
+  'synced',
+  'offline',
+  'quotaReached',
+  'entitlementStale',
+  'error',
+]);
+
+export const billingPlanSchema = z.enum(['free', 'pro']);
+
+export const syncStateSchema = z.object({
+  enabled: z.boolean().default(false),
+  status: syncStatusSchema.default('signedOut'),
+  deviceId: z.string().default(''),
+  signedInEmail: z.string().email().optional(),
+  plan: billingPlanSchema.default('free'),
+  syncedShelfCount: z.number().int().nonnegative().default(0),
+  deviceCount: z.number().int().nonnegative().default(0),
+  storageBytesUsed: z.number().int().nonnegative().default(0),
+  lastSyncedAt: z.string().optional(),
+  lastError: z.string().default(''),
+});
+
+export const defaultSyncState = {
+  enabled: false,
+  status: 'signedOut' as const,
+  deviceId: '',
+  plan: 'free' as const,
+  syncedShelfCount: 0,
+  deviceCount: 0,
+  storageBytesUsed: 0,
+  lastError: '',
+};
+
 export const appStateSchema = z.object({
   liveShelf: shelfRecordSchema.nullable(),
   recentShelves: z.array(shelfRecordSchema).max(10).default([]),
   preferences: preferencesRecordSchema,
   permissionStatus: permissionStatusSchema,
+  sync: syncStateSchema.default(defaultSyncState),
 });
 
 export const fileDropPayloadSchema = z.object({
@@ -143,7 +181,14 @@ export const nativeBookmarkResolveSchema = z.object({
   isMissing: z.boolean().default(false),
 });
 
+export const relinkItemInputSchema = z.object({
+  itemId: z.string(),
+});
+
+export const syncStatePatchSchema = syncStateSchema.partial();
+
 export type AppState = z.infer<typeof appStateSchema>;
+export type BillingPlan = z.infer<typeof billingPlanSchema>;
 export type CreateShelfInput = z.infer<typeof createShelfInputSchema>;
 export type FileRef = z.infer<typeof fileRefSchema>;
 export type IngestPayload = z.infer<typeof ingestPayloadSchema>;
@@ -159,3 +204,5 @@ export type ShelfItemRecord = z.infer<typeof shelfItemSchema>;
 export type ShelfOrigin = z.infer<typeof shelfOriginSchema>;
 export type ShelfRecord = z.infer<typeof shelfRecordSchema>;
 export type ShakeSensitivity = z.infer<typeof shakeSensitivitySchema>;
+export type SyncState = z.infer<typeof syncStateSchema>;
+export type SyncStatePatch = z.infer<typeof syncStatePatchSchema>;

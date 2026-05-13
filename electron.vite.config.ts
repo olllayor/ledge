@@ -6,9 +6,9 @@ const root = resolve(__dirname, '.');
 const shared = resolve(root, 'src/shared');
 const rendererCspByMode = {
   serve:
-    "default-src 'self' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset:; connect-src 'self' http://localhost:* ws://localhost:*;",
+    "default-src 'self' http://localhost:* ws://localhost:* https://*.convex.cloud wss://*.convex.cloud; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset: https://*.convex.cloud; connect-src 'self' http://localhost:* ws://localhost:* https://*.convex.cloud wss://*.convex.cloud;",
   build:
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset:; connect-src 'self';",
+    "default-src 'self' https://*.convex.cloud wss://*.convex.cloud; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset: https://*.convex.cloud; connect-src 'self' https://*.convex.cloud wss://*.convex.cloud;",
 } as const;
 
 export default defineConfig(({ command }) => ({

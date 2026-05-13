@@ -84,7 +84,7 @@ describe('StateStore', () => {
     expect(store.getRecentShelves()).toHaveLength(0)
   })
 
-  it('migrates legacy persisted state to version 1 on load', async () => {
+  it('migrates legacy persisted state to version 2 on load', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dropshelf-legacy-'))
     tempDirs.push(dir)
     const statePath = join(dir, 'state.json')
@@ -102,7 +102,7 @@ describe('StateStore', () => {
     await store.whenIdle()
     const persisted = JSON.parse(await readFile(statePath, 'utf8')) as { version: number; preferences: { globalShortcut: string } }
 
-    expect(persisted.version).toBe(1)
+    expect(persisted.version).toBe(2)
     expect(persisted.preferences.globalShortcut).toBe('CommandOrControl+Shift+Space')
   })
 
@@ -126,8 +126,50 @@ describe('StateStore', () => {
       preferences: { launchAtLogin: boolean }
     }
 
-    expect(persisted.version).toBe(1)
+    expect(persisted.version).toBe(2)
     expect(persisted.liveShelf).toBeNull()
     expect(persisted.preferences.launchAtLogin).toBe(true)
+  })
+
+  it('relinks a missing file-backed item on the live shelf', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dropshelf-relink-'))
+    tempDirs.push(dir)
+    const store = new StateStore(dir)
+    store.createShelf('manual')
+    store.appendItems([
+      {
+        id: 'item-1',
+        kind: 'file',
+        createdAt: '2026-05-09T00:00:00.000Z',
+        order: 0,
+        title: 'project.pdf',
+        subtitle: '',
+        preview: { summary: 'PDF', detail: '' },
+        mimeType: 'application/pdf',
+        file: {
+          originalPath: '/missing/project.pdf',
+          resolvedPath: '',
+          bookmarkBase64: '',
+          isMissing: true,
+          isStale: false
+        }
+      }
+    ])
+
+    const shelf = store.relinkFileBackedItem('item-1', {
+      originalPath: '/Users/me/Documents/project.pdf',
+      resolvedPath: '/Users/me/Documents/project.pdf',
+      bookmarkBase64: 'bookmark'
+    })
+
+    expect(shelf?.items[0]).toMatchObject({
+      file: {
+        originalPath: '/Users/me/Documents/project.pdf',
+        resolvedPath: '/Users/me/Documents/project.pdf',
+        bookmarkBase64: 'bookmark',
+        isMissing: false,
+        isStale: false
+      }
+    })
   })
 })

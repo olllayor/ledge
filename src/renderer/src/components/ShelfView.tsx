@@ -419,6 +419,7 @@ function HeroItem({
   onOpenItemSheet,
 }: HeroItemProps) {
   const previewSrc = getHeroPreviewSource(item);
+  const needsRelink = 'file' in item && item.file.isMissing;
   const exportableItems = getExportableItems(items);
   const canDragOut = exportableItems.length > 0 && !dragLocked && !isImporting;
   const statusLabel = isImporting ? 'Importing…' : getHeroCountLabel(items, heroMode);
@@ -516,6 +517,11 @@ function HeroItem({
         <span>{statusLabel}</span>
         {items.length >= 2 ? <IconChevronDown /> : null}
       </button>
+      {needsRelink ? (
+        <button className="hero-relink-button" type="button" onClick={() => void window.ledge.relinkItem(item.id)}>
+          Relink
+        </button>
+      ) : null}
     </div>
   );
 }

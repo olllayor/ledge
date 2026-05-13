@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { AppState } from '@shared/schema';
+import type { AppState, ShelfRecord } from '@shared/schema';
 import { normalizeExcludedBundleIds } from '@shared/preferences';
+import { estimateImportedImageStorageBytes, syncShelfLimitForPlan } from '@shared/sync';
+import { useSync } from '../providers/SyncProvider';
 import { IconArrowUpRight, IconChevronDown, IconGear } from './Icons';
 import { IconApp, IconCloud, IconFolderOpen, IconSparkles, IconStar, IconWrench, IconZap } from './PreferencesIcons';
 
@@ -24,6 +26,7 @@ export function PreferencesView({ state }: PreferencesViewProps) {
   const [excludedText, setExcludedText] = useState(preferences.excludedBundleIds.join('\n'));
   const [excludedError, setExcludedError] = useState('');
   const [shortcutDraft, setShortcutDraft] = useState(preferences.globalShortcut);
+  const [activeSection, setActiveSection] = useState('General');
   const appVersion = '0.1.0';
 
   useEffect(() => {
@@ -75,9 +78,10 @@ export function PreferencesView({ state }: PreferencesViewProps) {
           {sidebarItems.map(({ label, icon }) => (
             <button
               key={label}
-              className={`settings-nav-item ${label === 'General' ? 'is-active' : 'is-idle'}`}
+              className={`settings-nav-item ${label === activeSection ? 'is-active' : 'is-idle'}`}
               type="button"
-              aria-current={label === 'General' ? 'page' : undefined}
+              aria-current={label === activeSection ? 'page' : undefined}
+              onClick={() => setActiveSection(label)}
             >
               <span className="settings-nav-icon">{icon}</span>
               <span>{label}</span>
@@ -95,9 +99,19 @@ export function PreferencesView({ state }: PreferencesViewProps) {
 
       <section className="settings-stage">
         <header className="settings-stage-head">
-          <h1>General</h1>
+          <h1>{activeSection}</h1>
         </header>
 
+        {activeSection === 'Cloud Sharing' ? <CloudSyncSettings state={state} /> : null}
+        {activeSection === 'Ledge Pro' ? <ProSettings state={state} /> : null}
+        {activeSection !== 'General' && activeSection !== 'Cloud Sharing' && activeSection !== 'Ledge Pro' ? (
+          <div className="settings-stack">
+            <section className="settings-group">
+              <SettingsLine title="Coming later" copy="This area is planned for a future paid upgrade." trailing={<span />} />
+            </section>
+          </div>
+        ) : null}
+        {activeSection === 'General' ? (
         <div className="settings-stack">
           <section className="settings-group">
             <SettingsLine title="Show in menu bar" trailing={<Toggle checked={true} onChange={() => {}} disabled />} />
@@ -281,8 +295,173 @@ export function PreferencesView({ state }: PreferencesViewProps) {
             ) : null}
           </section>
         </div>
+        ) : null}
       </section>
     </main>
+  );
+}
+
+function CloudSyncSettings({ state }: PreferencesViewProps) {
+  const sync = useSync();
+  const [email, setEmail] = useState(state.sync.signedInEmail ?? sync.email);
+  const [code, setCode] = useState('');
+  const [status, setStatus] = useState('');
+  const [candidates, setCandidates] = useState<ShelfRecord[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const limit = sync.overview?.shelfLimit ?? syncShelfLimitForPlan(state.sync.plan);
+  const selectedShelves = candidates.filter((shelf) => selectedIds.has(shelf.id));
+  const selectedStorageBytes = estimateImportedImageStorageBytes(selectedShelves);
+
+  async function requestCode() {
+    setStatus('Sending code…');
+    await sync.requestOtp(email);
+    setStatus('Check your email for a 6-digit code.');
+  }
+
+  async function verifyCode() {
+    setStatus('Signing in…');
+    await sync.verifyOtp(email, code);
+    setCode('');
+    setStatus('Signed in.');
+  }
+
+  async function loadCandidates() {
+    const shelves = await sync.loadBackfillCandidates();
+    setCandidates(shelves);
+    setSelectedIds(new Set(shelves.slice(0, limit).map((shelf) => shelf.id)));
+  }
+
+  async function syncSelected() {
+    setStatus('Syncing selected shelves…');
+    await sync.syncSelectedShelves([...selectedIds]);
+    setStatus('Selected shelves are synced.');
+  }
+
+  return (
+    <div className="settings-stack">
+      <section className="settings-group">
+        <SettingsLine
+          title="Cloud sync"
+          copy={
+            sync.configured
+              ? 'Local shelves stay unlimited. Cloud sync is limited by your plan.'
+              : 'Set VITE_CONVEX_URL to enable the Convex sync client.'
+          }
+          trailing={<span className="settings-state-pill">{state.sync.status}</span>}
+        />
+        <SettingsLine title="Plan" copy={`${state.sync.plan.toUpperCase()} · ${state.sync.syncedShelfCount}/${limit} synced shelves`} trailing={<span />} />
+        <SettingsLine title="Devices" copy={`${state.sync.deviceCount} connected`} trailing={<span />} />
+      </section>
+
+      <section className="settings-group">
+        <div className="settings-field">
+          <label className="pref-label" htmlFor="sync-email">Email</label>
+          <input id="sync-email" className="pref-input" value={email} onChange={(event) => setEmail(event.target.value)} />
+        </div>
+        <div className="settings-actions-row">
+          <button className="settings-cta" type="button" disabled={!sync.configured || !email} onClick={() => void requestCode()}>
+            Send Code
+          </button>
+          <input
+            className="pref-input settings-code-input"
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            placeholder="123456"
+            inputMode="numeric"
+          />
+          <button className="settings-cta" type="button" disabled={!sync.configured || code.length < 6} onClick={() => void verifyCode()}>
+            Sign In
+          </button>
+        </div>
+        {state.sync.signedInEmail ? (
+          <button className="settings-cta" type="button" onClick={() => void sync.signOut()}>
+            Sign Out
+          </button>
+        ) : null}
+      </section>
+
+      <section className="settings-group">
+        <SettingsLine
+          title="Initial backfill"
+          copy={`${selectedIds.size}/${limit} selected · approx. ${formatBytes(selectedStorageBytes)} imported images`}
+          trailing={
+            <button className="settings-cta" type="button" disabled={!sync.sessionToken} onClick={() => void loadCandidates()}>
+              Choose…
+            </button>
+          }
+        />
+        {candidates.length > 0 ? (
+          <div className="sync-candidate-list">
+            {candidates.map((shelf) => {
+              const checked = selectedIds.has(shelf.id);
+              return (
+                <label key={shelf.id} className="sync-candidate">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!checked && selectedIds.size >= limit}
+                    onChange={(event) => {
+                      const next = new Set(selectedIds);
+                      if (event.target.checked) next.add(shelf.id);
+                      else next.delete(shelf.id);
+                      setSelectedIds(next);
+                    }}
+                  />
+                  <span>{shelf.name}</span>
+                  <small>{shelf.items.length} items</small>
+                </label>
+              );
+            })}
+          </div>
+        ) : null}
+        <button className="settings-cta" type="button" disabled={!sync.sessionToken || selectedIds.size === 0} onClick={() => void syncSelected()}>
+          Sync Selected
+        </button>
+        {status || state.sync.lastError ? <p className={`pref-status ${state.sync.lastError ? 'is-error' : ''}`}>{state.sync.lastError || status}</p> : null}
+      </section>
+    </div>
+  );
+}
+
+function ProSettings({ state }: PreferencesViewProps) {
+  const sync = useSync();
+  const [licenseKey, setLicenseKey] = useState('');
+  const [orderId, setOrderId] = useState('');
+  const [status, setStatus] = useState('');
+
+  async function refresh() {
+    setStatus('Refreshing entitlement…');
+    await sync.refreshEntitlements({
+      licenseKey: licenseKey || undefined,
+      orderId: orderId || undefined,
+    });
+    setStatus('Entitlement refreshed.');
+  }
+
+  return (
+    <div className="settings-stack">
+      <section className="settings-group">
+        <SettingsLine title="Ledge Pro" copy="99,000 UZS/year or $9.99/year." trailing={<span className="settings-state-pill">{state.sync.plan}</span>} />
+        <SettingsLine title="Cloud limits" copy="3 devices, 500 synced shelves, and 1 GB imported image storage." trailing={<span />} />
+        <button className="settings-cta" type="button" onClick={() => window.open('https://ledge.app/pro', '_blank')}>
+          Open Checkout
+        </button>
+      </section>
+      <section className="settings-group">
+        <div className="settings-field">
+          <label className="pref-label" htmlFor="license-key">License key</label>
+          <input id="license-key" className="pref-input" value={licenseKey} onChange={(event) => setLicenseKey(event.target.value)} />
+        </div>
+        <div className="settings-field">
+          <label className="pref-label" htmlFor="order-id">Order ID</label>
+          <input id="order-id" className="pref-input" value={orderId} onChange={(event) => setOrderId(event.target.value)} />
+        </div>
+        <button className="settings-cta" type="button" disabled={!sync.sessionToken || (!licenseKey && !orderId)} onClick={() => void refresh()}>
+          Refresh Entitlements
+        </button>
+        {status ? <p className="pref-status">{status}</p> : null}
+      </section>
+    </div>
   );
 }
 
@@ -326,4 +505,11 @@ function SettingsLine({ title, copy, trailing }: SettingsLineProps) {
       {trailing}
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }

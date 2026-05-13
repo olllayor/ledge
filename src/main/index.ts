@@ -21,6 +21,8 @@ import {
   ingestPayloadSchema,
   permissionStatusSchema,
   preferencePatchSchema,
+  shelfRecordSchema,
+  syncStatePatchSchema,
   type AppState,
   type IngestPayload,
   type PermissionStatus,
@@ -182,6 +184,19 @@ function registerIpc(): void {
     broadcastState();
     return stateStore.getPreferences();
   });
+  ipcMain.handle(IPC_CHANNELS.setSyncState, async (_event, patch: unknown) => {
+    stateStore.setSyncState(syncStatePatchSchema.parse(patch));
+    return broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.getSyncBackfillCandidates, async () => stateStore.getAllShelves());
+  ipcMain.handle(IPC_CHANNELS.applyRemoteShelf, async (_event, shelf: unknown) => {
+    applyRemoteShelfSnapshot(shelfRecordSchema.parse(shelf));
+    return broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.relinkItem, async (_event, itemId: string) => {
+    await relinkItem(itemId);
+    return broadcastState();
+  });
   ipcMain.handle(IPC_CHANNELS.getRecentShelves, async () => stateStore.getRecentShelves());
   ipcMain.handle(IPC_CHANNELS.getPermissionStatus, async () => currentPermissionStatus());
   ipcMain.handle(IPC_CHANNELS.openPermissionSettings, async () => nativeAgent.openPermissionSettings());
@@ -219,6 +234,7 @@ function registerIpc(): void {
         { label: 'Quick Look', enabled: !missing, click: () => previewItem(item.id) },
         { label: 'Reveal in Finder', enabled: !missing, click: () => revealItem(item.id) },
         { label: 'Open', enabled: !missing, click: () => openItem(item.id) },
+        { label: 'Relink…', click: () => relinkItem(item.id) },
         { type: 'separator' },
         { label: 'Share', enabled: true, click: () => shareItems([item.id]) },
       );
@@ -390,6 +406,46 @@ async function createShelf(
   broadcastState();
 }
 
+function applyRemoteShelfSnapshot(remoteShelf: ShelfRecord): void {
+  const liveShelf = stateStore.getLiveShelf()
+  if (!liveShelf || liveShelf.id === remoteShelf.id) {
+    if (!liveShelf || Date.parse(remoteShelf.updatedAt) > Date.parse(liveShelf.updatedAt)) {
+      stateStore.replaceLiveShelf(markRemoteFileRefsUnavailable(remoteShelf))
+    }
+    return
+  }
+
+  const recentShelf = stateStore.getRecentShelves().find((shelf) => shelf.id === remoteShelf.id)
+  if (!recentShelf) {
+    return
+  }
+
+  if (Date.parse(remoteShelf.updatedAt) > Date.parse(recentShelf.updatedAt)) {
+    stateStore.replaceRecentShelf(markRemoteFileRefsUnavailable(remoteShelf))
+  }
+}
+
+function markRemoteFileRefsUnavailable(shelf: ShelfRecord): ShelfRecord {
+  return {
+    ...shelf,
+    items: shelf.items.map((item) => {
+      if (!isFileBackedItem(item)) {
+        return item
+      }
+
+      return {
+        ...item,
+        file: {
+          ...item.file,
+          bookmarkBase64: '',
+          resolvedPath: '',
+          isMissing: true
+        }
+      }
+    })
+  }
+}
+
 async function restoreShelf(id: string): Promise<AppState> {
   const shelf = stateStore.restoreShelf(id);
   if (!shelf) {
@@ -419,6 +475,35 @@ async function restoreShelf(id: string): Promise<AppState> {
   shelfWindow.resetPosition();
   await shelfWindow.showNear(currentCursorPoint(), false);
   return broadcastState();
+}
+
+async function relinkItem(itemId: string): Promise<boolean> {
+  const item = liveShelfItems().find((entry) => entry.id === itemId)
+  if (!item || !isFileBackedItem(item)) {
+    return false
+  }
+
+  const browserWindow = shelfWindow.getBrowserWindow() ?? preferencesWindow.getBrowserWindow()
+  const properties: Electron.OpenDialogOptions['properties'] = item.kind === 'folder'
+    ? ['openDirectory']
+    : ['openFile']
+  const result = browserWindow
+    ? await dialog.showOpenDialog(browserWindow, { properties })
+    : await dialog.showOpenDialog({ properties })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return false
+  }
+
+  const selectedPath = result.filePaths[0]
+  const bookmarkBase64 = await nativeAgent.createBookmark(selectedPath)
+  stateStore.relinkFileBackedItem(itemId, {
+    originalPath: selectedPath,
+    resolvedPath: selectedPath,
+    bookmarkBase64
+  })
+  broadcastState()
+  return true
 }
 
 async function addPayloadsToLiveShelf(
