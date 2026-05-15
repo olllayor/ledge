@@ -10,6 +10,67 @@ import {
   storageBytesUsed,
 } from "./model";
 
+const fileRef = v.object({
+  originalPath: v.string(),
+  resolvedPath: v.string(),
+  isStale: v.boolean(),
+  isMissing: v.boolean(),
+});
+
+const preview = v.object({
+  summary: v.string(),
+  detail: v.string(),
+});
+
+const shelfItemBase = {
+  id: v.string(),
+  createdAt: v.string(),
+  order: v.number(),
+  title: v.string(),
+  subtitle: v.string(),
+  preview,
+};
+
+const shelfItemSchema = v.union(
+  v.object({
+    ...shelfItemBase,
+    kind: v.literal("file"),
+    file: fileRef,
+    mimeType: v.string(),
+  }),
+  v.object({
+    ...shelfItemBase,
+    kind: v.literal("folder"),
+    file: fileRef,
+  }),
+  v.object({
+    ...shelfItemBase,
+    kind: v.literal("imageAsset"),
+    file: fileRef,
+    mimeType: v.string(),
+  }),
+  v.object({
+    ...shelfItemBase,
+    kind: v.literal("text"),
+    text: v.string(),
+    savedFilePath: v.optional(v.string()),
+  }),
+  v.object({
+    ...shelfItemBase,
+    kind: v.literal("url"),
+    url: v.string(),
+    savedFilePath: v.optional(v.string()),
+  }),
+);
+
+const preferencesValues = v.object({
+  launchAtLogin: v.boolean(),
+  shakeEnabled: v.boolean(),
+  shakeSensitivity: v.union(v.literal("gentle"), v.literal("balanced"), v.literal("firm")),
+  excludedBundleIds: v.array(v.string()),
+  globalShortcut: v.string(),
+});
+
 const shelfPayload = {
   shelfId: v.string(),
   name: v.string(),
@@ -21,7 +82,7 @@ const shelfPayload = {
     v.literal("manual"),
     v.literal("restore"),
   ),
-  items: v.array(v.any()),
+  items: v.array(shelfItemSchema),
   localCreatedAt: v.string(),
   localUpdatedAt: v.string(),
   imageStorageBytes: v.number(),
@@ -162,7 +223,7 @@ export const upsertShelf = mutation({
 export const patchPreferences = mutation({
   args: {
     ...sessionArgs,
-    values: v.any(),
+    values: preferencesValues,
   },
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx, args.sessionToken);

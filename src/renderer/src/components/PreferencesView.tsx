@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AppState, ShelfRecord } from '@shared/schema';
 import { normalizeExcludedBundleIds } from '@shared/preferences';
 import { estimateImportedImageStorageBytes, syncShelfLimitForPlan } from '@shared/sync';
@@ -305,24 +305,65 @@ function CloudSyncSettings({ state }: PreferencesViewProps) {
   const sync = useSync();
   const [email, setEmail] = useState(state.sync.signedInEmail ?? sync.email);
   const [code, setCode] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'verifying' | 'signed-in'>('idle');
+  const [error, setError] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [candidates, setCandidates] = useState<ShelfRecord[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const codeInputRef = useRef<HTMLInputElement>(null);
   const limit = sync.overview?.shelfLimit ?? syncShelfLimitForPlan(state.sync.plan);
   const selectedShelves = candidates.filter((shelf) => selectedIds.has(shelf.id));
   const selectedStorageBytes = estimateImportedImageStorageBytes(selectedShelves);
+  const isLoggedIn = !!state.sync.signedInEmail;
+  const emailError = email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? 'Enter a valid email address.' : '';
+
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCooldown]);
+
+  useEffect(() => {
+    if (status === 'sent' && codeInputRef.current) {
+      codeInputRef.current.focus();
+    }
+  }, [status]);
 
   async function requestCode() {
-    setStatus('Sending code…');
-    await sync.requestOtp(email);
-    setStatus('Check your email for a 6-digit code.');
+    if (emailError) return;
+    setError('');
+    setStatus('sending');
+    try {
+      await sync.requestOtp(email);
+      setStatus('sent');
+      setResendCooldown(30);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send code.');
+      setStatus('idle');
+    }
   }
 
   async function verifyCode() {
-    setStatus('Signing in…');
-    await sync.verifyOtp(email, code);
-    setCode('');
-    setStatus('Signed in.');
+    if (code.length < 6) return;
+    setError('');
+    setStatus('verifying');
+    try {
+      await sync.verifyOtp(email, code);
+      setCode('');
+      setStatus('signed-in');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid code.');
+      setStatus('sent');
+    }
+  }
+
+  function handleCodeChange(value: string) {
+    const digits = value.replace(/\D/g, '').slice(0, 6);
+    setCode(digits);
+    if (digits.length === 6) {
+      void verifyCode();
+    }
   }
 
   async function loadCandidates() {
@@ -332,9 +373,77 @@ function CloudSyncSettings({ state }: PreferencesViewProps) {
   }
 
   async function syncSelected() {
-    setStatus('Syncing selected shelves…');
+    setStatus('verifying');
     await sync.syncSelectedShelves([...selectedIds]);
-    setStatus('Selected shelves are synced.');
+    setStatus('signed-in');
+  }
+
+  async function handleSignOut() {
+    await sync.signOut();
+    setStatus('idle');
+    setEmail(state.sync.signedInEmail ?? '');
+  }
+
+  if (isLoggedIn) {
+    return (
+      <div className="settings-stack">
+        <section className="settings-group">
+          <SettingsLine
+            title="Cloud sync"
+            copy="Local shelves stay unlimited. Cloud sync is limited by your plan."
+            trailing={<span className="settings-state-pill is-good">Connected</span>}
+          />
+          <SettingsLine title="Signed in as" copy={state.sync.signedInEmail} trailing={<span />} />
+          <SettingsLine title="Plan" copy={`${state.sync.plan.toUpperCase()} · ${state.sync.syncedShelfCount}/${limit} synced shelves`} trailing={<span />} />
+          <SettingsLine title="Devices" copy={`${state.sync.deviceCount} connected`} trailing={<span />} />
+        </section>
+
+        <section className="settings-group">
+          <button className="settings-cta is-danger" type="button" onClick={() => void handleSignOut()}>
+            Sign Out
+          </button>
+        </section>
+
+        <section className="settings-group">
+          <SettingsLine
+            title="Initial backfill"
+            copy={`${selectedIds.size}/${limit} selected · approx. ${formatBytes(selectedStorageBytes)} imported images`}
+            trailing={
+              <button className="settings-cta" type="button" disabled={!sync.sessionToken} onClick={() => void loadCandidates()}>
+                Choose…
+              </button>
+            }
+          />
+          {candidates.length > 0 ? (
+            <div className="sync-candidate-list">
+              {candidates.map((shelf) => {
+                const checked = selectedIds.has(shelf.id);
+                return (
+                  <label key={shelf.id} className="sync-candidate">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={!checked && selectedIds.size >= limit}
+                      onChange={(event) => {
+                        const next = new Set(selectedIds);
+                        if (event.target.checked) next.add(shelf.id);
+                        else next.delete(shelf.id);
+                        setSelectedIds(next);
+                      }}
+                    />
+                    <span>{shelf.name}</span>
+                    <small>{shelf.items.length} items</small>
+                  </label>
+                );
+              })}
+            </div>
+          ) : null}
+          <button className="settings-cta" type="button" disabled={!sync.sessionToken || selectedIds.size === 0} onClick={() => void syncSelected()}>
+            Sync Selected
+          </button>
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -344,81 +453,80 @@ function CloudSyncSettings({ state }: PreferencesViewProps) {
           title="Cloud sync"
           copy={
             sync.configured
-              ? 'Local shelves stay unlimited. Cloud sync is limited by your plan.'
+              ? 'Sign in to sync your shelves across devices.'
               : 'Set VITE_CONVEX_URL to enable the Convex sync client.'
           }
           trailing={<span className="settings-state-pill">{state.sync.status}</span>}
         />
-        <SettingsLine title="Plan" copy={`${state.sync.plan.toUpperCase()} · ${state.sync.syncedShelfCount}/${limit} synced shelves`} trailing={<span />} />
-        <SettingsLine title="Devices" copy={`${state.sync.deviceCount} connected`} trailing={<span />} />
       </section>
 
       <section className="settings-group">
         <div className="settings-field">
           <label className="pref-label" htmlFor="sync-email">Email</label>
-          <input id="sync-email" className="pref-input" value={email} onChange={(event) => setEmail(event.target.value)} />
-        </div>
-        <div className="settings-actions-row">
-          <button className="settings-cta" type="button" disabled={!sync.configured || !email} onClick={() => void requestCode()}>
-            Send Code
-          </button>
           <input
-            className="pref-input settings-code-input"
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-            placeholder="123456"
-            inputMode="numeric"
+            id="sync-email"
+            className="pref-input"
+            type="email"
+            value={email}
+            onChange={(event) => { setEmail(event.target.value); setError(''); }}
+            onKeyDown={(event) => { if (event.key === 'Enter' && !emailError) void requestCode(); }}
+            placeholder="you@example.com"
+            disabled={status === 'sending'}
           />
-          <button className="settings-cta" type="button" disabled={!sync.configured || code.length < 6} onClick={() => void verifyCode()}>
-            Sign In
-          </button>
+          {emailError ? <p className="pref-status is-error">{emailError}</p> : null}
         </div>
-        {state.sync.signedInEmail ? (
-          <button className="settings-cta" type="button" onClick={() => void sync.signOut()}>
-            Sign Out
-          </button>
-        ) : null}
+
+        <button
+          className="settings-cta"
+          type="button"
+          disabled={!sync.configured || !email || !!emailError || status === 'sending'}
+          onClick={() => void requestCode()}
+        >
+          {status === 'sending' ? 'Sending…' : 'Send Code'}
+        </button>
       </section>
 
-      <section className="settings-group">
-        <SettingsLine
-          title="Initial backfill"
-          copy={`${selectedIds.size}/${limit} selected · approx. ${formatBytes(selectedStorageBytes)} imported images`}
-          trailing={
-            <button className="settings-cta" type="button" disabled={!sync.sessionToken} onClick={() => void loadCandidates()}>
-              Choose…
-            </button>
-          }
-        />
-        {candidates.length > 0 ? (
-          <div className="sync-candidate-list">
-            {candidates.map((shelf) => {
-              const checked = selectedIds.has(shelf.id);
-              return (
-                <label key={shelf.id} className="sync-candidate">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={!checked && selectedIds.size >= limit}
-                    onChange={(event) => {
-                      const next = new Set(selectedIds);
-                      if (event.target.checked) next.add(shelf.id);
-                      else next.delete(shelf.id);
-                      setSelectedIds(next);
-                    }}
-                  />
-                  <span>{shelf.name}</span>
-                  <small>{shelf.items.length} items</small>
-                </label>
-              );
-            })}
+      {status === 'sent' || status === 'verifying' ? (
+        <section className="settings-group">
+          <div className="settings-field">
+            <label className="pref-label" htmlFor="sync-code">Verification code</label>
+            <input
+              ref={codeInputRef}
+              id="sync-code"
+              className="pref-input code-input"
+              value={code}
+              onChange={(event) => handleCodeChange(event.target.value)}
+              placeholder="123456"
+              inputMode="numeric"
+              maxLength={6}
+              disabled={status === 'verifying'}
+            />
+            <p className="pref-help">Check your email for a 6-digit code.</p>
           </div>
-        ) : null}
-        <button className="settings-cta" type="button" disabled={!sync.sessionToken || selectedIds.size === 0} onClick={() => void syncSelected()}>
-          Sync Selected
-        </button>
-        {status || state.sync.lastError ? <p className={`pref-status ${state.sync.lastError ? 'is-error' : ''}`}>{state.sync.lastError || status}</p> : null}
-      </section>
+
+          <div className="settings-actions-row">
+            <button
+              className="settings-cta"
+              type="button"
+              disabled={!sync.configured || code.length < 6 || status === 'verifying'}
+              onClick={() => void verifyCode()}
+            >
+              {status === 'verifying' ? 'Signing in…' : 'Sign In'}
+            </button>
+          </div>
+
+          <button
+            className="settings-link-btn"
+            type="button"
+            disabled={resendCooldown > 0}
+            onClick={() => void requestCode()}
+          >
+            {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
+          </button>
+        </section>
+      ) : null}
+
+      {error ? <p className="pref-status is-error">{error}</p> : null}
     </div>
   );
 }

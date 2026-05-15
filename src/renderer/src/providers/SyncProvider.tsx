@@ -39,6 +39,7 @@ interface RemoteShelf {
 
 const SESSION_KEY = 'ledge.sync.sessionToken';
 const EMAIL_KEY = 'ledge.sync.email';
+const DEBOUNCE_MS = 500;
 
 const noop = async () => {};
 
@@ -59,6 +60,26 @@ export function useSync() {
   return useContext(SyncContext);
 }
 
+class MutationQueue {
+  private chain = Promise.resolve();
+
+  enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    let resolve!: (value: T) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+
+    this.chain = this.chain.then(
+      () => fn().then(resolve, reject),
+      () => fn().then(resolve, reject),
+    );
+
+    return promise;
+  }
+}
+
 export function SyncProvider({ children }: { children: ReactNode }) {
   const [sessionToken, setSessionToken] = useState(() => localStorage.getItem(SESSION_KEY) ?? '');
   const [email, setEmail] = useState(() => localStorage.getItem(EMAIL_KEY) ?? '');
@@ -66,6 +87,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [lastAppliedRemoteUpdatedAt, setLastAppliedRemoteUpdatedAt] = useState('');
   const lastPushedShelfUpdatedAt = useRef('');
   const lastPushedPreferences = useRef('');
+  const queueRef = useRef(new MutationQueue());
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingShelfRef = useRef<{ shelf: NonNullable<NonNullable<typeof localState>['liveShelf']>; updatedAt: string } | null>(null);
 
   const overview = useQuery(api.sync.overview, sessionToken ? { sessionToken } : 'skip') as SyncOverview | undefined;
   const remoteShelves = useQuery(api.sync.listShelves, sessionToken ? { sessionToken } : 'skip') as
@@ -114,18 +138,94 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    void registerDeviceMutation({
-      sessionToken,
-      deviceId: localState.sync.deviceId,
-      name: navigator.userAgent.includes('Mac') ? 'Mac' : 'Desktop',
-      platform: navigator.platform || 'desktop',
-    }).catch((error: unknown) => {
-      void window.ledge.setSyncState({
-        status: 'quotaReached',
-        lastError: error instanceof Error ? error.message : 'Device sync limit reached.',
-      });
-    });
+    queueRef.current.enqueue(() =>
+      registerDeviceMutation({
+        sessionToken,
+        deviceId: localState.sync.deviceId,
+        name: navigator.userAgent.includes('Mac') ? 'Mac' : 'Desktop',
+        platform: navigator.platform || 'desktop',
+      }).catch((error: unknown) => {
+        void window.ledge.setSyncState({
+          status: 'quotaReached',
+          lastError: error instanceof Error ? error.message : 'Device sync limit reached.',
+        });
+      }),
+    );
   }, [localState?.sync.deviceId, registerDeviceMutation, sessionToken]);
+
+  const pushPendingShelf = useCallback(() => {
+    const pending = pendingShelfRef.current;
+    if (!pending || !sessionToken) {
+      return;
+    }
+
+    pendingShelfRef.current = null;
+    lastPushedShelfUpdatedAt.current = pending.updatedAt;
+
+    const cloudShelf = serializeShelfForCloud(pending.shelf);
+    queueRef.current.enqueue(() =>
+      upsertShelfMutation({
+        sessionToken,
+        shelfId: cloudShelf.id,
+        name: cloudShelf.name,
+        color: cloudShelf.color,
+        origin: cloudShelf.origin,
+        items: cloudShelf.items,
+        localCreatedAt: cloudShelf.createdAt,
+        localUpdatedAt: cloudShelf.updatedAt,
+        imageStorageBytes: estimateImportedImageStorageBytes([pending.shelf]),
+      }).catch((error: unknown) => {
+        lastPushedShelfUpdatedAt.current = '';
+        void window.ledge.setSyncState({
+          status: 'error',
+          lastError: error instanceof Error ? error.message : 'Failed to sync shelf changes.',
+        });
+      }),
+    );
+  }, [sessionToken, upsertShelfMutation]);
+
+  const pushPreferences = useCallback(() => {
+    if (!localState?.preferences || !sessionToken) {
+      return;
+    }
+
+    const serialized = JSON.stringify(localState.preferences);
+    if (lastPushedPreferences.current === serialized) {
+      return;
+    }
+
+    lastPushedPreferences.current = serialized;
+    queueRef.current.enqueue(() =>
+      patchPreferencesMutation({ sessionToken, values: localState.preferences! }).catch(() => {
+        lastPushedPreferences.current = '';
+      }),
+    );
+  }, [localState?.preferences, patchPreferencesMutation, sessionToken]);
+
+  useEffect(() => {
+    if (!sessionToken || !localState?.liveShelf || !remoteShelves) {
+      return;
+    }
+
+    const remote = remoteShelves.find((shelf) => shelf.shelfId === localState.liveShelf?.id);
+    if (!remote || Date.parse(localState.liveShelf.updatedAt) <= Date.parse(remote.localUpdatedAt)) {
+      return;
+    }
+
+    if (lastPushedShelfUpdatedAt.current === localState.liveShelf.updatedAt) {
+      return;
+    }
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    pendingShelfRef.current = { shelf: localState.liveShelf, updatedAt: localState.liveShelf.updatedAt };
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+      pushPendingShelf();
+    }, DEBOUNCE_MS);
+  }, [localState?.liveShelf, remoteShelves, sessionToken, pushPendingShelf]);
 
   useEffect(() => {
     if (!sessionToken || !remoteShelves || remoteShelves.length === 0) {
@@ -150,40 +250,6 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, [lastAppliedRemoteUpdatedAt, remoteShelves, sessionToken]);
 
   useEffect(() => {
-    if (!sessionToken || !localState?.liveShelf || !remoteShelves) {
-      return;
-    }
-
-    const remote = remoteShelves.find((shelf) => shelf.shelfId === localState.liveShelf?.id);
-    if (!remote || Date.parse(localState.liveShelf.updatedAt) <= Date.parse(remote.localUpdatedAt)) {
-      return;
-    }
-
-    if (lastPushedShelfUpdatedAt.current === localState.liveShelf.updatedAt) {
-      return;
-    }
-
-    lastPushedShelfUpdatedAt.current = localState.liveShelf.updatedAt;
-    const cloudShelf = serializeShelfForCloud(localState.liveShelf);
-    void upsertShelfMutation({
-      sessionToken,
-      shelfId: cloudShelf.id,
-      name: cloudShelf.name,
-      color: cloudShelf.color,
-      origin: cloudShelf.origin,
-      items: cloudShelf.items,
-      localCreatedAt: cloudShelf.createdAt,
-      localUpdatedAt: cloudShelf.updatedAt,
-      imageStorageBytes: estimateImportedImageStorageBytes([localState.liveShelf]),
-    }).catch((error: unknown) => {
-      void window.ledge.setSyncState({
-        status: 'error',
-        lastError: error instanceof Error ? error.message : 'Failed to sync shelf changes.',
-      });
-    });
-  }, [localState?.liveShelf, remoteShelves, sessionToken, upsertShelfMutation]);
-
-  useEffect(() => {
     if (!sessionToken || !localState?.preferences) {
       return;
     }
@@ -193,11 +259,25 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    lastPushedPreferences.current = serialized;
-    void patchPreferencesMutation({ sessionToken, values: localState.preferences }).catch(() => {
-      lastPushedPreferences.current = '';
-    });
-  }, [localState?.preferences, patchPreferencesMutation, sessionToken]);
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+      pushPreferences();
+    }, DEBOUNCE_MS);
+  }, [localState?.preferences, sessionToken, pushPreferences]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        pushPendingShelf();
+        pushPreferences();
+      }
+    };
+  }, [pushPendingShelf, pushPreferences]);
 
   const requestOtp = useCallback(
     async (nextEmail: string) => {

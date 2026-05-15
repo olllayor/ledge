@@ -13,11 +13,12 @@ export interface CloudFileRef {
   isMissing: boolean;
 }
 
-export type CloudShelfItem = Omit<ShelfItemRecord, 'file'> & {
-  file?: CloudFileRef;
-  cloudStorageId?: string;
-  cloudStorageBytes?: number;
-};
+export type CloudShelfItem =
+  | Omit<Extract<ShelfItemRecord, { kind: 'file' }>, 'file'> & { file: CloudFileRef }
+  | Omit<Extract<ShelfItemRecord, { kind: 'folder' }>, 'file'> & { file: CloudFileRef }
+  | Omit<Extract<ShelfItemRecord, { kind: 'imageAsset' }>, 'file'> & { file: CloudFileRef }
+  | Extract<ShelfItemRecord, { kind: 'text' }>
+  | (Extract<ShelfItemRecord, { kind: 'url' }> & { cloudStorageId?: string; cloudStorageBytes?: number });
 
 export interface CloudShelfRecord {
   id: string;

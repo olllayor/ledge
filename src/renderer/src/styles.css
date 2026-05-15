@@ -999,6 +999,46 @@ button {
 
 .settings-code-input {
   text-align: center;
+  letter-spacing: 0.5em;
+  font-size: 1.1rem;
+}
+
+.code-input {
+  text-align: center;
+  letter-spacing: 0.5em;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.settings-link-btn {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0.32rem 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 160ms ease;
+}
+
+.settings-link-btn:hover:not(:disabled) {
+  color: var(--ink-soft);
+}
+
+.settings-link-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.settings-cta.is-danger {
+  color: var(--danger);
+  border-color: rgba(255, 117, 103, 0.32);
+}
+
+.settings-cta.is-danger:hover {
+  background: rgba(255, 117, 103, 0.12);
+  border-color: rgba(255, 117, 103, 0.48);
 }
 
 .sync-candidate-list {

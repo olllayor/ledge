@@ -21,7 +21,6 @@ export class TrayController {
   constructor(private readonly callbacks: TrayCallbacks) {
     this.tray = new Tray(createTrayImage())
     this.tray.setIgnoreDoubleClickEvents(true)
-    this.tray.setTitle('Ledge')
     this.tray.setToolTip('Ledge')
     this.tray.on('click', () => {
       this.tray.popUpContextMenu(this.buildMenu())
@@ -107,10 +106,12 @@ function createRestoreMenuItem(shelf: ShelfRecord, onRestore: (id: string) => vo
 function createTrayImage() {
   const svg = `
     <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-      <rect x="2.2" y="9.8" width="13.6" height="3.1" rx="1.55" fill="black"/>
-      <rect x="5.3" y="4.1" width="7.4" height="4.9" rx="1.8" fill="black"/>
-      <rect x="6.7" y="5.5" width="4.6" height="0.95" rx="0.475" fill="white"/>
-      <rect x="6.25" y="10.9" width="5.5" height="0.95" rx="0.475" fill="white"/>
+      <rect x="1.5" y="11" width="15" height="5" rx="2" fill="black"/>
+      <rect x="11.5" y="5" width="4.5" height="7.5" rx="1.5" fill="black"/>
+      <rect x="2" y="2.5" width="9.5" height="9" rx="1.5" fill="black"/>
+      <rect x="3.5" y="4.5" width="5" height="0.6" rx="0.3" fill="white"/>
+      <rect x="3.5" y="6.5" width="3" height="0.6" rx="0.3" fill="white"/>
+      <rect x="3.5" y="8.5" width="4" height="0.6" rx="0.3" fill="white"/>
     </svg>
   `
 
