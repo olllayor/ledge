@@ -135,7 +135,15 @@ describe('computeShakeReady', () => {
       shakeEnabled: true,
       shakeSensitivity: 'firm',
       excludedBundleIds: ['com.apple.finder'],
-      globalShortcut: 'CommandOrControl+Shift+Space'
+      globalShortcut: 'CommandOrControl+Shift+Space',
+      hasCompletedOnboarding: false,
+      shelfInteraction: {
+        doubleClickAction: 'open',
+        shelfEdgeAction: 'dock',
+        autoCloseShelf: false,
+        snapToGrid: false,
+        autoRetract: false,
+      },
     })
 
     firstChild.stdin.write.mockImplementationOnce((chunk: string) => {

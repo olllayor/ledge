@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { z } from 'zod';
 import { IPC_CHANNELS, type LedgeAPI, type StateListener } from '@shared/ipc';
 import {
   appStateSchema,
@@ -39,6 +40,18 @@ const api: LedgeAPI = {
     return preferencesRecordSchema.parse(
       await ipcRenderer.invoke(IPC_CHANNELS.setPreferences, preferencePatchSchema.parse(patch)),
     );
+  },
+  async setSyncState(patch) {
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.setSyncState, patch));
+  },
+  async getSyncBackfillCandidates() {
+    return z.array(shelfRecordSchema).parse(await ipcRenderer.invoke(IPC_CHANNELS.getSyncBackfillCandidates));
+  },
+  async applyRemoteShelf(shelf) {
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.applyRemoteShelf, shelfRecordSchema.parse(shelf)));
+  },
+  async relinkItem(itemId) {
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.relinkItem, itemId));
   },
   async getRecentShelves() {
     return (await ipcRenderer.invoke(IPC_CHANNELS.getRecentShelves)).map((entry: unknown) =>

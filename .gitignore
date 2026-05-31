@@ -6,12 +6,12 @@ native/bin/
 native/DropShelfNativeAgent/.build/
 native/DropShelfNativeAgent/.swiftpm/
 native/LedgeNative/.build/
-native/LedgeNative/.swiftpm/
 coverage/
 .env
 .env.*
 *.log
 *.tsbuildinfo
+build/app.icns
 build/icon.icns
 build/icon.iconset/
 build/icon.png

@@ -1,4 +1,5 @@
 import { Menu, Tray, nativeImage } from 'electron'
+import { join } from 'node:path'
 import type { AppState, ShelfRecord } from '@shared/schema'
 
 interface TrayCallbacks {
@@ -23,6 +24,9 @@ export class TrayController {
     this.tray.setIgnoreDoubleClickEvents(true)
     this.tray.setToolTip('Ledge')
     this.tray.on('click', () => {
+      this.tray.popUpContextMenu(this.buildMenu())
+    })
+    this.tray.on('right-click', () => {
       this.tray.popUpContextMenu(this.buildMenu())
     })
     this.tray.on('drop-files', (_event, files) => {
@@ -101,16 +105,25 @@ function createRestoreMenuItem(shelf: ShelfRecord, onRestore: (id: string) => vo
 }
 
 function createTrayImage() {
-  const svg = `
-    <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-      <rect x="2.2" y="9.8" width="13.6" height="3.1" rx="1.55" fill="black"/>
-      <rect x="5.3" y="4.1" width="7.4" height="4.9" rx="1.8" fill="black"/>
-      <rect x="6.7" y="5.5" width="4.6" height="0.95" rx="0.475" fill="white"/>
-      <rect x="6.25" y="10.9" width="5.5" height="0.95" rx="0.475" fill="white"/>
-    </svg>
-  `
+  const resourcesDir = join(__dirname, '..', '..', 'build')
 
-  const image = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
-  image.setTemplateImage(true)
-  return image
+  // 1. Prefer the dedicated menubar icon (monochrome, pixel-fitted for 16 px)
+  const trayPath = join(resourcesDir, 'tray-icon.png')
+  const trayImage = nativeImage.createFromPath(trayPath)
+  if (!trayImage.isEmpty()) {
+    trayImage.setTemplateImage(true)
+    return trayImage
+  }
+
+  // 2. Fallback to the generic app icon (only during transition)
+  const fallbackPath = join(resourcesDir, 'icon.png')
+  const fallback = nativeImage.createFromPath(fallbackPath)
+  if (!fallback.isEmpty()) {
+    const resized = fallback.resize({ width: 16, height: 16 })
+    resized.setTemplateImage(true)
+    return resized
+  }
+
+  // 3. Ultimate fallback – Electron will supply a generic icon
+  return nativeImage.createEmpty()
 }

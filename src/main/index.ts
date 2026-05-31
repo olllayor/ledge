@@ -11,8 +11,9 @@ import {
   screen,
   shell,
 } from 'electron';
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import { basename, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IPC_CHANNELS } from '@shared/ipc';
 import {
@@ -21,6 +22,8 @@ import {
   ingestPayloadSchema,
   permissionStatusSchema,
   preferencePatchSchema,
+  shelfRecordSchema,
+  syncStatePatchSchema,
   type AppState,
   type IngestPayload,
   type PermissionStatus,
@@ -79,20 +82,36 @@ app.whenReady().then(async () => {
   }
 
   app.setName('Ledge');
-  Menu.setApplicationMenu(null);
-  protocolModule.handle(ASSET_PROTOCOL, (request) => {
+  protocolModule.handle(ASSET_PROTOCOL, async (request) => {
     const url = new URL(request.url);
     const path = url.searchParams.get('path');
 
     if (!path) {
+      console.error('[ledge] asset request missing path param');
       return new Response('Missing asset path.', { status: 400 });
     }
 
+    console.log('[ledge] asset request path:', path);
     const allowedPath = resolveAllowedAssetPath(path);
     if (!allowedPath) {
+      console.error('[ledge] asset path not allowed:', path);
       return new Response('Asset path is not allowed.', { status: 403 });
     }
 
+    console.log('[ledge] allowed path:', allowedPath);
+
+    if (extname(allowedPath).toLowerCase() === '.icns') {
+      try {
+        const pngBuffer = execFileSync('sips', ['-s', 'format', 'png', '--out', '/dev/stdout', allowedPath]);
+        return new Response(pngBuffer, {
+          headers: { 'Content-Type': 'image/png' },
+        });
+      } catch (err) {
+        console.error('[ledge] icns conversion failed:', err);
+      }
+    }
+
+    console.log('[ledge] serving raw file:', allowedPath);
     return net.fetch(pathToFileURL(allowedPath).toString());
   });
 
@@ -132,6 +151,8 @@ app.whenReady().then(async () => {
       app.quit();
     },
   });
+
+  Menu.setApplicationMenu(null);
 
   nativeAgent.on('statusChanged', () => {
     broadcastState();
@@ -182,6 +203,19 @@ function registerIpc(): void {
     broadcastState();
     return stateStore.getPreferences();
   });
+  ipcMain.handle(IPC_CHANNELS.setSyncState, async (_event, patch: unknown) => {
+    stateStore.setSyncState(syncStatePatchSchema.parse(patch));
+    return broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.getSyncBackfillCandidates, async () => stateStore.getAllShelves());
+  ipcMain.handle(IPC_CHANNELS.applyRemoteShelf, async (_event, shelf: unknown) => {
+    applyRemoteShelfSnapshot(shelfRecordSchema.parse(shelf));
+    return broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.relinkItem, async (_event, itemId: string) => {
+    await relinkItem(itemId);
+    return broadcastState();
+  });
   ipcMain.handle(IPC_CHANNELS.getRecentShelves, async () => stateStore.getRecentShelves());
   ipcMain.handle(IPC_CHANNELS.getPermissionStatus, async () => currentPermissionStatus());
   ipcMain.handle(IPC_CHANNELS.openPermissionSettings, async () => nativeAgent.openPermissionSettings());
@@ -219,6 +253,7 @@ function registerIpc(): void {
         { label: 'Quick Look', enabled: !missing, click: () => previewItem(item.id) },
         { label: 'Reveal in Finder', enabled: !missing, click: () => revealItem(item.id) },
         { label: 'Open', enabled: !missing, click: () => openItem(item.id) },
+        { label: 'Relink…', click: () => relinkItem(item.id) },
         { type: 'separator' },
         { label: 'Share', enabled: true, click: () => shareItems([item.id]) },
       );
@@ -390,6 +425,47 @@ async function createShelf(
   broadcastState();
 }
 
+function applyRemoteShelfSnapshot(remoteShelf: ShelfRecord): void {
+  const liveShelf = stateStore.getLiveShelf()
+  if (!liveShelf || liveShelf.id === remoteShelf.id) {
+    if (!liveShelf || Date.parse(remoteShelf.updatedAt) > Date.parse(liveShelf.updatedAt)) {
+      stateStore.replaceLiveShelf(sanitizeRemoteFileRefs(remoteShelf))
+    }
+    return
+  }
+
+  const recentShelf = stateStore.getRecentShelves().find((shelf) => shelf.id === remoteShelf.id)
+  if (!recentShelf) {
+    return
+  }
+
+  if (Date.parse(remoteShelf.updatedAt) > Date.parse(recentShelf.updatedAt)) {
+    stateStore.replaceRecentShelf(sanitizeRemoteFileRefs(remoteShelf))
+  }
+}
+
+function sanitizeRemoteFileRefs(shelf: ShelfRecord): ShelfRecord {
+  return {
+    ...shelf,
+    items: shelf.items.map((item) => {
+      if (!isFileBackedItem(item)) {
+        return item
+      }
+
+      return {
+        ...item,
+        file: {
+          ...item.file,
+          bookmarkBase64: '',
+          resolvedPath: '',
+          isMissing: false,
+          isStale: true
+        }
+      }
+    })
+  }
+}
+
 async function restoreShelf(id: string): Promise<AppState> {
   const shelf = stateStore.restoreShelf(id);
   if (!shelf) {
@@ -419,6 +495,35 @@ async function restoreShelf(id: string): Promise<AppState> {
   shelfWindow.resetPosition();
   await shelfWindow.showNear(currentCursorPoint(), false);
   return broadcastState();
+}
+
+async function relinkItem(itemId: string): Promise<boolean> {
+  const item = liveShelfItems().find((entry) => entry.id === itemId)
+  if (!item || !isFileBackedItem(item)) {
+    return false
+  }
+
+  const browserWindow = shelfWindow.getBrowserWindow() ?? preferencesWindow.getBrowserWindow()
+  const properties: Electron.OpenDialogOptions['properties'] = item.kind === 'folder'
+    ? ['openDirectory']
+    : ['openFile']
+  const result = browserWindow
+    ? await dialog.showOpenDialog(browserWindow, { properties })
+    : await dialog.showOpenDialog({ properties })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return false
+  }
+
+  const selectedPath = result.filePaths[0]
+  const bookmarkBase64 = await nativeAgent.createBookmark(selectedPath)
+  stateStore.relinkFileBackedItem(itemId, {
+    originalPath: selectedPath,
+    resolvedPath: selectedPath,
+    bookmarkBase64
+  })
+  broadcastState()
+  return true
 }
 
 async function addPayloadsToLiveShelf(
@@ -793,6 +898,8 @@ function startNativeDrag(webContents: Electron.WebContents, paths: string[]): vo
 function dragIconImage(paths: string[]) {
   const iconCandidates = [
     ...paths,
+    join(app.getAppPath(), 'build', 'app.icns'),
+    join(process.resourcesPath, 'app.icns'),
     join(app.getAppPath(), 'build', 'icon.png'),
     join(process.resourcesPath, 'icon.png'),
   ];
