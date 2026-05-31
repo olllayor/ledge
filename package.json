@@ -73,7 +73,7 @@
       }
     ],
     "mac": {
-      "icon": "build/icon.icns",
+      "icon": "build/app.icns",
       "category": "public.app-category.productivity",
       "target": [
         "dmg",

@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 
 export const FREE_SYNC_SHELF_LIMIT = 10;
 export const FREE_SYNC_DEVICE_LIMIT = 1;
@@ -13,6 +13,14 @@ export const sessionArgs = {
 };
 
 export async function requireUser(ctx: QueryCtx | MutationCtx, sessionToken: string): Promise<Id<"users">> {
+  const { userId } = await requireUserWithSession(ctx, sessionToken);
+  return userId;
+}
+
+export async function requireUserWithSession(
+  ctx: QueryCtx | MutationCtx,
+  sessionToken: string,
+): Promise<{ userId: Id<"users">; session: Doc<"authSessions"> }> {
   const tokenHash = await sha256(sessionToken);
   const session = await ctx.db
     .query("authSessions")
@@ -23,7 +31,7 @@ export async function requireUser(ctx: QueryCtx | MutationCtx, sessionToken: str
     throw new ConvexError("Authentication required.");
   }
 
-  return session.userId;
+  return { userId: session.userId, session };
 }
 
 export async function currentPlan(ctx: QueryCtx | MutationCtx, userId: Id<"users">): Promise<"free" | "pro"> {

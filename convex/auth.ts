@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { requireUser, sessionArgs, sha256 } from "./model";
+import { requireUserWithSession, sessionArgs, sha256 } from "./model";
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -9,9 +9,19 @@ const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export const me = query({
   args: sessionArgs,
   handler: async (ctx, args) => {
-    const userId = await requireUser(ctx, args.sessionToken);
+    const { userId, session } = await requireUserWithSession(ctx, args.sessionToken);
     const user = await ctx.db.get(userId);
-    return user ? { userId, email: user.email } : null;
+    if (!user) return null;
+
+    const now = Date.now();
+    const daysUntilExpiry = Math.floor((session.expiresAt - now) / (24 * 60 * 60 * 1000));
+
+    return {
+      userId,
+      email: user.email,
+      sessionExpiresAt: session.expiresAt,
+      sessionDaysRemaining: daysUntilExpiry,
+    };
   },
 });
 
@@ -133,6 +143,16 @@ export const signOut = mutation({
       await ctx.db.patch(session._id, { revokedAt: Date.now() });
     }
     return { ok: true };
+  },
+});
+
+export const refreshSession = mutation({
+  args: sessionArgs,
+  handler: async (ctx, args) => {
+    const { session } = await requireUserWithSession(ctx, args.sessionToken);
+    const newExpiresAt = Date.now() + SESSION_TTL_MS;
+    await ctx.db.patch(session._id, { expiresAt: newExpiresAt });
+    return { ok: true, expiresAt: newExpiresAt };
   },
 });
 

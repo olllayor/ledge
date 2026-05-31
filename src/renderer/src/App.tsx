@@ -1,5 +1,7 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { ShelfView } from './components/ShelfView';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { OnboardingView } from './components/OnboardingView';
 import { useLedgeState } from './hooks/useLedgeState';
 
 const PreferencesView = lazy(() =>
@@ -8,6 +10,9 @@ const PreferencesView = lazy(() =>
 
 export function App() {
   const { state, error } = useLedgeState();
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => state && !state.preferences.hasCompletedOnboarding,
+  );
   const view = new URLSearchParams(window.location.search).get('view') ?? 'shelf';
 
   if (error) {
@@ -32,6 +37,10 @@ export function App() {
     );
   }
 
+  if (showOnboarding && view === 'shelf') {
+    return <OnboardingView state={state} onComplete={() => setShowOnboarding(false)} />;
+  }
+
   if (view === 'preferences') {
     return (
       <Suspense
@@ -44,10 +53,16 @@ export function App() {
           </main>
         }
       >
-        <PreferencesView state={state} />
+        <ErrorBoundary>
+          <PreferencesView state={state} />
+        </ErrorBoundary>
       </Suspense>
     );
   }
 
-  return <ShelfView state={state} />;
+  return (
+    <ErrorBoundary>
+      <ShelfView state={state} />
+    </ErrorBoundary>
+  );
 }

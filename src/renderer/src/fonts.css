@@ -1,0 +1,12 @@
+/**
+ * Satoshi by Indian Type Foundry | https://www.fontshare.com/fonts/satoshi
+ * © 2023 Indian Type Foundry. Licensed under the Fontshare Free Font License.
+ */
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('/fonts/Satoshi-Variable.woff2') format('woff2');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}

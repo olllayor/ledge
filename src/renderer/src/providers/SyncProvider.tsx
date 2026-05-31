@@ -9,9 +9,11 @@ interface SyncContextValue {
   sessionToken: string;
   email: string;
   overview: SyncOverview | null;
+  sessionDaysRemaining: number | null;
   requestOtp(email: string): Promise<void>;
   verifyOtp(email: string, code: string): Promise<void>;
   signOut(): Promise<void>;
+  refreshSession(): Promise<void>;
   loadBackfillCandidates(): Promise<ShelfRecord[]>;
   syncSelectedShelves(shelfIds: string[]): Promise<void>;
   refreshEntitlements(input: { licenseKey?: string; orderId?: string }): Promise<void>;
@@ -48,9 +50,11 @@ const SyncContext = createContext<SyncContextValue>({
   sessionToken: '',
   email: '',
   overview: null,
+  sessionDaysRemaining: null,
   requestOtp: noop,
   verifyOtp: noop,
   signOut: noop,
+  refreshSession: noop,
   loadBackfillCandidates: async () => [],
   syncSelectedShelves: noop,
   refreshEntitlements: noop,
@@ -95,13 +99,20 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const remoteShelves = useQuery(api.sync.listShelves, sessionToken ? { sessionToken } : 'skip') as
     | RemoteShelf[]
     | undefined;
+  const sessionInfo = useQuery(api.auth.me, sessionToken ? { sessionToken } : 'skip') as
+    | { sessionDaysRemaining: number }
+    | undefined
+    | null;
   const requestOtpAction = useAction(api.auth.requestOtp);
   const verifyOtpMutation = useMutation(api.auth.verifyOtp);
   const signOutMutation = useMutation(api.auth.signOut);
+  const refreshSessionMutation = useMutation(api.auth.refreshSession);
   const registerDeviceMutation = useMutation(api.sync.registerDevice);
   const upsertShelfMutation = useMutation(api.sync.upsertShelf);
   const patchPreferencesMutation = useMutation(api.sync.patchPreferences);
   const refreshEntitlementsAction = useAction(api.billing.refreshEntitlements);
+
+  const sessionDaysRemaining = sessionInfo ? sessionInfo.sessionDaysRemaining : null;
 
   useEffect(() => {
     void window.ledge.getState().then(setLocalState);
@@ -308,6 +319,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     await window.ledge.setSyncState({ enabled: false, status: 'signedOut', signedInEmail: undefined });
   }, [sessionToken, signOutMutation]);
 
+  const refreshSession = useCallback(async () => {
+    if (!sessionToken) return;
+    await refreshSessionMutation({ sessionToken });
+  }, [sessionToken, refreshSessionMutation]);
+
   const loadBackfillCandidates = useCallback(async () => {
     return await window.ledge.getSyncBackfillCandidates();
   }, []);
@@ -366,9 +382,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       sessionToken,
       email,
       overview: overview ?? null,
+      sessionDaysRemaining,
       requestOtp,
       verifyOtp,
       signOut,
+      refreshSession,
       loadBackfillCandidates,
       syncSelectedShelves,
       refreshEntitlements,
@@ -378,7 +396,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       loadBackfillCandidates,
       overview,
       refreshEntitlements,
+      refreshSession,
       requestOtp,
+      sessionDaysRemaining,
       sessionToken,
       signOut,
       syncSelectedShelves,

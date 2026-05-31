@@ -11,8 +11,9 @@ import {
   screen,
   shell,
 } from 'electron';
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import { basename, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { IPC_CHANNELS } from '@shared/ipc';
 import {
@@ -81,20 +82,36 @@ app.whenReady().then(async () => {
   }
 
   app.setName('Ledge');
-  Menu.setApplicationMenu(null);
-  protocolModule.handle(ASSET_PROTOCOL, (request) => {
+  protocolModule.handle(ASSET_PROTOCOL, async (request) => {
     const url = new URL(request.url);
     const path = url.searchParams.get('path');
 
     if (!path) {
+      console.error('[ledge] asset request missing path param');
       return new Response('Missing asset path.', { status: 400 });
     }
 
+    console.log('[ledge] asset request path:', path);
     const allowedPath = resolveAllowedAssetPath(path);
     if (!allowedPath) {
+      console.error('[ledge] asset path not allowed:', path);
       return new Response('Asset path is not allowed.', { status: 403 });
     }
 
+    console.log('[ledge] allowed path:', allowedPath);
+
+    if (extname(allowedPath).toLowerCase() === '.icns') {
+      try {
+        const pngBuffer = execFileSync('sips', ['-s', 'format', 'png', '--out', '/dev/stdout', allowedPath]);
+        return new Response(pngBuffer, {
+          headers: { 'Content-Type': 'image/png' },
+        });
+      } catch (err) {
+        console.error('[ledge] icns conversion failed:', err);
+      }
+    }
+
+    console.log('[ledge] serving raw file:', allowedPath);
     return net.fetch(pathToFileURL(allowedPath).toString());
   });
 
@@ -134,6 +151,8 @@ app.whenReady().then(async () => {
       app.quit();
     },
   });
+
+  Menu.setApplicationMenu(null);
 
   nativeAgent.on('statusChanged', () => {
     broadcastState();
@@ -410,7 +429,7 @@ function applyRemoteShelfSnapshot(remoteShelf: ShelfRecord): void {
   const liveShelf = stateStore.getLiveShelf()
   if (!liveShelf || liveShelf.id === remoteShelf.id) {
     if (!liveShelf || Date.parse(remoteShelf.updatedAt) > Date.parse(liveShelf.updatedAt)) {
-      stateStore.replaceLiveShelf(markRemoteFileRefsUnavailable(remoteShelf))
+      stateStore.replaceLiveShelf(sanitizeRemoteFileRefs(remoteShelf))
     }
     return
   }
@@ -421,11 +440,11 @@ function applyRemoteShelfSnapshot(remoteShelf: ShelfRecord): void {
   }
 
   if (Date.parse(remoteShelf.updatedAt) > Date.parse(recentShelf.updatedAt)) {
-    stateStore.replaceRecentShelf(markRemoteFileRefsUnavailable(remoteShelf))
+    stateStore.replaceRecentShelf(sanitizeRemoteFileRefs(remoteShelf))
   }
 }
 
-function markRemoteFileRefsUnavailable(shelf: ShelfRecord): ShelfRecord {
+function sanitizeRemoteFileRefs(shelf: ShelfRecord): ShelfRecord {
   return {
     ...shelf,
     items: shelf.items.map((item) => {
@@ -439,7 +458,8 @@ function markRemoteFileRefsUnavailable(shelf: ShelfRecord): ShelfRecord {
           ...item.file,
           bookmarkBase64: '',
           resolvedPath: '',
-          isMissing: true
+          isMissing: false,
+          isStale: true
         }
       }
     })
@@ -878,6 +898,8 @@ function startNativeDrag(webContents: Electron.WebContents, paths: string[]): vo
 function dragIconImage(paths: string[]) {
   const iconCandidates = [
     ...paths,
+    join(app.getAppPath(), 'build', 'app.icns'),
+    join(process.resourcesPath, 'app.icns'),
     join(app.getAppPath(), 'build', 'icon.png'),
     join(process.resourcesPath, 'icon.png'),
   ];

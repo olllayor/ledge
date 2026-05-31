@@ -11,6 +11,7 @@ coverage/
 .env.*
 *.log
 *.tsbuildinfo
+build/app.icns
 build/icon.icns
 build/icon.iconset/
 build/icon.png

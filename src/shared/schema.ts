@@ -73,12 +73,28 @@ export const shelfRecordSchema = z.object({
   items: z.array(shelfItemSchema),
 });
 
+export const shelfInteractionSchema = z.object({
+  doubleClickAction: z.enum(['open', 'reveal']).default('open'),
+  shelfEdgeAction: z.enum(['dock', 'close']).default('dock'),
+  autoCloseShelf: z.boolean().default(false),
+  snapToGrid: z.boolean().default(false),
+  autoRetract: z.boolean().default(false),
+});
+
 export const preferencesRecordSchema = z.object({
   launchAtLogin: z.boolean().default(false),
   shakeEnabled: z.boolean().default(true),
   shakeSensitivity: shakeSensitivitySchema.default('balanced'),
   excludedBundleIds: z.array(z.string()).default([]),
   globalShortcut: z.string().default('CommandOrControl+Shift+Space'),
+  hasCompletedOnboarding: z.boolean().default(false),
+  shelfInteraction: shelfInteractionSchema.default({
+    doubleClickAction: 'open',
+    shelfEdgeAction: 'dock',
+    autoCloseShelf: false,
+    snapToGrid: false,
+    autoRetract: false,
+  }),
 });
 
 export const permissionStatusSchema = z.object({
