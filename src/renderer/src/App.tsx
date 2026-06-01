@@ -49,28 +49,32 @@ export function App() {
 
   if (view === 'preferences') {
     return (
-      <Suspense
-        fallback={
-          <main className="loading-shell">
-            <div className="loading-card">
-              <p className="eyebrow">Ledge</p>
-              <p>Loading preferences…</p>
-            </div>
-          </main>
-        }
-      >
-        <ErrorBoundary>
-          <PreferencesView state={state} />
-          <ToastHost />
-        </ErrorBoundary>
-      </Suspense>
+      <>
+        <Suspense
+          fallback={
+            <main className="loading-shell">
+              <div className="loading-card">
+                <p className="eyebrow">Ledge</p>
+                <p>Loading preferences…</p>
+              </div>
+            </main>
+          }
+        >
+          <ErrorBoundary>
+            <PreferencesView state={state} />
+          </ErrorBoundary>
+        </Suspense>
+        <ToastHost />
+      </>
     );
   }
 
   return (
-    <ErrorBoundary>
-      <ShelfView state={state} />
+    <>
+      <ErrorBoundary>
+        <ShelfView state={state} />
+      </ErrorBoundary>
       <ToastHost />
-    </ErrorBoundary>
+    </>
   );
 }
