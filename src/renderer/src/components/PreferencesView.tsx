@@ -279,7 +279,7 @@ function ShelfSettings({ state, showToast }: { state: AppState; showToast(msg: s
               : `${plan.recentShelvesUsed} of ${plan.recentShelvesLimit} slots used. Older shelves are dropped first.`
           }
           trailing={
-            atRecentsCap ? (
+            atRecentsCap && !isPro ? (
               <button
                 className="settings-cta-small"
                 type="button"

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { z } from 'zod';
-import { IPC_CHANNELS, type LedgeAPI, type StateListener, type ToastKind, type ToastPayload } from '@shared/ipc';
+import { IPC_CHANNELS, toastPayloadSchema, type LedgeAPI, type StateListener, type ToastKind } from '@shared/ipc';
 import {
   appStateSchema,
   createShelfInputSchema,
@@ -111,7 +111,7 @@ const api: LedgeAPI = {
   },
   onToast(listener) {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-      const parsed = (payload ?? {}) as ToastPayload;
+      const parsed = toastPayloadSchema.parse(payload ?? {});
       listener(parsed);
     };
     ipcRenderer.on(IPC_CHANNELS.showToast, wrapped);

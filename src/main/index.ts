@@ -328,12 +328,10 @@ function registerIpc(): void {
     return true;
   });
 
-  ipcMain.on(IPC_CHANNELS.showToast, (event, message: string, kind: ToastKind = 'info') => {
+  ipcMain.on(IPC_CHANNELS.showToast, (_event, message: string, kind: ToastKind = 'info') => {
     const payload: ToastPayload = { message, kind };
     for (const window of BrowserWindow.getAllWindows()) {
-      if (window.webContents.id !== event.sender.id) {
-        window.webContents.send(IPC_CHANNELS.showToast, payload);
-      }
+      window.webContents.send(IPC_CHANNELS.showToast, payload);
     }
   });
 

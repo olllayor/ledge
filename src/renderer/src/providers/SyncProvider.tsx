@@ -301,8 +301,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     };
   }, [pushPendingShelf, pushPreferences]);
 
+  const hasSeenShelfLimitMigration = localState?.preferences?.hasSeenShelfLimitMigration ?? true;
+
   useEffect(() => {
-    if (!sessionToken || !overview || !localState) {
+    if (!sessionToken || !overview) {
       return;
     }
 
@@ -310,7 +312,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (localState.preferences.hasSeenShelfLimitMigration) {
+    if (hasSeenShelfLimitMigration) {
       return;
     }
 
@@ -319,7 +321,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       'info',
     );
     void window.ledge.setPreferences({ hasSeenShelfLimitMigration: true });
-  }, [overview, localState, sessionToken]);
+  }, [overview, hasSeenShelfLimitMigration, sessionToken]);
 
   const requestOtp = useCallback(
     async (nextEmail: string) => {

@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react';
 import { ShelfView } from './components/ShelfView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OnboardingView } from './components/OnboardingView';
+import { ToastHost } from './components/ToastHost';
 import { useLedgeState } from './hooks/useLedgeState';
 
 const PreferencesView = lazy(() =>
@@ -38,7 +39,12 @@ export function App() {
   }
 
   if (showOnboarding && view === 'shelf') {
-    return <OnboardingView state={state} onComplete={() => setShowOnboarding(false)} />;
+    return (
+      <>
+        <OnboardingView state={state} onComplete={() => setShowOnboarding(false)} />
+        <ToastHost />
+      </>
+    );
   }
 
   if (view === 'preferences') {
@@ -55,6 +61,7 @@ export function App() {
       >
         <ErrorBoundary>
           <PreferencesView state={state} />
+          <ToastHost />
         </ErrorBoundary>
       </Suspense>
     );
@@ -63,6 +70,7 @@ export function App() {
   return (
     <ErrorBoundary>
       <ShelfView state={state} />
+      <ToastHost />
     </ErrorBoundary>
   );
 }

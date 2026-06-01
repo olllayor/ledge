@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type {
   AppState,
   CreateShelfInput,
@@ -45,10 +46,12 @@ export const IPC_CHANNELS = {
 
 export type ToastKind = 'success' | 'error' | 'info';
 
-export interface ToastPayload {
-  message: string;
-  kind: ToastKind;
-}
+export const toastPayloadSchema = z.object({
+  message: z.string(),
+  kind: z.enum(['success', 'error', 'info']),
+});
+
+export type ToastPayload = z.infer<typeof toastPayloadSchema>;
 
 export type StateListener = (state: AppState) => void;
 
