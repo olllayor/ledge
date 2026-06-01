@@ -8,6 +8,7 @@ import {
   preferencesRecordSchema,
   syncStateSchema,
   type AppState,
+  type BillingPlan,
   type PermissionStatus,
   type PreferencePatch,
   type PreferencesRecord,
@@ -18,6 +19,7 @@ import {
   type SyncState,
   type SyncStatePatch
 } from '@shared/schema'
+import { recentShelvesLimitForPlan, shelfColorsForPlan } from '@shared/sync'
 
 const persistedStateSchema = appStateSchema.omit({ permissionStatus: true })
 const persistedStateEnvelopeV1Schema = appStateSchema.omit({ permissionStatus: true, sync: true }).extend({
@@ -110,7 +112,7 @@ export class StateStore {
     this.persisted.liveShelf = {
       id: randomUUID(),
       name: defaultShelfName(),
-      color: nextShelfColor(this.persisted.recentShelves.length),
+      color: nextShelfColor(this.persisted.recentShelves.length, this.currentPlan()),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       origin,
@@ -248,8 +250,20 @@ export class StateStore {
       ...this.persisted.sync,
       ...patch
     })
+    this.applyPlanLimits()
     this.save()
     return this.persisted.sync
+  }
+
+  currentPlan(): BillingPlan {
+    return this.persisted.sync.plan
+  }
+
+  private applyPlanLimits(): void {
+    const recentsLimit = recentShelvesLimitForPlan(this.currentPlan())
+    if (this.persisted.recentShelves.length > recentsLimit) {
+      this.persisted.recentShelves = this.persisted.recentShelves.slice(0, recentsLimit)
+    }
   }
 
   relinkFileBackedItem(itemId: string, fileRef: Pick<FileRef, 'originalPath' | 'bookmarkBase64' | 'resolvedPath'>): ShelfRecord | null {
@@ -291,7 +305,8 @@ export class StateStore {
     // Empty shelves are transient workspace, not recent history.
     if (liveShelf.items.length > 0) {
       const existing = this.persisted.recentShelves.filter((entry) => entry.id !== liveShelf.id)
-      this.persisted.recentShelves = [liveShelf, ...existing].slice(0, 10)
+      const recentsLimit = recentShelvesLimitForPlan(this.currentPlan())
+      this.persisted.recentShelves = [liveShelf, ...existing].slice(0, recentsLimit)
     }
 
     this.persisted.liveShelf = null
@@ -401,7 +416,7 @@ function defaultShelfName(): string {
   return `Shelf ${time}`
 }
 
-function nextShelfColor(seed: number): ShelfRecord['color'] {
-  const colors: ShelfRecord['color'][] = ['ember', 'wave', 'forest', 'sand']
+function nextShelfColor(seed: number, plan: BillingPlan): ShelfRecord['color'] {
+  const colors = shelfColorsForPlan(plan)
   return colors[seed % colors.length]
 }

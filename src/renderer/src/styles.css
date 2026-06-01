@@ -1559,6 +1559,23 @@ button {
   text-align: center;
 }
 
+.pro-plan-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pro-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pref-text-tertiary);
+}
+
 .pro-price {
   margin: 0 0 6px;
   font-size: 28px;
@@ -1567,11 +1584,86 @@ button {
   color: var(--pref-text);
 }
 
+.pro-price-suffix {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--pref-text-secondary);
+  letter-spacing: 0;
+}
+
 .pro-copy {
-  margin: 0;
+  margin: 0 auto 16px;
+  max-width: 320px;
   font-size: 13px;
   color: var(--pref-text-secondary);
-  line-height: 1.4;
+  line-height: 1.45;
+}
+
+.settings-cta.pro-cta {
+  display: inline-block;
+  min-width: 200px;
+}
+
+/* ── Pro Compare Grid ── */
+
+.pro-compare {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--pref-divider);
+}
+
+.pro-compare-head,
+.pro-compare-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  align-items: center;
+  padding: 10px 14px;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.pro-compare-head {
+  background: var(--pref-sidebar-hover);
+  color: var(--pref-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--pref-divider);
+}
+
+.pro-compare-row + .pro-compare-row {
+  border-top: 1px solid var(--pref-divider);
+}
+
+.pro-compare-label {
+  color: var(--pref-text);
+  font-weight: 500;
+}
+
+.pro-compare-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pref-text-secondary);
+}
+
+.pro-compare-cell.is-pro {
+  color: var(--pref-text);
+  font-weight: 500;
+}
+
+.pro-compare-cell.is-pro svg {
+  width: 14px;
+  height: 14px;
+  color: var(--pref-success);
+  flex: none;
+}
+
+.pro-compare-col.is-pro {
+  color: var(--pref-accent);
 }
 
 /* ── Code Input ── */
@@ -2204,6 +2296,127 @@ textarea.pref-input {
   .empty-state-doc {
     animation: none;
   }
+}
+
+/* ── Pro upgrade prompts ─────────────────────────────────────── */
+
+.pro-upgrade-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  margin: 6px 0 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pro-upgrade-prompt-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.pro-upgrade-prompt-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.pro-upgrade-prompt-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pro-upgrade-prompt-message {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+
+.pro-upgrade-prompt-cta {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.pro-upgrade-prompt-cta:hover {
+  text-decoration: underline;
+}
+
+.pro-upgrade-prompt-cta:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.pro-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px 2px 5px;
+  background: linear-gradient(135deg, var(--accent), #5e5ce6);
+  color: #fff;
+  border-radius: 4px;
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
+.pro-badge svg {
+  width: 9px;
+  height: 9px;
+}
+
+.pro-feature-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pro-feature-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: var(--ink-soft);
+}
+
+.pro-feature-list li svg {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.settings-row-title-row {
+  display: inline-flex;
+  align-items: center;
+}
+
+.toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 

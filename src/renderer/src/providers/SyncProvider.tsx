@@ -200,6 +200,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (overview?.plan !== 'pro') {
+      return;
+    }
+
     const serialized = JSON.stringify(localState.preferences);
     if (lastPushedPreferences.current === serialized) {
       return;
@@ -207,11 +211,18 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
     lastPushedPreferences.current = serialized;
     queueRef.current.enqueue(() =>
-      patchPreferencesMutation({ sessionToken, values: localState.preferences! }).catch(() => {
+      patchPreferencesMutation({ sessionToken, values: localState.preferences! }).catch((error: unknown) => {
         lastPushedPreferences.current = '';
+        const message = error instanceof Error ? error.message : '';
+        if (message.includes('Pro')) {
+          window.ledge.showToast(
+            'Preferences sync is a Pro feature. Upgrade in Preferences → Ledge Pro.',
+            'info',
+          );
+        }
       }),
     );
-  }, [localState?.preferences, patchPreferencesMutation, sessionToken]);
+  }, [localState?.preferences, overview?.plan, patchPreferencesMutation, sessionToken]);
 
   useEffect(() => {
     if (!sessionToken || !localState?.liveShelf || !remoteShelves) {
@@ -289,6 +300,26 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [pushPendingShelf, pushPreferences]);
+
+  useEffect(() => {
+    if (!sessionToken || !overview || !localState) {
+      return;
+    }
+
+    if (overview.plan !== 'free') {
+      return;
+    }
+
+    if (localState.preferences.hasSeenShelfLimitMigration) {
+      return;
+    }
+
+    window.ledge.showToast(
+      "We've increased your free limit to 100 shelves.",
+      'info',
+    );
+    void window.ledge.setPreferences({ hasSeenShelfLimitMigration: true });
+  }, [overview, localState, sessionToken]);
 
   const requestOtp = useCallback(
     async (nextEmail: string) => {

@@ -1,5 +1,6 @@
 import {
   app,
+  BrowserWindow,
   clipboard,
   dialog,
   globalShortcut,
@@ -15,7 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { IPC_CHANNELS } from '@shared/ipc';
+import { IPC_CHANNELS, type ToastKind, type ToastPayload } from '@shared/ipc';
 import {
   appStateSchema,
   createShelfInputSchema,
@@ -325,6 +326,15 @@ function registerIpc(): void {
     const menu = Menu.buildFromTemplate(template);
     menu.popup({ window: shelfWindow.getBrowserWindow() ?? undefined });
     return true;
+  });
+
+  ipcMain.on(IPC_CHANNELS.showToast, (event, message: string, kind: ToastKind = 'info') => {
+    const payload: ToastPayload = { message, kind };
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.webContents.id !== event.sender.id) {
+        window.webContents.send(IPC_CHANNELS.showToast, payload);
+      }
+    }
   });
 
   ipcMain.on(IPC_CHANNELS.startItemDrag, (event, itemId: string) => {

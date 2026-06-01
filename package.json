@@ -32,11 +32,13 @@
     "convex:codegen": "convex codegen"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@electron/asar": "3.4.1",
     "@types/node": "25.5.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.2.0",
+    "convex-test": "^0.0.53",
     "electron": "41.2.0",
     "electron-builder": "26.9.0",
     "electron-vite": "5.0.0",

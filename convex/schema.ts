@@ -60,6 +60,7 @@ const preferencesValues = v.object({
   shakeSensitivity: v.union(v.literal("gentle"), v.literal("balanced"), v.literal("firm")),
   excludedBundleIds: v.array(v.string()),
   globalShortcut: v.string(),
+  hasSeenShelfLimitMigration: v.boolean(),
 });
 
 export default defineSchema({

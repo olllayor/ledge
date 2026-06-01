@@ -172,4 +172,121 @@ describe('StateStore', () => {
       }
     })
   })
+
+  it('cycles only free shelf colors for free plans', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dropshelf-free-colors-'))
+    tempDirs.push(dir)
+    const store = new StateStore(dir)
+
+    const colors = Array.from({ length: 6 }, () => {
+      const shelf = store.createShelf('manual')
+      store.appendItems([
+        {
+          id: randomId(),
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          order: 0,
+          title: 't',
+          subtitle: '',
+          preview: { summary: 't', detail: '' },
+          text: 't'
+        }
+      ])
+      store.closeShelf()
+      return shelf.color
+    })
+
+    expect(colors.every((color) => color === 'ember' || color === 'wave')).toBe(true)
+  })
+
+  it('cycles pro shelf colors when the plan is pro', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dropshelf-pro-colors-'))
+    tempDirs.push(dir)
+    const store = new StateStore(dir)
+    store.setSyncState({ plan: 'pro' })
+
+    const colors = Array.from({ length: 8 }, () => {
+      const shelf = store.createShelf('manual')
+      store.appendItems([
+        {
+          id: randomId(),
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          order: 0,
+          title: 't',
+          subtitle: '',
+          preview: { summary: 't', detail: '' },
+          text: 't'
+        }
+      ])
+      store.closeShelf()
+      return shelf.color
+    })
+
+    const palette = new Set(colors)
+    expect(palette.size).toBeGreaterThan(2)
+    expect(palette.has('forest') || palette.has('sand')).toBe(true)
+  })
+
+  it('caps recent shelves at the plan limit', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dropshelf-free-recents-'))
+    tempDirs.push(dir)
+    const store = new StateStore(dir)
+
+    for (let i = 0; i < 5; i++) {
+      const shelf = store.createShelf('manual')
+      store.appendItems([
+        {
+          id: randomId(),
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          order: 0,
+          title: `t${i}`,
+          subtitle: '',
+          preview: { summary: 't', detail: '' },
+          text: 't'
+        }
+      ])
+      store.closeShelf()
+      void shelf
+    }
+
+    expect(store.getRecentShelves()).toHaveLength(3)
+  })
+
+  it('trims existing recents when the plan downgrades to free', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dropshelf-downgrade-'))
+    tempDirs.push(dir)
+    const store = new StateStore(dir)
+    store.setSyncState({ plan: 'pro' })
+
+    for (let i = 0; i < 6; i++) {
+      const shelf = store.createShelf('manual')
+      store.appendItems([
+        {
+          id: randomId(),
+          kind: 'text',
+          createdAt: new Date().toISOString(),
+          order: 0,
+          title: `t${i}`,
+          subtitle: '',
+          preview: { summary: 't', detail: '' },
+          text: 't'
+        }
+      ])
+      store.closeShelf()
+      void shelf
+    }
+
+    expect(store.getRecentShelves()).toHaveLength(6)
+
+    store.setSyncState({ plan: 'free' })
+    expect(store.getRecentShelves()).toHaveLength(3)
+  })
 })
+
+let counter = 0
+function randomId(): string {
+  counter += 1
+  return `id-${counter}-${Date.now().toString(36)}`
+}
