@@ -73,7 +73,7 @@
       }
     ],
     "mac": {
-      "icon": "build/icon.icns",
+      "icon": "build/app.icns",
       "category": "public.app-category.productivity",
       "target": [
         "dmg",
@@ -100,6 +100,8 @@
     "nodeGypRebuild": false
   },
   "dependencies": {
-    "convex": "^1.38.0"
+    "clsx": "^2.1.1",
+    "convex": "^1.38.0",
+    "tailwind-merge": "^3.6.0"
   }
 }

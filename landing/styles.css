@@ -1,3 +1,15 @@
+/**
+ * Satoshi by Indian Type Foundry | https://www.fontshare.com/fonts/satoshi
+ * © 2023 Indian Type Foundry. Licensed under the Fontshare Free Font License.
+ */
+@font-face {
+  font-family: 'Satoshi';
+  src: url('/assets/fonts/Satoshi-Variable.woff2') format('woff2');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   --ink: #241b14;
@@ -13,8 +25,8 @@
   --blue: #4f8cff;
   --green: #56b886;
   --shadow: 0 28px 80px rgba(83, 58, 37, 0.18);
-  --display: "Avenir Next", "Trebuchet MS", sans-serif;
-  --body: Charter, "Iowan Old Style", Georgia, serif;
+  --display: 'Satoshi', sans-serif;
+  --body: 'Satoshi', sans-serif;
 }
 
 * {
@@ -34,6 +46,7 @@ body {
     linear-gradient(135deg, #fbf4eb 0%, #ead8c3 100%);
   color: var(--ink);
   font-family: var(--body);
+  font-synthesis: none;
   overflow-x: hidden;
 }
 

@@ -11,7 +11,10 @@ coverage/
 .env.*
 *.log
 *.tsbuildinfo
+build/app.icns
 build/icon.icns
 build/icon.iconset/
 build/icon.png
-.codex/
+.codex/*
+!.codex/environments/
+!.codex/environments/environment.toml

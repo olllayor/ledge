@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 const repoRoot = resolve(import.meta.dirname, '..')
 const targets = [
   'out',
+  'build/app.icns',
   'build/icon.icns',
   'build/icon.iconset',
   'build/icon.png',

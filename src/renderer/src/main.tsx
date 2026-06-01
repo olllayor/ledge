@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { ConvexProvider, ConvexReactClient } from 'convex/react'
 import { App } from './App'
 import { SyncProvider } from './providers/SyncProvider'
+import './fonts.css'
 import './styles.css'
 
 const container = document.getElementById('root')

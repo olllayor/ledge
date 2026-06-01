@@ -1,5 +1,6 @@
 /**
  * PreferencesIcons.tsx — Icons used only by the preferences view.
+ * SF Symbols-inspired, 24x24 viewBox, strokeWidth 2.
  */
 
 /** Sparkles — Shelf Interaction */
@@ -112,14 +113,144 @@ export function IconApp() {
       viewBox="0 0 24 24"
       aria-hidden="true"
       fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      {/* Background rounded square */}
+      <rect x="2" y="2" width="20" height="20" rx="5" fill="#E8D5C0" />
+      {/* Shelf bar */}
+      <rect x="5" y="15" width="14" height="4" rx="2" fill="#3A3029" />
+      {/* Card */}
+      <rect x="8" y="6" width="8" height="8" rx="2.5" fill="#FFF8F0" />
+      {/* Card detail lines */}
+      <rect x="10" y="8.5" width="4" height="1.2" rx="0.6" fill="#3A3029" opacity="0.85" />
+      <rect x="10" y="11" width="3" height="1" rx="0.5" fill="#8A7766" opacity="0.8" />
+    </svg>
+  );
+}
+
+/** Shield — Permissions */
+export function IconShield() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
       stroke="currentColor"
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <rect x="3" y="3" width="18" height="18" rx="4" ry="4" />
-      <line x1="12" y1="8" x2="12" y2="16" />
-      <line x1="8" y1="12" x2="16" y2="12" />
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  );
+}
+
+/** Bolt — Activation */
+export function IconBolt() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+/** Hand — Interaction */
+export function IconHand() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 11V6a2 2 0 0 0-4 0v1M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8" />
+      <path d="M18 8a2 2 0 0 1 2 2v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8" />
+    </svg>
+  );
+}
+
+/** Keyboard — Shortcut */
+export function IconKeyboard() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
+    </svg>
+  );
+}
+
+/** Shake gesture — curved arrows */
+export function IconShake() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0" />
+      <path d="M2 18c2-3 4-3 6 0s4 3 6 0 4-3 6 0" opacity="0.4" />
+    </svg>
+  );
+}
+
+/** Info — About */
+export function IconInfo() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+  );
+}
+
+/** Monitor — Menu bar / display */
+export function IconMonitor() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
     </svg>
   );
 }

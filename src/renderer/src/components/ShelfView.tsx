@@ -13,6 +13,82 @@ import {
   IconArrowUpRight,
 } from './Icons';
 
+function EmptyStateIllustration() {
+  return (
+    <svg
+      viewBox="0 0 96 96"
+      aria-hidden="true"
+      className="empty-state-illustration"
+    >
+      <defs>
+        <clipPath id="doc-clip">
+          <rect x="0" y="0" width="28" height="36" rx="4" />
+        </clipPath>
+      </defs>
+      {/* Back-left doc */}
+      <g className="empty-state-doc empty-state-doc-left">
+        <rect
+          x="14"
+          y="22"
+          width="28"
+          height="36"
+          rx="4"
+          fill="var(--surface)"
+          stroke="var(--line)"
+          strokeWidth="1"
+        />
+        <rect x="18" y="30" width="20" height="2" rx="1" fill="var(--line-strong)" opacity="0.6" />
+        <rect x="18" y="36" width="16" height="2" rx="1" fill="var(--line-strong)" opacity="0.4" />
+        <rect x="18" y="42" width="12" height="2" rx="1" fill="var(--line-strong)" opacity="0.3" />
+      </g>
+      {/* Back-right doc */}
+      <g className="empty-state-doc empty-state-doc-right">
+        <rect
+          x="54"
+          y="22"
+          width="28"
+          height="36"
+          rx="4"
+          fill="var(--surface)"
+          stroke="var(--line)"
+          strokeWidth="1"
+        />
+        <rect x="58" y="30" width="20" height="2" rx="1" fill="var(--line-strong)" opacity="0.6" />
+        <rect x="58" y="36" width="16" height="2" rx="1" fill="var(--line-strong)" opacity="0.4" />
+        <rect x="58" y="42" width="12" height="2" rx="1" fill="var(--line-strong)" opacity="0.3" />
+      </g>
+      {/* Front-center doc */}
+      <g className="empty-state-doc empty-state-doc-center">
+        <rect
+          x="34"
+          y="30"
+          width="28"
+          height="36"
+          rx="4"
+          fill="var(--surface-strong)"
+          stroke="var(--line-strong)"
+          strokeWidth="1"
+        />
+        <rect x="38" y="38" width="20" height="2" rx="1" fill="var(--ink-faint)" opacity="0.5" />
+        <rect x="38" y="44" width="16" height="2" rx="1" fill="var(--ink-faint)" opacity="0.35" />
+        <rect x="38" y="50" width="12" height="2" rx="1" fill="var(--ink-faint)" opacity="0.25" />
+      </g>
+      {/* Shelf base */}
+      <rect
+        x="12"
+        y="72"
+        width="72"
+        height="8"
+        rx="4"
+        fill="var(--surface)"
+        stroke="var(--line)"
+        strokeWidth="1"
+        opacity="0.8"
+      />
+    </svg>
+  );
+}
+
 interface ShelfViewProps {
   state: AppState;
 }
@@ -26,11 +102,14 @@ export function ShelfView({ state }: ShelfViewProps) {
   const [isImporting, setIsImporting] = useState(false);
   const [sessionMode, setSessionMode] = useState<SessionMode>('idle');
   const [isHovering, setIsHovering] = useState(false);
+  const [undoState, setUndoState] = useState<{ paths: string[] } | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemSheetRef = useRef<HTMLDivElement | null>(null);
   const lastUpdatedAtRef = useRef(liveShelf?.updatedAt ?? '');
   const dragDepthRef = useRef(0);
+  const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const UNDO_TIMEOUT = 5000;
   const isAcceptingDrop = sessionMode === 'acceptingDrop';
   const isExporting = sessionMode === 'exporting';
   const isMenuOpen = sessionMode === 'menuOpen';
@@ -152,6 +231,33 @@ export function ShelfView({ state }: ShelfViewProps) {
     setSessionMode((current) => (current === 'acceptingDrop' ? 'idle' : current));
   }
 
+  function handleExportAndClear() {
+    const exportable = getExportableItems(items);
+    if (exportable.length === 0) return false;
+
+    const didStartDrag =
+      exportable.length === 1
+        ? window.ledge.startItemDrag(exportable[0]!.id)
+        : window.ledge.startItemsDrag(exportable.map((i) => i.id));
+
+    if (didStartDrag) {
+      const paths = (
+        exportable as { file: { resolvedPath?: string; originalPath?: string; isMissing: boolean } }[]
+      )
+        .filter((i) => !i.file.isMissing)
+        .map((i) => i.file.resolvedPath || i.file.originalPath)
+        .filter((p): p is string => Boolean(p));
+      if (paths.length > 0) {
+        setUndoState({ paths });
+        if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+        undoTimeoutRef.current = setTimeout(() => setUndoState(null), UNDO_TIMEOUT);
+      }
+      window.ledge.clearShelf();
+    }
+
+    return didStartDrag;
+  }
+
   function handleDragEnter(event: React.DragEvent<HTMLElement>) {
     if (isExporting || !isExternalTransfer(event.dataTransfer)) {
       return;
@@ -271,6 +377,7 @@ export function ShelfView({ state }: ShelfViewProps) {
           >
             {itemCount === 0 ? (
               <div className="empty-state compact">
+                <EmptyStateIllustration />
                 <p className="surface-title compact">Drop files here</p>
               </div>
             ) : primaryItem ? (
@@ -288,20 +395,13 @@ export function ShelfView({ state }: ShelfViewProps) {
                   onExportEnd={() => {
                     setSessionMode((current) => (current === 'exporting' ? 'idle' : current));
                   }}
+                  onExportItems={handleExportAndClear}
                   onOpenItemSheet={openItemSheet}
                 />
                 {isHovering && !isExporting && !isImporting && itemCount > 0 && (
                   <button
                     className="drag-button"
-                    onClick={() => {
-                      const exportable = getExportableItems(items);
-                      if (exportable.length === 1) {
-                        window.ledge.startItemDrag(exportable[0]!.id);
-                      } else if (exportable.length > 1) {
-                        window.ledge.startItemsDrag(exportable.map((i) => i.id));
-                      }
-                      window.ledge.clearShelf();
-                    }}
+                    onClick={handleExportAndClear}
                     aria-label="Drag items out"
                   >
                     <IconArrowUpRight />
@@ -310,6 +410,7 @@ export function ShelfView({ state }: ShelfViewProps) {
               </div>
             ) : (
               <div className="empty-state compact">
+                <EmptyStateIllustration />
                 <p className="surface-title compact">Drop files here</p>
               </div>
             )}
@@ -325,6 +426,23 @@ export function ShelfView({ state }: ShelfViewProps) {
                 Open Settings
               </button>
             </section>
+          ) : null}
+
+          {undoState ? (
+            <div className="undo-bar">
+              <span className="undo-bar-label">Items exported</span>
+              <button
+                className="undo-bar-action"
+                onClick={() => {
+                  void window.ledge.addPayloads([{ kind: 'fileDrop', paths: undoState.paths }]);
+                  setUndoState(null);
+                  if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+                }}
+                type="button"
+              >
+                Undo
+              </button>
+            </div>
           ) : null}
         </>
       )}
@@ -373,7 +491,7 @@ function ItemSheet({ items, sheetRef, onClose }: ItemSheetProps) {
           >
             <div className="item-grid-preview">
               {getHeroPreviewSource(item) ? (
-                <img src={getHeroPreviewSource(item) || undefined} alt={item.title} />
+                <img src={getHeroPreviewSource(item) || undefined} alt={item.title} width={88} height={88} />
               ) : (
                 <HeroGlyph kind={item.kind} />
               )}
@@ -383,12 +501,12 @@ function ItemSheet({ items, sheetRef, onClose }: ItemSheetProps) {
           </div>
         ))}
         {items.length > 0 && (
-          <div className="item-grid-cell action-cell" onClick={() => window.ledge.revealItem(items[0]?.id)}>
+          <button className="item-grid-cell action-cell" onClick={() => window.ledge.revealItem(items[0]?.id)} type="button">
             <div className="item-grid-preview action-preview">
               <IconFolder />
             </div>
             <p className="item-grid-title">Reveal in Finder</p>
-          </div>
+          </button>
         )}
       </div>
     </section>
@@ -404,6 +522,7 @@ interface HeroItemProps {
   dragLocked: boolean;
   onExportStart(): void;
   onExportEnd(): void;
+  onExportItems(): boolean;
   onOpenItemSheet(): void;
 }
 
@@ -416,6 +535,7 @@ function HeroItem({
   dragLocked,
   onExportStart,
   onExportEnd,
+  onExportItems,
   onOpenItemSheet,
 }: HeroItemProps) {
   const previewSrc = getHeroPreviewSource(item);
@@ -438,14 +558,8 @@ function HeroItem({
     }
 
     event.preventDefault();
-    const didStartDrag =
-      exportableItems.length === 1
-        ? window.ledge.startItemDrag(exportableItems[0]!.id)
-        : window.ledge.startItemsDrag(exportableItems.map((entry) => entry.id));
-
-    if (didStartDrag) {
+    if (onExportItems()) {
       onExportStart();
-      window.ledge.clearShelf();
     } else {
       onExportEnd();
     }
@@ -474,7 +588,7 @@ function HeroItem({
               return (
                 <div key={collageItem.id} className={`hero-stack-card ${stackClassName}`}>
                   {src ? (
-                    <img src={src} alt="" className="hero-stack-image" draggable={false} />
+                    <img src={src} alt="" className="hero-stack-image" draggable={false} width={104} height={132} />
                   ) : (
                     <HeroGlyph kind={collageItem.kind} />
                   )}
@@ -489,7 +603,7 @@ function HeroItem({
             ))}
             <div className={`hero-artwork hero-artwork-deck ${isExporting ? 'is-exporting' : ''}`}>
               {previewSrc ? (
-                <img src={previewSrc} alt="" className="hero-image" draggable={false} />
+                <img src={previewSrc} alt="" className="hero-image" draggable={false} width={88} height={88} />
               ) : (
                 <HeroGlyph kind={item.kind} />
               )}
@@ -498,7 +612,7 @@ function HeroItem({
         ) : (
           <div className={`hero-artwork ${isExporting ? 'is-exporting' : ''}`}>
             {previewSrc ? (
-              <img src={previewSrc} alt="" className="hero-image" draggable={false} />
+              <img src={previewSrc} alt="" className="hero-image" draggable={false} width={88} height={88} />
             ) : (
               <HeroGlyph kind={item.kind} />
             )}

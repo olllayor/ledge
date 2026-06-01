@@ -1,4 +1,5 @@
 import { Menu, Tray, nativeImage } from 'electron'
+import { join } from 'node:path'
 import type { AppState, ShelfRecord } from '@shared/schema'
 
 interface TrayCallbacks {
@@ -104,18 +105,25 @@ function createRestoreMenuItem(shelf: ShelfRecord, onRestore: (id: string) => vo
 }
 
 function createTrayImage() {
-  const svg = `
-    <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-      <rect x="1.5" y="11" width="15" height="5" rx="2" fill="black"/>
-      <rect x="11.5" y="5" width="4.5" height="7.5" rx="1.5" fill="black"/>
-      <rect x="2" y="2.5" width="9.5" height="9" rx="1.5" fill="black"/>
-      <rect x="3.5" y="4.5" width="5" height="0.6" rx="0.3" fill="white"/>
-      <rect x="3.5" y="6.5" width="3" height="0.6" rx="0.3" fill="white"/>
-      <rect x="3.5" y="8.5" width="4" height="0.6" rx="0.3" fill="white"/>
-    </svg>
-  `
+  const resourcesDir = join(__dirname, '..', '..', 'build')
 
-  const image = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
-  image.setTemplateImage(true)
-  return image
+  // 1. Prefer the dedicated menubar icon (monochrome, pixel-fitted for 16 px)
+  const trayPath = join(resourcesDir, 'tray-icon.png')
+  const trayImage = nativeImage.createFromPath(trayPath)
+  if (!trayImage.isEmpty()) {
+    trayImage.setTemplateImage(true)
+    return trayImage
+  }
+
+  // 2. Fallback to the generic app icon (only during transition)
+  const fallbackPath = join(resourcesDir, 'icon.png')
+  const fallback = nativeImage.createFromPath(fallbackPath)
+  if (!fallback.isEmpty()) {
+    const resized = fallback.resize({ width: 16, height: 16 })
+    resized.setTemplateImage(true)
+    return resized
+  }
+
+  // 3. Ultimate fallback – Electron will supply a generic icon
+  return nativeImage.createEmpty()
 }

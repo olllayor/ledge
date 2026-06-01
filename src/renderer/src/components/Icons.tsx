@@ -327,3 +327,95 @@ export function IconForward() {
     </svg>
   );
 }
+
+/** Keyboard — shortcut icon */
+export function IconKeyboard() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8" />
+    </svg>
+  );
+}
+
+/** Hand with motion lines — shake gesture */
+export function IconShake() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 8V6a2 2 0 0 0-4 0v2M14 10V4a2 2 0 0 0-4 0v6M10 10V5.5a2 2 0 0 0-4 0V10" />
+      <path d="M18 8a2 2 0 0 1 2 2v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8" />
+      <path d="M3 2h.01M6 2h.01M9 2h.01" opacity="0.5" />
+    </svg>
+  );
+}
+
+/** Menu bar tray icon */
+export function IconMenuBar() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="4" width="20" height="5" rx="1" />
+      <circle cx="18" cy="6.5" r="1" fill="currentColor" />
+      <circle cx="15" cy="6.5" r="1" fill="currentColor" />
+      <circle cx="12" cy="6.5" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Download arrow — drop action */
+export function IconDrop() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 3v12M12 15l-4-4M12 15l4-4" />
+      <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+    </svg>
+  );
+}
+
+/** Sparkle — welcome/celebration */
+export function IconSparkle() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z" />
+    </svg>
+  );
+}

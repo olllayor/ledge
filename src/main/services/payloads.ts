@@ -303,6 +303,7 @@ const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
   csv: 'text/csv',
   gif: 'image/gif',
   heic: 'image/heic',
+  icns: 'image/x-icns',
   heif: 'image/heif',
   html: 'text/html',
   jpeg: 'image/jpeg',
