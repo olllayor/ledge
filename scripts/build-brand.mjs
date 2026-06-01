@@ -47,6 +47,9 @@ execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', icnsPath], {
 // Generates a crisp, monochrome shelf icon for the system tray.
 // Requires ImageMagick (uses 'magick' on v7+, falls back to 'convert').
 const traySvgPath = resolve(buildDir, 'tray-icon.svg')
+const trayPngPath = resolve(buildDir, 'tray-icon.png')
+const trayRetinaPath = resolve(buildDir, 'tray-icon@2x.png')
+
 if (existsSync(traySvgPath)) {
   const magick = (() => {
     try {
@@ -63,23 +66,24 @@ if (existsSync(traySvgPath)) {
   })()
 
   if (!magick) {
-    throw new Error(
-      'ImageMagick is required to build the tray icon. Install it with: brew install imagemagick'
-    )
+    if (existsSync(trayPngPath) && existsSync(trayRetinaPath)) {
+      console.warn('ImageMagick not found; reusing existing tray icon PNGs')
+    } else {
+      throw new Error(
+        'ImageMagick is required to build the tray icon. Install it with: brew install imagemagick'
+      )
+    }
+  } else {
+    execFileSync(magick, [traySvgPath, '-resize', '16x16', trayPngPath], {
+      cwd: repoRoot,
+      stdio: 'inherit'
+    })
+
+    execFileSync(magick, [traySvgPath, '-resize', '32x32', trayRetinaPath], {
+      cwd: repoRoot,
+      stdio: 'inherit'
+    })
   }
-
-  const trayPngPath = resolve(buildDir, 'tray-icon.png')
-  const trayRetinaPath = resolve(buildDir, 'tray-icon@2x.png')
-
-  execFileSync(magick, [traySvgPath, '-resize', '16x16', trayPngPath], {
-    cwd: repoRoot,
-    stdio: 'inherit'
-  })
-
-  execFileSync(magick, [traySvgPath, '-resize', '32x32', trayRetinaPath], {
-    cwd: repoRoot,
-    stdio: 'inherit'
-  })
 } else {
   console.warn(`Tray icon source missing at ${traySvgPath}; skipping tray icon generation`)
 }
