@@ -4,6 +4,7 @@ import {
   currentPlan,
   deviceLimitForPlan,
   PRO_IMAGE_STORAGE_LIMIT_BYTES,
+  PRO_REQUIRED_FOR_PREFERENCES_MESSAGE,
   requireUser,
   sessionArgs,
   shelfLimitForPlan,
@@ -69,6 +70,7 @@ const preferencesValues = v.object({
   shakeSensitivity: v.union(v.literal("gentle"), v.literal("balanced"), v.literal("firm")),
   excludedBundleIds: v.array(v.string()),
   globalShortcut: v.string(),
+  hasSeenShelfLimitMigration: v.boolean(),
 });
 
 const shelfPayload = {
@@ -227,6 +229,10 @@ export const patchPreferences = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx, args.sessionToken);
+    const plan = await currentPlan(ctx, userId);
+    if (plan !== "pro") {
+      throw new ConvexError(PRO_REQUIRED_FOR_PREFERENCES_MESSAGE);
+    }
     const existing = await ctx.db
       .query("preferences")
       .withIndex("by_user", (q) => q.eq("userId", userId))

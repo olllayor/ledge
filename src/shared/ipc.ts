@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type {
   AppState,
   CreateShelfInput,
@@ -39,8 +40,18 @@ export const IPC_CHANNELS = {
   shareShelfItems: 'ledge:share-shelf-items',
   showItemContextMenu: 'ledge:show-item-context-menu',
   showShelfContextMenu: 'ledge:show-shelf-context-menu',
+  showToast: 'ledge:show-toast',
   stateUpdated: 'ledge:state-updated',
 } as const;
+
+export type ToastKind = 'success' | 'error' | 'info';
+
+export const toastPayloadSchema = z.object({
+  message: z.string(),
+  kind: z.enum(['success', 'error', 'info']),
+});
+
+export type ToastPayload = z.infer<typeof toastPayloadSchema>;
 
 export type StateListener = (state: AppState) => void;
 
@@ -74,6 +85,8 @@ export interface LedgeAPI {
   shareShelfItems(itemIds?: string[]): Promise<boolean>;
   showItemContextMenu(itemId: string): Promise<boolean>;
   showShelfContextMenu(): Promise<boolean>;
+  showToast(message: string, kind?: ToastKind): void;
+  onToast(listener: (payload: ToastPayload) => void): () => void;
   getFilePath(file: File): string;
   subscribeState(listener: StateListener): () => void;
 }

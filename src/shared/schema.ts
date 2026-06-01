@@ -88,6 +88,7 @@ export const preferencesRecordSchema = z.object({
   excludedBundleIds: z.array(z.string()).default([]),
   globalShortcut: z.string().default('CommandOrControl+Shift+Space'),
   hasCompletedOnboarding: z.boolean().default(false),
+  hasSeenShelfLimitMigration: z.boolean().default(false),
   shelfInteraction: shelfInteractionSchema.default({
     doubleClickAction: 'open',
     shelfEdgeAction: 'dock',

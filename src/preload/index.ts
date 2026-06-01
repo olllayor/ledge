@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { z } from 'zod';
-import { IPC_CHANNELS, type LedgeAPI, type StateListener } from '@shared/ipc';
+import { IPC_CHANNELS, toastPayloadSchema, type LedgeAPI, type StateListener, type ToastKind } from '@shared/ipc';
 import {
   appStateSchema,
   createShelfInputSchema,
@@ -105,6 +105,19 @@ const api: LedgeAPI = {
   },
   async showShelfContextMenu() {
     return ipcRenderer.invoke(IPC_CHANNELS.showShelfContextMenu);
+  },
+  showToast(message, kind: ToastKind = 'info') {
+    ipcRenderer.send(IPC_CHANNELS.showToast, message, kind);
+  },
+  onToast(listener) {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      const parsed = toastPayloadSchema.parse(payload ?? {});
+      listener(parsed);
+    };
+    ipcRenderer.on(IPC_CHANNELS.showToast, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.showToast, wrapped);
+    };
   },
   getFilePath(file) {
     try {

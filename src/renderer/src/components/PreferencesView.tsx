@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AppState, ShakeSensitivity } from '@shared/schema';
 import { useSync } from '../providers/SyncProvider';
+import { usePlan } from '../hooks/usePlan';
 import { IconGear } from './Icons';
 import {
   IconApp,
   IconBolt,
+  IconCheck,
   IconCloud,
   IconHand,
   IconInfo,
   IconKeyboard,
+  IconLock,
   IconMonitor,
   IconShield,
   IconShake,
   IconSparkles,
   IconStar,
 } from './PreferencesIcons';
+import { ProBadge, ProUpgradePrompt } from './ProUpgradePrompt';
 
 interface PreferencesViewProps {
   state: AppState;
@@ -222,7 +226,11 @@ function GeneralSettings({ state, showToast }: { state: AppState; showToast(msg:
 /* ── Shelf ── */
 
 function ShelfSettings({ state, showToast }: { state: AppState; showToast(msg: string, kind?: 'success' | 'error'): void }) {
+  const plan = usePlan(state);
   const interaction = state.preferences.shelfInteraction ?? {};
+  const isPro = plan.isPro;
+  const autoCloseEnabled = interaction.autoCloseShelf ?? false;
+  const atRecentsCap = plan.recentShelvesUsed >= plan.recentShelvesLimit;
 
   async function updateShelfInteraction(patch: Partial<typeof interaction>) {
     try {
@@ -235,8 +243,57 @@ function ShelfSettings({ state, showToast }: { state: AppState; showToast(msg: s
     }
   }
 
+  const autoCloseTitle = (
+    <span className="settings-row-title-row">
+      Auto-close shelf
+      {!isPro && <ProBadge />}
+    </span>
+  );
+
+  const autoCloseCopy = isPro
+    ? 'Automatically close the shelf after dragging an item out.'
+    : autoCloseEnabled
+      ? 'Active locally. Pro required to sync this preference across devices.'
+      : 'Pro feature. Upgrade to automatically close shelves after dragging an item out.';
+
+  const autoClosePrompt = !isPro && (
+    <ProUpgradePrompt
+      message={
+        autoCloseEnabled
+          ? 'This preference is active locally but will not sync to other devices without Pro.'
+          : 'Upgrade to Pro to use auto-close shelf and sync your preferences across devices.'
+      }
+      source="auto_close"
+    />
+  );
+
   return (
     <>
+      <SettingsGroup title="Recent shelves">
+        <SettingsRow
+          icon={<IconSparkles />}
+          title="Recent shelf history"
+          copy={
+            plan.isPro
+              ? `${plan.recentShelvesUsed} of ${plan.recentShelvesLimit} slots used.`
+              : `${plan.recentShelvesUsed} of ${plan.recentShelvesLimit} slots used. Older shelves are dropped first.`
+          }
+          trailing={
+            atRecentsCap && !isPro ? (
+              <button
+                className="settings-cta-small"
+                type="button"
+                onClick={() => window.open('https://ledge.app/pro', '_blank')}
+              >
+                Get more
+              </button>
+            ) : (
+              <span />
+            )
+          }
+        />
+      </SettingsGroup>
+
       <SettingsGroup title="Item Actions">
         <SettingsRow
           icon={<IconSparkles />}
@@ -270,15 +327,19 @@ function ShelfSettings({ state, showToast }: { state: AppState; showToast(msg: s
       <SettingsGroup title="Automation">
         <SettingsRow
           icon={<IconMonitor />}
-          title="Auto-close shelf"
-          copy="Automatically close the shelf after dragging an item out."
+          title={autoCloseTitle}
+          copy={autoCloseCopy}
           trailing={
             <Toggle
-              checked={interaction.autoCloseShelf ?? false}
+              checked={autoCloseEnabled}
+              disabled={!isPro}
               onChange={(checked) => void updateShelfInteraction({ autoCloseShelf: checked })}
             />
           }
-        />
+          fullWidth={!isPro}
+        >
+          {autoClosePrompt}
+        </SettingsRow>
         <SettingsRow
           icon={<IconHand />}
           title="Snap into place"
@@ -509,7 +570,12 @@ function CloudSyncSettings({ state, showToast }: { state: AppState; showToast(ms
           />
           <SettingsRow title="Signed in as" copy={state.sync.signedInEmail} trailing={<span />} />
           <SettingsRow
-            title="Plan"
+            title={
+              <span className="settings-row-title-row">
+                Plan
+                {overview && overview.plan === 'free' && <ProBadge />}
+              </span>
+            }
             copy={overview ? `${overview.plan.toUpperCase()} · ${overview.syncedShelfCount} / ${overview.shelfLimit} shelves` : `${state.sync.plan.toUpperCase()}`}
             trailing={<span />}
           />
@@ -632,8 +698,19 @@ function CloudSyncSettings({ state, showToast }: { state: AppState; showToast(ms
 
 /* ── Pro ── */
 
+const PRO_BENEFITS: { label: string; free: string; pro: string }[] = [
+  { label: 'Shelf colors', free: '2 (Ember, Wave)', pro: '4 (Ember, Wave, Forest, Sand)' },
+  { label: 'Recent shelves', free: '3', pro: '10' },
+  { label: 'Synced shelves', free: '100', pro: '500' },
+  { label: 'Connected devices', free: '1', pro: '3' },
+  { label: 'Imported image storage', free: '—', pro: '1 GB' },
+  { label: 'Preferences sync', free: '—', pro: 'Across devices' },
+  { label: 'Auto-close shelf', free: '—', pro: 'Included' },
+];
+
 function ProSettings({ state, showToast }: { state: AppState; showToast(msg: string, kind?: 'success' | 'error'): void }) {
   const sync = useSync();
+  const plan = usePlan(state);
   const [licenseKey, setLicenseKey] = useState('');
   const [orderId, setOrderId] = useState('');
   const [status, setStatus] = useState('');
@@ -655,57 +732,98 @@ function ProSettings({ state, showToast }: { state: AppState; showToast(msg: str
     }
   }
 
-  const currentPlan = state.sync.plan;
-
   return (
     <>
       <SettingsGroup>
         <div className="pro-hero">
-          <p className="pro-price">$9.99 / year</p>
-          <p className="pro-copy">3 devices, 500 synced shelves, and 1 GB imported image storage.</p>
-        </div>
-        <button
-          className="settings-cta pro-cta"
-          type="button"
-          onClick={() => window.open('https://ledge.app/pro', '_blank')}
-        >
-          Upgrade to Pro
-        </button>
-        {currentPlan === 'pro' && (
-          <div style={{ textAlign: 'center', padding: '8px 0 0' }}>
-            <StatusPill label="Active" variant="good" />
+          <div className="pro-plan-row">
+            <p className="pro-eyebrow">Current plan</p>
+            <StatusPill
+              label={plan.isPro ? 'Ledge Pro' : 'Free'}
+              variant={plan.isPro ? 'good' : 'neutral'}
+            />
           </div>
-        )}
+          <p className="pro-price">$9.99 <span className="pro-price-suffix">/ year</span></p>
+          <p className="pro-copy">Ledge Pro unlocks the full color palette, more recent shelves, cloud sync for all your devices, preferences sync, and auto-close.</p>
+          {!plan.isPro && (
+            <button
+              className="settings-cta pro-cta"
+              type="button"
+              onClick={() => {
+                if (import.meta.env.DEV) {
+                  console.log('[analytics] pro_upgrade_clicked', { source: 'pro_section' });
+                }
+                window.open('https://ledge.app/pro', '_blank');
+              }}
+            >
+              Upgrade to Pro
+            </button>
+          )}
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title="Free vs Pro">
+        <div className="pro-compare">
+          <div className="pro-compare-head">
+            <span />
+            <span className="pro-compare-col is-free">Free</span>
+            <span className="pro-compare-col is-pro">Pro</span>
+          </div>
+          {PRO_BENEFITS.map((row) => (
+            <div key={row.label} className="pro-compare-row">
+              <span className="pro-compare-label">{row.label}</span>
+              <span className="pro-compare-cell is-free">{row.free}</span>
+              <span className="pro-compare-cell is-pro">
+                <IconCheck />
+                <span>{row.pro}</span>
+              </span>
+            </div>
+          ))}
+        </div>
       </SettingsGroup>
 
       <SettingsGroup title="Activate license">
-        <div className="settings-field">
-          <label className="pref-label">License key</label>
-          <input
-            className="pref-input"
-            value={licenseKey}
-            onChange={(e) => setLicenseKey(e.target.value)}
-            placeholder="LEDGE-XXXX-XXXX"
-          />
-        </div>
-        <div className="settings-field">
-          <label className="pref-label">Order ID</label>
-          <input
-            className="pref-input"
-            value={orderId}
-            onChange={(e) => setOrderId(e.target.value)}
-            placeholder="#123456"
-          />
-        </div>
-        <button
-          className="settings-cta"
-          type="button"
-          disabled={(!licenseKey && !orderId) || status === 'Refreshing…'}
-          onClick={() => void refresh()}
+        <SettingsRow
+          icon={<IconLock />}
+          title="License key"
+          copy="Paste a license key from your Lemon Squeezy receipt."
+          trailing={<span />}
+          fullWidth
         >
-          {status === 'Refreshing…' ? 'Refreshing…' : 'Refresh Entitlements'}
-        </button>
-        {status && status !== 'Refreshing…' ? <p className="pref-status">{status}</p> : null}
+          <div className="settings-field" style={{ padding: '8px 0 6px' }}>
+            <input
+              className="pref-input"
+              value={licenseKey}
+              onChange={(e) => setLicenseKey(e.target.value)}
+              placeholder="LEDGE-XXXX-XXXX"
+            />
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title="Order ID"
+          copy="Or paste a Lemon Squeezy order ID to refresh entitlements."
+          trailing={<span />}
+          fullWidth
+        >
+          <div className="settings-field" style={{ padding: '6px 0 8px' }}>
+            <input
+              className="pref-input"
+              value={orderId}
+              onChange={(e) => setOrderId(e.target.value)}
+              placeholder="#123456"
+            />
+            <button
+              className="settings-cta"
+              type="button"
+              style={{ marginTop: 10 }}
+              disabled={(!licenseKey && !orderId) || status === 'Refreshing…'}
+              onClick={() => void refresh()}
+            >
+              {status === 'Refreshing…' ? 'Refreshing…' : 'Refresh Entitlements'}
+            </button>
+            {status && status !== 'Refreshing…' ? <p className="pref-status">{status}</p> : null}
+          </div>
+        </SettingsRow>
       </SettingsGroup>
     </>
   );
@@ -907,8 +1025,8 @@ function SettingsGroup({ title, children }: { title?: string; children: ReactNod
 
 interface SettingsRowProps {
   icon?: ReactNode;
-  title: string;
-  copy?: string;
+  title: ReactNode;
+  copy?: ReactNode;
   trailing: ReactNode;
   fullWidth?: boolean;
   children?: ReactNode;

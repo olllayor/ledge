@@ -4,7 +4,7 @@ import type { ShelfRecord } from './schema'
 
 describe('sync helpers', () => {
   it('keeps plan limits scoped to cloud sync', () => {
-    expect(syncShelfLimitForPlan('free')).toBe(10)
+    expect(syncShelfLimitForPlan('free')).toBe(100)
     expect(syncDeviceLimitForPlan('free')).toBe(1)
     expect(syncShelfLimitForPlan('pro')).toBe(500)
     expect(syncDeviceLimitForPlan('pro')).toBe(3)

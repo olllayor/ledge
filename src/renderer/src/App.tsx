@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react';
 import { ShelfView } from './components/ShelfView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OnboardingView } from './components/OnboardingView';
+import { ToastHost } from './components/ToastHost';
 import { useLedgeState } from './hooks/useLedgeState';
 
 const PreferencesView = lazy(() =>
@@ -38,31 +39,42 @@ export function App() {
   }
 
   if (showOnboarding && view === 'shelf') {
-    return <OnboardingView state={state} onComplete={() => setShowOnboarding(false)} />;
+    return (
+      <>
+        <OnboardingView state={state} onComplete={() => setShowOnboarding(false)} />
+        <ToastHost />
+      </>
+    );
   }
 
   if (view === 'preferences') {
     return (
-      <Suspense
-        fallback={
-          <main className="loading-shell">
-            <div className="loading-card">
-              <p className="eyebrow">Ledge</p>
-              <p>Loading preferences…</p>
-            </div>
-          </main>
-        }
-      >
-        <ErrorBoundary>
-          <PreferencesView state={state} />
-        </ErrorBoundary>
-      </Suspense>
+      <>
+        <Suspense
+          fallback={
+            <main className="loading-shell">
+              <div className="loading-card">
+                <p className="eyebrow">Ledge</p>
+                <p>Loading preferences…</p>
+              </div>
+            </main>
+          }
+        >
+          <ErrorBoundary>
+            <PreferencesView state={state} />
+          </ErrorBoundary>
+        </Suspense>
+        <ToastHost />
+      </>
     );
   }
 
   return (
-    <ErrorBoundary>
-      <ShelfView state={state} />
-    </ErrorBoundary>
+    <>
+      <ErrorBoundary>
+        <ShelfView state={state} />
+      </ErrorBoundary>
+      <ToastHost />
+    </>
   );
 }

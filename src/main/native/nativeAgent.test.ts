@@ -137,6 +137,7 @@ describe('computeShakeReady', () => {
       excludedBundleIds: ['com.apple.finder'],
       globalShortcut: 'CommandOrControl+Shift+Space',
       hasCompletedOnboarding: false,
+      hasSeenShelfLimitMigration: false,
       shelfInteraction: {
         doubleClickAction: 'open',
         shelfEdgeAction: 'dock',
