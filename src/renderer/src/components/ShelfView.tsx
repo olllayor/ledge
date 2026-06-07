@@ -485,18 +485,87 @@ function ShelfView({ state }: ShelfViewProps) {
   );
 }
 
+function shelfItemsEqual(a: ShelfItemRecord[], b: ShelfItemRecord[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const itemA = a[i];
+    const itemB = b[i];
+    if (
+      itemA.id !== itemB.id ||
+      itemA.kind !== itemB.kind ||
+      itemA.title !== itemB.title ||
+      itemA.subtitle !== itemB.subtitle ||
+      itemA.preview.summary !== itemB.preview.summary ||
+      itemA.preview.detail !== itemB.preview.detail ||
+      itemA.order !== itemB.order
+    ) {
+      return false;
+    }
+    if (itemA.kind === 'file' && itemB.kind === 'file') {
+      if (
+        itemA.file.originalPath !== itemB.file.originalPath ||
+        itemA.file.resolvedPath !== itemB.file.resolvedPath ||
+        itemA.file.isStale !== itemB.file.isStale ||
+        itemA.file.isMissing !== itemB.file.isMissing
+      ) {
+        return false;
+      }
+      if (itemA.mimeType !== itemB.mimeType) return false;
+    }
+    if (itemA.kind === 'folder' && itemB.kind === 'folder') {
+      if (
+        itemA.file.originalPath !== itemB.file.originalPath ||
+        itemA.file.resolvedPath !== itemB.file.resolvedPath ||
+        itemA.file.isStale !== itemB.file.isStale ||
+        itemA.file.isMissing !== itemB.file.isMissing
+      ) {
+        return false;
+      }
+    }
+    if (itemA.kind === 'imageAsset' && itemB.kind === 'imageAsset') {
+      if (
+        itemA.file.originalPath !== itemB.file.originalPath ||
+        itemA.file.resolvedPath !== itemB.file.resolvedPath ||
+        itemA.file.isStale !== itemB.file.isStale ||
+        itemA.file.isMissing !== itemB.file.isMissing
+      ) {
+        return false;
+      }
+      if (itemA.mimeType !== itemB.mimeType) return false;
+    }
+    if (itemA.kind === 'text' && itemB.kind === 'text') {
+      if (itemA.text !== itemB.text) return false;
+      if (itemA.savedFilePath !== itemB.savedFilePath) return false;
+    }
+    if (itemA.kind === 'url' && itemB.kind === 'url') {
+      if (itemA.url !== itemB.url) return false;
+      if (itemA.savedFilePath !== itemB.savedFilePath) return false;
+    }
+  }
+  return true;
+}
+
 const ShelfViewMemo = memo(ShelfView, (prevProps, nextProps) => {
-  return (
-    prevProps.state.liveShelf?.id === nextProps.state.liveShelf?.id &&
-    prevProps.state.liveShelf?.updatedAt === nextProps.state.liveShelf?.updatedAt &&
-    prevProps.state.liveShelf?.items.length === nextProps.state.liveShelf?.items.length &&
-    prevProps.state.preferences.shelfInteraction.doubleClickAction === nextProps.state.preferences.shelfInteraction.doubleClickAction &&
-    prevProps.state.preferences.shelfInteraction.autoCloseShelf === nextProps.state.preferences.shelfInteraction.autoCloseShelf &&
-    prevProps.state.preferences.shakeEnabled === nextProps.state.preferences.shakeEnabled &&
-    prevProps.state.permissionStatus.nativeHelperAvailable === nextProps.state.permissionStatus.nativeHelperAvailable &&
-    prevProps.state.permissionStatus.accessibilityTrusted === nextProps.state.permissionStatus.accessibilityTrusted &&
-    prevProps.state.permissionStatus.lastError === nextProps.state.permissionStatus.lastError
-  );
+  const prevShelf = prevProps.state.liveShelf;
+  const nextShelf = nextProps.state.liveShelf;
+
+  if (prevShelf?.id !== nextShelf?.id) return false;
+  if (prevShelf?.updatedAt !== nextShelf?.updatedAt) return false;
+  if (!shelfItemsEqual(prevShelf?.items ?? [], nextShelf?.items ?? [])) return false;
+
+  const prevPrefs = prevProps.state.preferences;
+  const nextPrefs = nextProps.state.preferences;
+  if (prevPrefs.shelfInteraction.doubleClickAction !== nextPrefs.shelfInteraction.doubleClickAction) return false;
+  if (prevPrefs.shelfInteraction.autoCloseShelf !== nextPrefs.shelfInteraction.autoCloseShelf) return false;
+  if (prevPrefs.shakeEnabled !== nextPrefs.shakeEnabled) return false;
+
+  const prevPerm = prevProps.state.permissionStatus;
+  const nextPerm = nextProps.state.permissionStatus;
+  if (prevPerm.nativeHelperAvailable !== nextPerm.nativeHelperAvailable) return false;
+  if (prevPerm.accessibilityTrusted !== nextPerm.accessibilityTrusted) return false;
+  if (prevPerm.lastError !== nextPerm.lastError) return false;
+
+  return true;
 });
 
 export { ShelfViewMemo as ShelfView };

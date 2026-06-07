@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { ShelfView } from './components/ShelfView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OnboardingView } from './components/OnboardingView';
@@ -10,21 +10,22 @@ const PreferencesView = lazy(() =>
   import('./components/PreferencesView').then((module) => ({ default: module.PreferencesView })),
 );
 
-function selectShelfViewState(state: AppState) {
-  return {
-    liveShelf: state.liveShelf,
-    preferences: {
-      shelfInteraction: state.preferences.shelfInteraction,
-      shakeEnabled: state.preferences.shakeEnabled,
-    },
-    permissionStatus: state.permissionStatus,
-    sync: {
-      plan: state.sync.plan,
-    },
-  };
-}
-
 export function App() {
+  const selectShelfViewState = useMemo(
+    () => (state: AppState) => ({
+      liveShelf: state.liveShelf,
+      preferences: {
+        shelfInteraction: state.preferences.shelfInteraction,
+        shakeEnabled: state.preferences.shakeEnabled,
+      },
+      permissionStatus: state.permissionStatus,
+      sync: {
+        plan: state.sync.plan,
+      },
+    }),
+    []
+  );
+
   const { state, error, fullState } = useLedgeState(selectShelfViewState);
   const [showOnboarding, setShowOnboarding] = useState(
     () => fullState && !fullState.preferences.hasCompletedOnboarding,

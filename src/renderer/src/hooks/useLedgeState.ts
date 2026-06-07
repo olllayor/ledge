@@ -21,6 +21,7 @@ export function useLedgeState<T = AppState>(
   const [fullState, setFullState] = useState<AppState | null>(null);
   const [error, setError] = useState<string>('');
   const prevSelectedRef = useRef<T | null>(null);
+  const selectedRef = useRef<T | null>(null);
 
   useEffect(() => {
     if (!window.ledge) {
@@ -65,15 +66,19 @@ export function useLedgeState<T = AppState>(
     return selector ? selector(fullState) : (fullState as T);
   }, [fullState, selector]);
 
+  selectedRef.current = selected;
+
   const shouldUpdate = useMemo(() => {
     if (prevSelectedRef.current === null && selected === null) return false;
     if (prevSelectedRef.current === null || selected === null) return true;
     return !equalityFn(prevSelectedRef.current, selected);
   }, [selected, equalityFn]);
 
-  if (shouldUpdate) {
-    prevSelectedRef.current = selected;
-  }
+  useEffect(() => {
+    if (shouldUpdate) {
+      prevSelectedRef.current = selected;
+    }
+  }, [shouldUpdate, selected]);
 
   return {
     state: prevSelectedRef.current,
