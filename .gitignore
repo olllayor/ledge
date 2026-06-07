@@ -5,7 +5,6 @@ out/
 native/bin/
 native/DropShelfNativeAgent/.build/
 native/DropShelfNativeAgent/.swiftpm/
-native/LedgeNative/.build/
 coverage/
 .env
 .env.*
