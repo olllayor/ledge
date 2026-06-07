@@ -6,33 +6,44 @@ class MockStream extends EventEmitter {
   setEncoding(_encoding: BufferEncoding): void {}
 }
 
+class MockStdin extends EventEmitter {
+  readonly chunks: string[] = []
+  readonly write = vi.fn((chunk: string): boolean => {
+    this.chunks.push(chunk)
+    return true
+  })
+}
+
 class MockChildProcess extends EventEmitter {
   readonly stdout = new MockStream()
   readonly stderr = new MockStream()
+  readonly stdin = new MockStdin()
   readonly methods: string[] = []
-  readonly stdin = {
-    write: vi.fn((chunk: string) => {
-      const request = JSON.parse(chunk.trim()) as { id: number; method: string }
-      this.methods.push(request.method)
+}
 
-      if (request.method === 'permissions.getStatus') {
-        queueMicrotask(() => {
-          this.stdout.emit(
-            'data',
-            `${JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { accessibilityTrusted: true } })}\n`
-          )
-        })
-      }
+function recordWrites(child: MockChildProcess): void {
+  const originalWrite = child.stdin.write
+  originalWrite.mockImplementation((chunk: string): boolean => {
+    const request = JSON.parse(chunk.trim()) as { id: number; method: string }
+    child.methods.push(request.method)
 
-      if (request.method === 'gesture.start') {
-        queueMicrotask(() => {
-          this.stdout.emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: request.id, result: true })}\n`)
-        })
-      }
+    if (request.method === 'permissions.getStatus') {
+      queueMicrotask(() => {
+        child.stdout.emit(
+          'data',
+          `${JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { accessibilityTrusted: true } })}\n`
+        )
+      })
+    }
 
-      return true
-    })
-  }
+    if (request.method === 'gesture.start') {
+      queueMicrotask(() => {
+        child.stdout.emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: request.id, result: true })}\n`)
+      })
+    }
+
+    return true
+  })
 }
 
 afterEach(() => {
@@ -68,6 +79,7 @@ describe('computeShakeReady', () => {
 
   it('ignores malformed helper stdout and continues processing later messages', async () => {
     const child = new MockChildProcess()
+    recordWrites(child)
     const agent = new NativeAgentClient({
       spawnProcess: () => child,
       resolveBinaryPath: () => process.execPath
@@ -85,6 +97,7 @@ describe('computeShakeReady', () => {
 
   it('emits shakeDetected notifications from helper stdout', async () => {
     const child = new MockChildProcess()
+    recordWrites(child)
     const agent = new NativeAgentClient({
       spawnProcess: () => child,
       resolveBinaryPath: () => process.execPath
@@ -119,6 +132,8 @@ describe('computeShakeReady', () => {
     vi.useFakeTimers()
     const firstChild = new MockChildProcess()
     const secondChild = new MockChildProcess()
+    recordWrites(firstChild)
+    recordWrites(secondChild)
     const spawnProcess = vi.fn<(binaryPath: string) => MockChildProcess>()
       .mockReturnValueOnce(firstChild)
       .mockReturnValueOnce(secondChild)
@@ -166,6 +181,8 @@ describe('computeShakeReady', () => {
     vi.useFakeTimers()
     const firstChild = new MockChildProcess()
     const secondChild = new MockChildProcess()
+    recordWrites(firstChild)
+    recordWrites(secondChild)
     const spawnProcess = vi.fn<(binaryPath: string) => MockChildProcess>()
       .mockReturnValueOnce(firstChild)
       .mockReturnValueOnce(secondChild)
@@ -192,6 +209,64 @@ describe('computeShakeReady', () => {
     expect(agent.getStatus().lastError).toContain('timed out')
     await vi.advanceTimersByTimeAsync(50)
 
+    expect(spawnProcess).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats an async stdin error as helper unavailable and schedules a restart', async () => {
+    vi.useFakeTimers()
+    const firstChild = new MockChildProcess()
+    const secondChild = new MockChildProcess()
+    recordWrites(firstChild)
+    recordWrites(secondChild)
+    const spawnProcess = vi.fn<(binaryPath: string) => MockChildProcess>()
+      .mockReturnValueOnce(firstChild)
+      .mockReturnValueOnce(secondChild)
+    const agent = new NativeAgentClient({
+      spawnProcess,
+      resolveBinaryPath: () => process.execPath,
+      restartDelayMs: 50,
+      maxRestartDelayMs: 50
+    })
+
+    await agent.start()
+    expect(agent.getStatus().nativeHelperAvailable).toBe(true)
+
+    firstChild.stdin.emit('error', new Error('EPIPE'))
+
+    expect(agent.getStatus().nativeHelperAvailable).toBe(false)
+    expect(agent.getStatus().lastError).toBe('EPIPE')
+    await vi.advanceTimersByTimeAsync(50)
+    expect(spawnProcess).toHaveBeenCalledTimes(2)
+  })
+
+  it('restarts the helper when stdin.write throws synchronously', async () => {
+    vi.useFakeTimers()
+    const firstChild = new MockChildProcess()
+    const secondChild = new MockChildProcess()
+    recordWrites(firstChild)
+    recordWrites(secondChild)
+    const spawnProcess = vi.fn<(binaryPath: string) => MockChildProcess>()
+      .mockReturnValueOnce(firstChild)
+      .mockReturnValueOnce(secondChild)
+    const agent = new NativeAgentClient({
+      spawnProcess,
+      resolveBinaryPath: () => process.execPath,
+      restartDelayMs: 50,
+      maxRestartDelayMs: 50
+    })
+
+    await agent.start()
+
+    firstChild.stdin.write.mockImplementationOnce(() => {
+      throw new Error('write after end')
+    })
+
+    const pending = agent.createBookmark('/tmp/sync-throw')
+    await expect(pending).rejects.toThrow('Native helper is unavailable')
+    expect(agent.getStatus().nativeHelperAvailable).toBe(false)
+    expect(agent.getStatus().lastError).toBe('write after end')
+
+    await vi.advanceTimersByTimeAsync(50)
     expect(spawnProcess).toHaveBeenCalledTimes(2)
   })
 })

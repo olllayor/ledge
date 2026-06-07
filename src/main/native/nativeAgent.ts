@@ -48,7 +48,7 @@ type PendingRequest = {
 }
 
 interface NativeHelperProcess extends EventEmitter {
-  stdin: {
+  stdin: EventEmitter & {
     write(chunk: string): boolean
   }
   stdout: EventEmitter & {
@@ -137,6 +137,10 @@ export class NativeAgentClient extends EventEmitter {
     })
     child.on('error', (error) => {
       const message = error instanceof Error ? error.message : 'Native helper failed unexpectedly'
+      this.handleChildUnavailable(child, message)
+    })
+    child.stdin.on('error', (error) => {
+      const message = error instanceof Error ? error.message : 'Native helper stdin error'
       this.handleChildUnavailable(child, message)
     })
 
@@ -368,10 +372,14 @@ export class NativeAgentClient extends EventEmitter {
 
       try {
         child.stdin.write(`${JSON.stringify(payload)}\n`)
-      } catch {
+      } catch (error) {
         const pending = this.pending.get(id)
         this.pending.delete(id)
         pending?.reject(helperUnavailableError())
+        this.handleChildUnavailable(
+          child,
+          error instanceof Error ? error.message : 'Native helper stdin write failed'
+        )
       }
     })
   }
