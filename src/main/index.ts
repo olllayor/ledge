@@ -47,6 +47,7 @@ import {
   validateGlobalShortcut,
 } from './services/systemUtils';
 import { StateStore } from './services/stateStore';
+import { InactivityTimer } from './services/inactivityTimer';
 import { PreferencesWindow } from './windows/preferencesWindow';
 import { ShelfWindow } from './windows/shelfWindow';
 import { TrayController } from './tray';
@@ -56,6 +57,7 @@ let nativeAgent: NativeAgentClient;
 let tray: TrayController;
 let shelfWindow: ShelfWindow;
 let preferencesWindow: PreferencesWindow;
+let inactivityTimer: InactivityTimer;
 let shortcutStatus: Pick<PermissionStatus, 'shortcutRegistered' | 'shortcutError'> = {
   shortcutRegistered: false,
   shortcutError: '',
@@ -120,6 +122,14 @@ app.whenReady().then(async () => {
   nativeAgent = new NativeAgentClient();
   shelfWindow = new ShelfWindow();
   preferencesWindow = new PreferencesWindow();
+  inactivityTimer = new InactivityTimer(() => {
+    if (
+      stateStore.getPreferences().shelfInteraction.autoRetract &&
+      shelfWindow.isVisible()
+    ) {
+      shelfWindow.hide();
+    }
+  });
   tray = new TrayController({
     onNewShelf: () => {
       void createShelf('tray', currentCursorPoint(), false);
@@ -194,6 +204,7 @@ function registerIpc(): void {
     stateStore.closeShelf();
     shelfWindow.resetPosition();
     shelfWindow.hide();
+    inactivityTimer.clear();
     return broadcastState();
   });
   ipcMain.handle(IPC_CHANNELS.getPreferences, async () => stateStore.getPreferences());
@@ -202,6 +213,7 @@ function registerIpc(): void {
     syncSystemPreferences();
     await nativeAgent.configureGesture(stateStore.getPreferences());
     broadcastState();
+    tickInactivity();
     return stateStore.getPreferences();
   });
   ipcMain.handle(IPC_CHANNELS.setSyncState, async (_event, patch: unknown) => {
@@ -227,18 +239,22 @@ function registerIpc(): void {
   ipcMain.handle(IPC_CHANNELS.saveItem, async (_event, itemId: string) => saveItem(itemId));
   ipcMain.handle(IPC_CHANNELS.removeItem, async (_event, itemId: string) => {
     stateStore.removeItem(itemId);
+    tickInactivity();
     return broadcastState();
   });
   ipcMain.handle(IPC_CHANNELS.renameShelf, async (_event, name: string) => {
     stateStore.renameLiveShelf(name);
+    tickInactivity();
     return broadcastState();
   });
   ipcMain.handle(IPC_CHANNELS.clearShelf, async () => {
     stateStore.clearLiveShelf();
+    tickInactivity();
     return broadcastState();
   });
   ipcMain.handle(IPC_CHANNELS.reorderItems, async (_event, itemIds: string[]) => {
     stateStore.reorderItems(itemIds);
+    tickInactivity();
     return broadcastState();
   });
   ipcMain.handle(IPC_CHANNELS.shareShelfItems, async (_event, itemIds?: string[]) => shareItems(itemIds));
@@ -274,6 +290,7 @@ function registerIpc(): void {
         label: 'Remove Item',
         click: () => {
           stateStore.removeItem(item.id);
+          tickInactivity();
           broadcastState();
         },
       },
@@ -309,6 +326,7 @@ function registerIpc(): void {
         enabled: items.length > 0,
         click: () => {
           stateStore.clearLiveShelf();
+          tickInactivity();
           broadcastState();
         },
       },
@@ -318,6 +336,7 @@ function registerIpc(): void {
           stateStore.closeShelf();
           shelfWindow.resetPosition();
           shelfWindow.hide();
+          inactivityTimer.clear();
           broadcastState();
         },
       },
@@ -333,6 +352,10 @@ function registerIpc(): void {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send(IPC_CHANNELS.showToast, payload);
     }
+  });
+
+  ipcMain.on(IPC_CHANNELS.shelfInteractionPing, () => {
+    tickInactivity();
   });
 
   ipcMain.on(IPC_CHANNELS.startItemDrag, (event, itemId: string) => {
@@ -431,6 +454,7 @@ async function createShelf(
   const isShake = reason === 'shake';
   await shelfWindow.showNear(point, inactive, isShake ? { width: 240, height: 296 } : undefined);
   broadcastState();
+  tickInactivity();
 }
 
 function applyRemoteShelfSnapshot(remoteShelf: ShelfRecord): void {
@@ -502,6 +526,7 @@ async function restoreShelf(id: string): Promise<AppState> {
 
   shelfWindow.resetPosition();
   await shelfWindow.showNear(currentCursorPoint(), false);
+  tickInactivity();
   return broadcastState();
 }
 
@@ -565,6 +590,7 @@ async function addPayloadsToLiveShelf(
     await shelfWindow.showNear(options.point ?? currentCursorPoint(), options.inactive ?? false);
   }
   broadcastState();
+  tickInactivity();
   return true;
 }
 
@@ -633,6 +659,16 @@ function broadcastState(): AppState {
   shelfWindow.sendState(state);
   preferencesWindow.sendState(state);
   return state;
+}
+
+function tickInactivity(): void {
+  const shouldArm =
+    stateStore.getPreferences().shelfInteraction.autoRetract && shelfWindow.isVisible();
+  if (shouldArm) {
+    inactivityTimer.reset();
+  } else {
+    inactivityTimer.clear();
+  }
 }
 
 function liveShelfItems(): ShelfItemRecord[] {

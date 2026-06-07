@@ -309,19 +309,6 @@ function ShelfSettings({ state, showToast }: { state: AppState; showToast(msg: s
             </Picker>
           }
         />
-        <SettingsRow
-          title="Shelf edge action"
-          copy="Behavior when interacting with the shelf edge."
-          trailing={
-            <Picker
-              value={interaction.shelfEdgeAction ?? 'dock'}
-              onChange={(v) => void updateShelfInteraction({ shelfEdgeAction: v as 'dock' | 'close' })}
-            >
-              <option value="dock">Dock Shelf</option>
-              <option value="close">Close Shelf</option>
-            </Picker>
-          }
-        />
       </SettingsGroup>
 
       <SettingsGroup title="Automation">
@@ -341,19 +328,8 @@ function ShelfSettings({ state, showToast }: { state: AppState; showToast(msg: s
           {autoClosePrompt}
         </SettingsRow>
         <SettingsRow
-          icon={<IconHand />}
-          title="Snap into place"
-          copy="Items snap to a grid when dropped on a shelf."
-          trailing={
-            <Toggle
-              checked={interaction.snapToGrid ?? false}
-              onChange={(checked) => void updateShelfInteraction({ snapToGrid: checked })}
-            />
-          }
-        />
-        <SettingsRow
           title="Auto-retract"
-          copy="Minimize the shelf after a period of inactivity."
+          copy="Hide the shelf after 60 seconds of inactivity."
           trailing={
             <Toggle
               checked={interaction.autoRetract ?? false}

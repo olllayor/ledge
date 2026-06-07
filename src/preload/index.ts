@@ -135,6 +135,9 @@ const api: LedgeAPI = {
       ipcRenderer.removeListener(IPC_CHANNELS.stateUpdated, wrapped);
     };
   },
+  shelfInteractionPing() {
+    ipcRenderer.send(IPC_CHANNELS.shelfInteractionPing);
+  },
 };
 
 contextBridge.exposeInMainWorld('ledge', api);

@@ -99,6 +99,9 @@ export function ShelfView({ state }: ShelfViewProps) {
   const primaryItem = items[0] ?? null;
   const itemCount = items.length;
   const heroMode = getHeroMode(items);
+  const shelfInteraction = state.preferences.shelfInteraction;
+  const autoCloseShelf = shelfInteraction.autoCloseShelf ?? false;
+  const doubleClickAction = shelfInteraction.doubleClickAction ?? 'open';
   const [isImporting, setIsImporting] = useState(false);
   const [sessionMode, setSessionMode] = useState<SessionMode>('idle');
   const [isHovering, setIsHovering] = useState(false);
@@ -109,6 +112,8 @@ export function ShelfView({ state }: ShelfViewProps) {
   const lastUpdatedAtRef = useRef(liveShelf?.updatedAt ?? '');
   const dragDepthRef = useRef(0);
   const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPingRef = useRef(0);
+  const PING_INTERVAL_MS = 1000;
   const UNDO_TIMEOUT = 5000;
   const isAcceptingDrop = sessionMode === 'acceptingDrop';
   const isExporting = sessionMode === 'exporting';
@@ -231,6 +236,15 @@ export function ShelfView({ state }: ShelfViewProps) {
     setSessionMode((current) => (current === 'acceptingDrop' ? 'idle' : current));
   }
 
+  function pingInteraction() {
+    const now = Date.now();
+    if (now - lastPingRef.current < PING_INTERVAL_MS) {
+      return;
+    }
+    lastPingRef.current = now;
+    window.ledge.shelfInteractionPing();
+  }
+
   function handleExportAndClear() {
     const exportable = getExportableItems(items);
     if (exportable.length === 0) return false;
@@ -265,6 +279,7 @@ export function ShelfView({ state }: ShelfViewProps) {
 
     dragDepthRef.current += 1;
     setSessionMode('acceptingDrop');
+    pingInteraction();
   }
 
   function handleDragLeave(event: React.DragEvent<HTMLElement>) {
@@ -287,6 +302,7 @@ export function ShelfView({ state }: ShelfViewProps) {
 
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
+    pingInteraction();
 
     if (sessionMode !== 'acceptingDrop') {
       setSessionMode('acceptingDrop');
@@ -296,6 +312,7 @@ export function ShelfView({ state }: ShelfViewProps) {
   async function handleDrop(event: React.DragEvent<HTMLElement>) {
     event.preventDefault();
     resetDropState();
+    pingInteraction();
     await pushPayloads(await payloadsFromTransfer(event.dataTransfer));
   }
 
@@ -334,6 +351,8 @@ export function ShelfView({ state }: ShelfViewProps) {
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onPointerDown={pingInteraction}
+      onKeyDown={pingInteraction}
       onPointerEnter={() => {
         if (isExporting) {
           setSessionMode('idle');
@@ -347,7 +366,12 @@ export function ShelfView({ state }: ShelfViewProps) {
       <div className="drag-handle" />
 
       {isItemListOpen && liveShelf ? (
-        <ItemSheet items={items} sheetRef={itemSheetRef} onClose={closeTransientSurface} />
+        <ItemSheet
+          items={items}
+          sheetRef={itemSheetRef}
+          doubleClickAction={doubleClickAction}
+          onClose={closeTransientSurface}
+        />
       ) : (
         <>
           <header className="shelf-topbar">
@@ -389,6 +413,8 @@ export function ShelfView({ state }: ShelfViewProps) {
                   isImporting={isImporting}
                   isExporting={isExporting}
                   dragLocked={isMenuOpen || isItemListOpen}
+                  autoCloseShelf={autoCloseShelf}
+                  doubleClickAction={doubleClickAction}
                   onExportStart={() => {
                     setSessionMode('exporting');
                   }}
@@ -453,10 +479,19 @@ export function ShelfView({ state }: ShelfViewProps) {
 interface ItemSheetProps {
   items: ShelfItemRecord[];
   sheetRef: RefObject<HTMLDivElement | null>;
+  doubleClickAction: 'open' | 'reveal';
   onClose(): void;
 }
 
-function ItemSheet({ items, sheetRef, onClose }: ItemSheetProps) {
+function ItemSheet({ items, sheetRef, doubleClickAction, onClose }: ItemSheetProps) {
+  function handleCellDoubleClick(itemId: string) {
+    if (doubleClickAction === 'reveal') {
+      void window.ledge.revealItem(itemId);
+    } else {
+      void window.ledge.openItem(itemId);
+    }
+  }
+
   return (
     <section ref={sheetRef} className="item-sheet" aria-label="Shelf items">
       <header className="item-sheet-header">
@@ -488,6 +523,7 @@ function ItemSheet({ items, sheetRef, onClose }: ItemSheetProps) {
               e.preventDefault();
               window.ledge.showItemContextMenu(item.id);
             }}
+            onDoubleClick={() => handleCellDoubleClick(item.id)}
           >
             <div className="item-grid-preview">
               {getHeroPreviewSource(item) ? (
@@ -520,6 +556,8 @@ interface HeroItemProps {
   isImporting: boolean;
   isExporting: boolean;
   dragLocked: boolean;
+  autoCloseShelf: boolean;
+  doubleClickAction: 'open' | 'reveal';
   onExportStart(): void;
   onExportEnd(): void;
   onExportItems(): boolean;
@@ -533,6 +571,8 @@ function HeroItem({
   isImporting,
   isExporting,
   dragLocked,
+  autoCloseShelf,
+  doubleClickAction,
   onExportStart,
   onExportEnd,
   onExportItems,
@@ -565,14 +605,30 @@ function HeroItem({
     }
   }
 
+  function handleHeroDoubleClick() {
+    if (isExporting) {
+      return;
+    }
+    if (doubleClickAction === 'reveal') {
+      void window.ledge.revealItem(item.id);
+    } else {
+      void window.ledge.openItem(item.id);
+    }
+  }
+
   return (
     <div
       className={`hero-item is-${heroMode}${canDragOut ? ' is-draggable' : ''}${isExporting ? ' is-exporting' : ''}`}
       draggable={canDragOut}
       onDragStart={handleHeroDragStart}
       onDragEnd={() => {
+        const wasExporting = isExporting;
         onExportEnd();
+        if (autoCloseShelf && wasExporting) {
+          void window.ledge.closeShelf();
+        }
       }}
+      onDoubleClick={handleHeroDoubleClick}
       onContextMenu={(e) => {
         e.preventDefault();
         window.ledge.showItemContextMenu(item.id);

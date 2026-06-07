@@ -140,9 +140,7 @@ describe('computeShakeReady', () => {
       hasSeenShelfLimitMigration: false,
       shelfInteraction: {
         doubleClickAction: 'open',
-        shelfEdgeAction: 'dock',
         autoCloseShelf: false,
-        snapToGrid: false,
         autoRetract: false,
       },
     })

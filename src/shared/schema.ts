@@ -75,9 +75,7 @@ export const shelfRecordSchema = z.object({
 
 export const shelfInteractionSchema = z.object({
   doubleClickAction: z.enum(['open', 'reveal']).default('open'),
-  shelfEdgeAction: z.enum(['dock', 'close']).default('dock'),
   autoCloseShelf: z.boolean().default(false),
-  snapToGrid: z.boolean().default(false),
   autoRetract: z.boolean().default(false),
 });
 
@@ -91,9 +89,7 @@ export const preferencesRecordSchema = z.object({
   hasSeenShelfLimitMigration: z.boolean().default(false),
   shelfInteraction: shelfInteractionSchema.default({
     doubleClickAction: 'open',
-    shelfEdgeAction: 'dock',
     autoCloseShelf: false,
-    snapToGrid: false,
     autoRetract: false,
   }),
 });
