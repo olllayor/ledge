@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { AppState, IngestPayload, ShelfItemRecord } from '@shared/schema';
 import { getExportableItems, getHeroCountLabel, getHeroMode, type HeroMode, type SessionMode } from './shelfFlow';
 import {
@@ -89,11 +89,20 @@ function EmptyStateIllustration() {
   );
 }
 
-interface ShelfViewProps {
-  state: AppState;
+interface ShelfViewState {
+  liveShelf: AppState['liveShelf'];
+  preferences: {
+    shelfInteraction: AppState['preferences']['shelfInteraction'];
+    shakeEnabled: AppState['preferences']['shakeEnabled'];
+  };
+  permissionStatus: AppState['permissionStatus'];
 }
 
-export function ShelfView({ state }: ShelfViewProps) {
+interface ShelfViewProps {
+  state: ShelfViewState;
+}
+
+function ShelfView({ state }: ShelfViewProps) {
   const liveShelf = state.liveShelf;
   const items = liveShelf?.items ?? [];
   const primaryItem = items[0] ?? null;
@@ -212,7 +221,7 @@ export function ShelfView({ state }: ShelfViewProps) {
     };
   }, [sessionMode]);
 
-  async function pushPayloads(payloads: IngestPayload[]) {
+  const pushPayloads = useCallback(async (payloads: IngestPayload[]) => {
     if (payloads.length === 0) {
       return;
     }
@@ -229,23 +238,23 @@ export function ShelfView({ state }: ShelfViewProps) {
     } finally {
       setIsImporting(false);
     }
-  }
+  }, [liveShelf]);
 
-  function resetDropState() {
+  const resetDropState = useCallback(() => {
     dragDepthRef.current = 0;
     setSessionMode((current) => (current === 'acceptingDrop' ? 'idle' : current));
-  }
+  }, []);
 
-  function pingInteraction() {
+  const pingInteraction = useCallback(() => {
     const now = Date.now();
     if (now - lastPingRef.current < PING_INTERVAL_MS) {
       return;
     }
     lastPingRef.current = now;
     window.ledge.shelfInteractionPing();
-  }
+  }, []);
 
-  function handleExportAndClear() {
+  const handleExportAndClear = useCallback(() => {
     const exportable = getExportableItems(items);
     if (exportable.length === 0) return false;
 
@@ -270,9 +279,9 @@ export function ShelfView({ state }: ShelfViewProps) {
     }
 
     return didStartDrag;
-  }
+  }, [items]);
 
-  function handleDragEnter(event: React.DragEvent<HTMLElement>) {
+  const handleDragEnter = useCallback((event: React.DragEvent<HTMLElement>) => {
     if (isExporting || !isExternalTransfer(event.dataTransfer)) {
       return;
     }
@@ -280,9 +289,9 @@ export function ShelfView({ state }: ShelfViewProps) {
     dragDepthRef.current += 1;
     setSessionMode('acceptingDrop');
     pingInteraction();
-  }
+  }, [isExporting, pingInteraction]);
 
-  function handleDragLeave(event: React.DragEvent<HTMLElement>) {
+  const handleDragLeave = useCallback((event: React.DragEvent<HTMLElement>) => {
     if (isExporting || !isExternalTransfer(event.dataTransfer)) {
       return;
     }
@@ -293,9 +302,9 @@ export function ShelfView({ state }: ShelfViewProps) {
     if (nextDepth === 0 && !event.currentTarget.contains(event.relatedTarget as Node | null)) {
       setSessionMode((current) => (current === 'acceptingDrop' ? 'idle' : current));
     }
-  }
+  }, [isExporting]);
 
-  function handleDragOver(event: React.DragEvent<HTMLElement>) {
+  const handleDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
     if (isExporting || !isExternalTransfer(event.dataTransfer)) {
       return;
     }
@@ -307,16 +316,16 @@ export function ShelfView({ state }: ShelfViewProps) {
     if (sessionMode !== 'acceptingDrop') {
       setSessionMode('acceptingDrop');
     }
-  }
+  }, [isExporting, sessionMode, pingInteraction]);
 
-  async function handleDrop(event: React.DragEvent<HTMLElement>) {
+  const handleDrop = useCallback(async (event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
     resetDropState();
     pingInteraction();
     await pushPayloads(await payloadsFromTransfer(event.dataTransfer));
-  }
+  }, [resetDropState, pingInteraction, pushPayloads]);
 
-  async function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
+  const handlePaste = useCallback(async (event: React.ClipboardEvent<HTMLDivElement>) => {
     const payloads = await payloadsFromTransfer(event.clipboardData);
     if (payloads.length === 0) {
       return;
@@ -324,23 +333,23 @@ export function ShelfView({ state }: ShelfViewProps) {
 
     event.preventDefault();
     await pushPayloads(payloads);
-  }
+  }, [pushPayloads]);
 
-  async function openOverflowMenu() {
+  const openItemSheet = useCallback(() => {
+    setSessionMode('itemListOpen');
+  }, []);
+
+  const openOverflowMenu = useCallback(async () => {
     if (!liveShelf) {
       return;
     }
     await window.ledge.showShelfContextMenu();
-  }
+  }, [liveShelf]);
 
-  function openItemSheet() {
-    setSessionMode('itemListOpen');
-  }
-
-  function closeTransientSurface() {
+  const closeTransientSurface = useCallback(() => {
     dragDepthRef.current = 0;
     setSessionMode('idle');
-  }
+  }, []);
 
   return (
     <main
@@ -475,6 +484,22 @@ export function ShelfView({ state }: ShelfViewProps) {
     </main>
   );
 }
+
+const ShelfViewMemo = memo(ShelfView, (prevProps, nextProps) => {
+  return (
+    prevProps.state.liveShelf?.id === nextProps.state.liveShelf?.id &&
+    prevProps.state.liveShelf?.updatedAt === nextProps.state.liveShelf?.updatedAt &&
+    prevProps.state.liveShelf?.items.length === nextProps.state.liveShelf?.items.length &&
+    prevProps.state.preferences.shelfInteraction.doubleClickAction === nextProps.state.preferences.shelfInteraction.doubleClickAction &&
+    prevProps.state.preferences.shelfInteraction.autoCloseShelf === nextProps.state.preferences.shelfInteraction.autoCloseShelf &&
+    prevProps.state.preferences.shakeEnabled === nextProps.state.preferences.shakeEnabled &&
+    prevProps.state.permissionStatus.nativeHelperAvailable === nextProps.state.permissionStatus.nativeHelperAvailable &&
+    prevProps.state.permissionStatus.accessibilityTrusted === nextProps.state.permissionStatus.accessibilityTrusted &&
+    prevProps.state.permissionStatus.lastError === nextProps.state.permissionStatus.lastError
+  );
+});
+
+export { ShelfViewMemo as ShelfView };
 
 interface ItemSheetProps {
   items: ShelfItemRecord[];

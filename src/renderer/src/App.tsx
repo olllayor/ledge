@@ -4,15 +4,30 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { OnboardingView } from './components/OnboardingView';
 import { ToastHost } from './components/ToastHost';
 import { useLedgeState } from './hooks/useLedgeState';
+import type { AppState } from '@shared/schema';
 
 const PreferencesView = lazy(() =>
   import('./components/PreferencesView').then((module) => ({ default: module.PreferencesView })),
 );
 
+function selectShelfViewState(state: AppState) {
+  return {
+    liveShelf: state.liveShelf,
+    preferences: {
+      shelfInteraction: state.preferences.shelfInteraction,
+      shakeEnabled: state.preferences.shakeEnabled,
+    },
+    permissionStatus: state.permissionStatus,
+    sync: {
+      plan: state.sync.plan,
+    },
+  };
+}
+
 export function App() {
-  const { state, error } = useLedgeState();
+  const { state, error, fullState } = useLedgeState(selectShelfViewState);
   const [showOnboarding, setShowOnboarding] = useState(
-    () => state && !state.preferences.hasCompletedOnboarding,
+    () => fullState && !fullState.preferences.hasCompletedOnboarding,
   );
   const view = new URLSearchParams(window.location.search).get('view') ?? 'shelf';
 
@@ -27,7 +42,7 @@ export function App() {
     );
   }
 
-  if (!state) {
+  if (!fullState) {
     return (
       <main className="loading-shell">
         <div className="loading-card">
@@ -41,7 +56,7 @@ export function App() {
   if (showOnboarding && view === 'shelf') {
     return (
       <>
-        <OnboardingView state={state} onComplete={() => setShowOnboarding(false)} />
+        <OnboardingView state={fullState} onComplete={() => setShowOnboarding(false)} />
         <ToastHost />
       </>
     );
@@ -61,7 +76,7 @@ export function App() {
           }
         >
           <ErrorBoundary>
-            <PreferencesView state={state} />
+            <PreferencesView state={fullState} />
           </ErrorBoundary>
         </Suspense>
         <ToastHost />
@@ -72,7 +87,7 @@ export function App() {
   return (
     <>
       <ErrorBoundary>
-        <ShelfView state={state} />
+        <ShelfView state={state!} />
       </ErrorBoundary>
       <ToastHost />
     </>

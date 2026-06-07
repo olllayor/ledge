@@ -1,9 +1,26 @@
-import { startTransition, useEffect, useState } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import type { AppState } from '@shared/schema';
 
-export function useLedgeState() {
-  const [state, setState] = useState<AppState | null>(null);
+function shallowEqual<T>(a: T, b: T): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  const keysA = Object.keys(a as object);
+  const keysB = Object.keys(b as object);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    if (!Object.is((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])) return false;
+  }
+  return true;
+}
+
+export function useLedgeState<T = AppState>(
+  selector?: (state: AppState) => T,
+  equalityFn: (a: T, b: T) => boolean = shallowEqual
+): { state: T | null; error: string; fullState: AppState | null } {
+  const [fullState, setFullState] = useState<AppState | null>(null);
   const [error, setError] = useState<string>('');
+  const prevSelectedRef = useRef<T | null>(null);
 
   useEffect(() => {
     if (!window.ledge) {
@@ -18,7 +35,7 @@ export function useLedgeState() {
       .then((nextState) => {
         if (active) {
           startTransition(() => {
-            setState(nextState);
+            setFullState(nextState);
             setError('');
           });
         }
@@ -30,12 +47,9 @@ export function useLedgeState() {
       });
 
     const unsubscribe = window.ledge.subscribeState((nextState) => {
-      if (!active) {
-        return;
-      }
-
+      if (!active) return;
       startTransition(() => {
-        setState(nextState);
+        setFullState(nextState);
         setError('');
       });
     });
@@ -46,8 +60,24 @@ export function useLedgeState() {
     };
   }, []);
 
+  const selected = useMemo(() => {
+    if (!fullState) return null;
+    return selector ? selector(fullState) : (fullState as T);
+  }, [fullState, selector]);
+
+  const shouldUpdate = useMemo(() => {
+    if (prevSelectedRef.current === null && selected === null) return false;
+    if (prevSelectedRef.current === null || selected === null) return true;
+    return !equalityFn(prevSelectedRef.current, selected);
+  }, [selected, equalityFn]);
+
+  if (shouldUpdate) {
+    prevSelectedRef.current = selected;
+  }
+
   return {
-    state,
+    state: prevSelectedRef.current,
     error,
+    fullState,
   };
 }
