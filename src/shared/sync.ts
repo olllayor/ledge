@@ -1,28 +1,40 @@
-import { type BillingPlan, type ShelfColor, type ShelfItemRecord, type ShelfRecord } from './schema';
+import { type ShelfItemRecord, type ShelfRecord, type FileRef } from './schema';
+import {
+  syncShelfLimitForPlan,
+  syncDeviceLimitForPlan,
+  recentShelvesLimitForPlan,
+  shelfColorsForPlan,
+  isShelfColorAllowed,
+  FREE_RECENT_SHELVES_LIMIT,
+  PRO_RECENT_SHELVES_LIMIT,
+  FREE_SHELF_COLORS,
+  PRO_SHELF_COLORS,
+} from './syncUtils';
 
-export const FREE_SYNC_SHELF_LIMIT = 100;
-export const FREE_SYNC_DEVICE_LIMIT = 1;
-export const PRO_SYNC_SHELF_LIMIT = 500;
-export const PRO_SYNC_DEVICE_LIMIT = 3;
-export const PRO_IMAGE_STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
+// Re-export the plan utilities and constants so existing call sites
+// (notably src/renderer/src/hooks/usePlan.ts) can keep importing from '@shared/sync'.
+export {
+  syncShelfLimitForPlan,
+  syncDeviceLimitForPlan,
+  recentShelvesLimitForPlan,
+  shelfColorsForPlan,
+  isShelfColorAllowed,
+  FREE_RECENT_SHELVES_LIMIT,
+  PRO_RECENT_SHELVES_LIMIT,
+  FREE_SHELF_COLORS,
+  PRO_SHELF_COLORS,
+};
 
-export const FREE_RECENT_SHELVES_LIMIT = 3;
-export const PRO_RECENT_SHELVES_LIMIT = 10;
-
-export const FREE_SHELF_COLORS: readonly ShelfColor[] = ['ember', 'wave'];
-export const PRO_SHELF_COLORS: readonly ShelfColor[] = ['ember', 'wave', 'forest', 'sand'];
-
-export interface CloudFileRef {
-  originalPath: string;
-  resolvedPath: string;
-  isStale: boolean;
-  isMissing: boolean;
-}
+/**
+ * Cloud representation of a file-backed item. The native macOS bookmark
+ * is a local-only secret and must never be serialized off the device.
+ */
+export type CloudFileRef = Omit<FileRef, 'bookmarkBase64'>;
 
 export type CloudShelfItem =
-  | Omit<Extract<ShelfItemRecord, { kind: 'file' }>, 'file'> & { file: CloudFileRef }
-  | Omit<Extract<ShelfItemRecord, { kind: 'folder' }>, 'file'> & { file: CloudFileRef }
-  | Omit<Extract<ShelfItemRecord, { kind: 'imageAsset' }>, 'file'> & { file: CloudFileRef }
+  | (Omit<Extract<ShelfItemRecord, { kind: 'file' }>, 'file'> & { file: CloudFileRef })
+  | (Omit<Extract<ShelfItemRecord, { kind: 'folder' }>, 'file'> & { file: CloudFileRef })
+  | (Omit<Extract<ShelfItemRecord, { kind: 'imageAsset' }>, 'file'> & { file: CloudFileRef })
   | Extract<ShelfItemRecord, { kind: 'text' }>
   | (Extract<ShelfItemRecord, { kind: 'url' }> & { cloudStorageId?: string; cloudStorageBytes?: number });
 
@@ -34,26 +46,6 @@ export interface CloudShelfRecord {
   updatedAt: string;
   origin: ShelfRecord['origin'];
   items: CloudShelfItem[];
-}
-
-export function syncShelfLimitForPlan(plan: BillingPlan): number {
-  return plan === 'pro' ? PRO_SYNC_SHELF_LIMIT : FREE_SYNC_SHELF_LIMIT;
-}
-
-export function syncDeviceLimitForPlan(plan: BillingPlan): number {
-  return plan === 'pro' ? PRO_SYNC_DEVICE_LIMIT : FREE_SYNC_DEVICE_LIMIT;
-}
-
-export function recentShelvesLimitForPlan(plan: BillingPlan): number {
-  return plan === 'pro' ? PRO_RECENT_SHELVES_LIMIT : FREE_RECENT_SHELVES_LIMIT;
-}
-
-export function shelfColorsForPlan(plan: BillingPlan): readonly ShelfColor[] {
-  return plan === 'pro' ? PRO_SHELF_COLORS : FREE_SHELF_COLORS;
-}
-
-export function isShelfColorAllowed(color: ShelfColor, plan: BillingPlan): boolean {
-  return plan === 'pro' ? PRO_SHELF_COLORS.includes(color) : FREE_SHELF_COLORS.includes(color);
 }
 
 export function serializeShelfForCloud(shelf: ShelfRecord): CloudShelfRecord {

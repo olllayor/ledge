@@ -34,3 +34,17 @@ describe('isOpenPathSuccess', () => {
     expect(isOpenPathSuccess('The file could not be opened')).toBe(false)
   })
 })
+
+describe('validateGlobalShortcut (additional cases)', () => {
+  it('rejects completely empty input', () => {
+    expect(validateGlobalShortcut('   ')).toBe('')
+  })
+
+  it('rejects unknown keys', () => {
+    expect(validateGlobalShortcut('Command+NotAKey')).toBe('Shortcut key "NotAKey" is not supported.')
+  })
+
+  it('rejects a bare modifier with no key', () => {
+    expect(validateGlobalShortcut('Command')).toBe('Shortcut needs a non-modifier key.')
+  })
+})

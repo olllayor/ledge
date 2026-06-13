@@ -31,7 +31,16 @@ export const refreshEntitlements = action({
     const userId = await ctx.runQuery(internal.billing.userIdForSession, {
       sessionToken: args.sessionToken,
     });
+    const userEmail = await ctx.runQuery(internal.billing.emailForUserId, { userId });
     const result = await fetchLemonSqueezyEntitlement(apiKey, args.licenseKey, args.orderId);
+    // Verify the license belongs to the signed-in user. Without this
+    // check, any user could paste an arbitrary license key and promote
+    // themselves to Pro using someone else's purchase.
+    if (result.userEmail && userEmail && result.userEmail.toLowerCase() !== userEmail.toLowerCase()) {
+      throw new ConvexError(
+        "This license key is registered to a different account. Sign in with the matching email to use it.",
+      );
+    }
     await ctx.runMutation(internal.billing.applyEntitlement, {
       userId,
       plan: result.active ? "pro" : "free",
@@ -51,6 +60,14 @@ export const userIdForSession = internalQuery({
   args: sessionArgs,
   handler: async (ctx, args) => {
     return await requireUser(ctx, args.sessionToken);
+  },
+});
+
+export const emailForUserId = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    return user?.email;
   },
 });
 
@@ -102,6 +119,7 @@ async function fetchLemonSqueezyEntitlement(
   customerId?: string;
   subscriptionId?: string;
   renewsAt?: number;
+  userEmail?: string;
 }> {
   if (!licenseKey && !orderId) {
     throw new ConvexError("Provide a Lemon Squeezy license key or order ID.");
@@ -121,6 +139,7 @@ async function fetchLemonSqueezyEntitlement(
       active: Boolean(json.valid),
       customerId: json.meta?.customer_id ? String(json.meta.customer_id) : undefined,
       subscriptionId: json.meta?.subscription_id ? String(json.meta.subscription_id) : undefined,
+      userEmail: json.license_key?.user_email ? String(json.license_key.user_email) : undefined,
     };
   }
 

@@ -17,3 +17,19 @@ build/icon.png
 .codex/*
 !.codex/environments/
 !.codex/environments/environment.toml
+
+# AI / agent tool caches and configs. These are machine-local artifacts
+# and should never enter version control. Add new entries here when a
+# new tool starts writing into the repo root.
+.agents/
+.opencode/
+.antigravitycli/
+.playwright-mcp/
+opencode.json
+.git.save
+
+# Vim / editor swap files. The repo doesn't pin an editor, but stray
+# .swp / .swo / ~ files have shown up before.
+*.swp
+*.swo
+*~

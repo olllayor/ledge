@@ -48,6 +48,47 @@ export const cleanupExpiredOtps = internalMutation({
   },
 });
 
+export const cleanupOldWebhookEvents = internalMutation({
+  handler: async (ctx) => {
+    // Keep 30 days of dedup history. A replayed event older than that
+    // is a non-issue: even if we re-apply the entitlement, the worst
+    // case is "active" overwriting "active" (or "cancelled" staying
+    // "cancelled") — both already protected by the email-match check
+    // in refreshEntitlements.
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const old = await ctx.db
+      .query("processedWebhookEvents")
+      .order("asc")
+      .take(BATCH_SIZE);
+    const toDelete = old.filter((event) => event.processedAt < cutoff);
+    for (const event of toDelete) {
+      await ctx.db.delete(event._id);
+    }
+    if (toDelete.length === BATCH_SIZE) {
+      await ctx.scheduler.runAfter(0, internal.crons.cleanupOldWebhookEvents);
+    }
+  },
+});
+
+export const cleanupOldUploadEvents = internalMutation({
+  handler: async (ctx) => {
+    // Image upload events are only meaningful for the rolling 1-hour
+    // in-flight cap. Anything older than 24h can be safely discarded.
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const old = await ctx.db
+      .query("imageUploadEvents")
+      .order("asc")
+      .take(BATCH_SIZE);
+    const toDelete = old.filter((event) => event.createdAt < cutoff);
+    for (const event of toDelete) {
+      await ctx.db.delete(event._id);
+    }
+    if (toDelete.length === BATCH_SIZE) {
+      await ctx.scheduler.runAfter(0, internal.crons.cleanupOldUploadEvents);
+    }
+  },
+});
+
 const crons = cronJobs();
 
 crons.interval(
@@ -60,6 +101,18 @@ crons.interval(
   "cleanup expired OTPs",
   { hours: 1 },
   internal.crons.cleanupExpiredOtps,
+);
+
+crons.interval(
+  "cleanup old upload events",
+  { hours: 1 },
+  internal.crons.cleanupOldUploadEvents,
+);
+
+crons.interval(
+  "cleanup old webhook events",
+  { hours: 24 },
+  internal.crons.cleanupOldWebhookEvents,
 );
 
 export default crons;

@@ -43,6 +43,7 @@ export const IPC_CHANNELS = {
   showToast: 'ledge:show-toast',
   stateUpdated: 'ledge:state-updated',
   shelfInteractionPing: 'ledge:shelf-interaction-ping',
+  getAppVersion: 'ledge:get-app-version',
 } as const;
 
 export type ToastKind = 'success' | 'error' | 'info';
@@ -91,4 +92,5 @@ export interface LedgeAPI {
   getFilePath(file: File): string;
   subscribeState(listener: StateListener): () => void;
   shelfInteractionPing(): void;
+  getAppVersion(): Promise<string>;
 }

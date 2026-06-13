@@ -6,9 +6,7 @@ import {
   IconMenuDots,
   IconChevronDown,
   IconChevronLeft,
-  IconGear,
   IconGrid,
-  IconList,
   IconFolder,
   IconArrowUpRight,
 } from './Icons';
@@ -596,16 +594,10 @@ function ItemSheet({ items, sheetRef, doubleClickAction, onClose }: ItemSheetPro
           <p className="item-sheet-title">{items.length} Files</p>
           <p className="item-sheet-copy">{items.length > 0 ? 'Items in shelf' : ''}</p>
         </div>
-        <div className="item-sheet-actions">
-          <button className="ghost-button icon-button" aria-label="Settings">
-            <IconGear />
-          </button>
-          <button className="ghost-button icon-button active" aria-label="Grid View">
+        <div className="item-sheet-actions" aria-hidden="true">
+          <span className="ghost-button icon-button active" aria-label="Grid view (only mode)">
             <IconGrid />
-          </button>
-          <button className="ghost-button icon-button" aria-label="List View">
-            <IconList />
-          </button>
+          </span>
         </div>
       </header>
       <div className="item-sheet-grid">
@@ -776,7 +768,7 @@ function HeroItem({
         className={`hero-count-button${isExporting ? ' is-exporting' : ''}`}
         onClick={onOpenItemSheet}
         disabled={items.length < 2}
-        aria-label={`Show ${statusLabel}`}
+        aria-label={isImporting ? "Importing items" : `Open shelf with ${items.length} ${items.length === 1 ? "item" : "items"}`}
       >
         <span>{statusLabel}</span>
         {items.length >= 2 ? <IconChevronDown /> : null}

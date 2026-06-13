@@ -9,6 +9,9 @@ on:
 jobs:
   verify:
     runs-on: macos-14
+    # Cap the job at 20 minutes so a hung build or flaky test can’t
+    # block the queue. lint+test+build normally finish in ~5 minutes.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout

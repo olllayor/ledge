@@ -1,14 +1,26 @@
 import { ConvexError, v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import {
+  PRO_IMAGE_STORAGE_LIMIT_BYTES,
+  PRO_REQUIRED_FOR_PREFERENCES_MESSAGE,
+} from "./sharedSchemas";
+import {
+  syncShelfLimitForPlan,
+  syncDeviceLimitForPlan,
+} from "../src/shared/syncUtils";
+
+// Re-export the plan helpers under the model-local names used by the rest of
+// convex/. The shared utils use a `sync*` prefix to make their purpose
+// explicit; the Convex fn layer historically called them without the prefix.
+export const deviceLimitForPlan = syncDeviceLimitForPlan;
+export const shelfLimitForPlan = syncShelfLimitForPlan;
+export { PRO_IMAGE_STORAGE_LIMIT_BYTES, PRO_REQUIRED_FOR_PREFERENCES_MESSAGE };
 
 export const FREE_SYNC_SHELF_LIMIT = 100;
 export const FREE_SYNC_DEVICE_LIMIT = 1;
 export const PRO_SYNC_SHELF_LIMIT = 500;
 export const PRO_SYNC_DEVICE_LIMIT = 3;
-export const PRO_IMAGE_STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
-
-export const PRO_REQUIRED_FOR_PREFERENCES_MESSAGE = "Preferences sync requires Pro.";
 
 export const sessionArgs = {
   sessionToken: v.string(),
@@ -43,14 +55,6 @@ export async function currentPlan(ctx: QueryCtx | MutationCtx, userId: Id<"users
     .first();
 
   return entitlement?.plan === "pro" && entitlement.status === "active" ? "pro" : "free";
-}
-
-export function shelfLimitForPlan(plan: "free" | "pro"): number {
-  return plan === "pro" ? PRO_SYNC_SHELF_LIMIT : FREE_SYNC_SHELF_LIMIT;
-}
-
-export function deviceLimitForPlan(plan: "free" | "pro"): number {
-  return plan === "pro" ? PRO_SYNC_DEVICE_LIMIT : FREE_SYNC_DEVICE_LIMIT;
 }
 
 export async function storageBytesUsed(ctx: QueryCtx | MutationCtx, userId: Id<"users">): Promise<number> {

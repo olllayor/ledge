@@ -1,4 +1,4 @@
-import { Menu, Tray, nativeImage } from 'electron'
+import { app, Menu, Tray, nativeImage } from 'electron'
 import { join } from 'node:path'
 import type { AppState, ShelfRecord } from '@shared/schema'
 
@@ -65,7 +65,7 @@ export class TrayController {
         type: 'separator'
       },
       {
-        label: `Version ${process.env.npm_package_version ?? '0.1.0'}`,
+        label: `Version ${app.getVersion()}`,
         enabled: false
       },
       {
