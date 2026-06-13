@@ -13,9 +13,18 @@ on:
         required: false
         default: ''
 
+# Coalesce concurrent runs of this workflow so a fast-forward merge and a
+# tag push within seconds don't both try to publish a release.
+concurrency:
+  group: ledge-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-14
+    # Release builds compile Electron + native helper + sign + DMG; allow
+    # up to an hour so a slow Apple notarization doesn’t kill the job.
+    timeout-minutes: 60
     permissions:
       contents: write
     env:

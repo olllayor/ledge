@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { serializeShelfForCloud, syncDeviceLimitForPlan, syncShelfLimitForPlan } from './sync'
+import { syncDeviceLimitForPlan, syncShelfLimitForPlan } from './syncUtils'
+import { serializeShelfForCloud } from './sync'
 import type { ShelfRecord } from './schema'
 
 describe('sync helpers', () => {

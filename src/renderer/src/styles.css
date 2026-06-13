@@ -24,6 +24,21 @@
     'calt' 1;
   /* Prefer legibility over rendering speed for body text */
   text-rendering: optimizeLegibility;
+
+  /* Animation timing variables */
+  --transition-fast: 160ms ease-out;
+  --transition-spring: 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Light mode support */
@@ -78,6 +93,31 @@ button {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Animation utility classes */
+.transition-fast {
+  transition: var(--transition-fast);
+}
+
+.transition-spring {
+  transition: var(--transition-spring);
+}
+
+.transition-transform {
+  transition: transform 160ms ease-out;
+}
+
+.transition-colors {
+  transition: background-color 160ms ease-out, border-color 160ms ease-out, box-shadow 160ms ease-out;
+}
+
+.transition-opacity {
+  transition: opacity 160ms ease-out;
+}
+
+.transition-width {
+  transition: width 160ms ease-out;
 }
 
 .loading-shell {
@@ -173,10 +213,10 @@ button {
   background: var(--surface);
   color: var(--ink);
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    transform 160ms ease,
-    opacity 160ms ease;
+    background 160ms ease-out,
+    border-color 160ms ease-out,
+    transform 160ms ease-out,
+    opacity 160ms ease-out;
   -webkit-app-region: no-drag;
 }
 
@@ -188,6 +228,15 @@ button {
 .settings-cta:hover {
   border-color: var(--line-strong);
   background: var(--surface-strong);
+}
+
+.chrome-button:active,
+.ghost-button:active,
+.mini-button:active,
+.toggle:active,
+.settings-nav-item:active,
+.settings-cta:active {
+  transform: scale(0.98);
 }
 
 .chrome-button {
@@ -241,7 +290,7 @@ button {
   inset: 0;
   border-radius: 14px;
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: opacity 180ms ease-out;
   pointer-events: none;
 }
 
@@ -348,8 +397,8 @@ button {
 .hero-item.is-draggable .hero-stage {
   box-shadow: none;
   transition:
-    transform 160ms ease,
-    box-shadow 160ms ease;
+    transform 160ms ease-out,
+    box-shadow 160ms ease-out;
 }
 
 .hero-item.is-draggable:hover .hero-stage:not(.is-exporting) {
@@ -389,9 +438,9 @@ button {
     0 14px 22px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 var(--line);
   transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    filter 160ms ease;
+    opacity 160ms ease-out,
+    transform 160ms ease-out,
+    filter 160ms ease-out;
 }
 
 .hero-artwork-deck {
@@ -447,9 +496,9 @@ button {
   display: grid;
   place-items: center;
   transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    filter 160ms ease;
+    opacity 160ms ease-out,
+    transform 160ms ease-out,
+    filter 160ms ease-out;
 }
 
 .hero-stack-card {
@@ -512,10 +561,10 @@ button {
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    transform 160ms ease,
-    opacity 160ms ease;
+    background 160ms ease-out,
+    border-color 160ms ease-out,
+    transform 160ms ease-out,
+    opacity 160ms ease-out;
   -webkit-app-region: no-drag;
 }
 
@@ -525,7 +574,7 @@ button {
 }
 
 .hero-count-button:active:not(:disabled) {
-  transform: translateY(0);
+  transform: scale(0.98);
 }
 
 .hero-count-button:disabled {
@@ -556,7 +605,20 @@ button {
   font-size: 0.72rem;
   font-weight: 650;
   cursor: pointer;
+  transition:
+    background 160ms ease-out,
+    border-color 160ms ease-out,
+    transform 160ms ease-out,
+    opacity 160ms ease-out;
   -webkit-app-region: no-drag;
+}
+
+.hero-relink-button:hover {
+  background: rgba(24, 120, 255, 0.2);
+}
+
+.hero-relink-button:active {
+  transform: scale(0.98);
 }
 
 .drag-button {
@@ -576,9 +638,9 @@ button {
   cursor: grab;
   will-change: transform;
   transition:
-    opacity 160ms ease,
-    transform 160ms ease,
-    background 160ms ease;
+    opacity 160ms ease-out,
+    transform 160ms ease-out,
+    background 160ms ease-out;
   -webkit-app-region: no-drag;
 }
 
@@ -685,7 +747,7 @@ button {
   flex: 1;
   gap: 10px;
   min-height: 0;
-  animation: fade-in 150ms ease;
+  animation: fade-in 150ms ease-out;
 }
 
 @keyframes fade-in {
@@ -870,7 +932,7 @@ button {
   border-radius: 12px;
   border: 1px solid var(--line);
   background: var(--surface);
-  animation: fade-in 150ms ease;
+  animation: fade-in 150ms ease-out;
 }
 
 .undo-bar-label {
@@ -887,7 +949,7 @@ button {
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 6px;
-  transition: opacity 120ms ease;
+  transition: opacity 160ms ease-out;
 }
 
 .undo-bar-action:hover {
@@ -1004,7 +1066,7 @@ button {
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: all 120ms ease;
+  transition: background-color 160ms ease-out, color 160ms ease-out;
 }
 
 .settings-nav-item:hover {
@@ -1217,7 +1279,7 @@ button {
   color: var(--pref-text);
   padding: 8px 12px;
   font-size: 13px;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
 }
 
 .pref-input::placeholder {
@@ -1315,7 +1377,7 @@ button {
   border: none;
   background: var(--pref-toggle-off);
   cursor: pointer;
-  transition: background 200ms ease;
+  transition: background 160ms ease-out;
   flex: none;
   position: relative;
 }
@@ -1328,7 +1390,8 @@ button {
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transform: translateX(0);
-  transition: transform 200ms ease;
+  transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: transform;
 }
 
 .toggle.is-on {
@@ -1357,7 +1420,7 @@ button {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 100ms ease;
+  transition: border-color 160ms ease-out;
   flex: none;
 }
 
@@ -1386,11 +1449,15 @@ button {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 120ms ease;
+  transition: background-color 160ms ease-out, opacity 160ms ease-out;
 }
 
 .settings-cta:hover:not(:disabled) {
   background: var(--pref-sidebar-hover);
+}
+
+.settings-cta:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .settings-cta:disabled {
@@ -1428,12 +1495,16 @@ button {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 120ms ease;
+  transition: background-color 160ms ease-out, opacity 160ms ease-out;
   flex: none;
 }
 
 .settings-cta-small:hover:not(:disabled) {
   background: var(--pref-sidebar-hover);
+}
+
+.settings-cta-small:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .settings-cta-small:disabled {
@@ -1450,7 +1521,7 @@ button {
   cursor: pointer;
   padding: 4px 16px 10px;
   text-decoration: none;
-  transition: opacity 120ms ease;
+  transition: opacity 160ms ease-out;
 }
 
 .settings-link-btn:hover:not(:disabled) {
@@ -1505,7 +1576,7 @@ button {
   height: 100%;
   border-radius: 999px;
   background: var(--pref-accent);
-  transition: width 400ms ease;
+  transition: width 300ms ease-out;
 }
 
 /* ── Toast ── */
@@ -1520,7 +1591,7 @@ button {
   border-radius: 999px;
   font-size: 13px;
   font-weight: 500;
-  animation: toast-in 200ms ease;
+  animation: toast-in 200ms ease-out;
   pointer-events: none;
   max-width: calc(100% - 24px);
   text-align: center;
@@ -1578,6 +1649,23 @@ button {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+}
+
+.toast-host.exiting,
+.pref-toast.exiting {
+  animation: toast-out 150ms ease-in forwards;
+  pointer-events: none;
 }
 
 /* ── Pro Hero ── */
@@ -1951,19 +2039,19 @@ textarea.pref-input {
 }
 
 .onboarding-step.slide-forward.is-active {
-  animation: slideInForward 200ms ease forwards;
+  animation: slideInForward 200ms ease-out forwards;
 }
 
 .onboarding-step.slide-forward.is-hidden {
-  animation: slideOutLeft 200ms ease forwards;
+  animation: slideOutLeft 200ms ease-in forwards;
 }
 
 .onboarding-step.slide-backward.is-active {
-  animation: slideInBackward 200ms ease forwards;
+  animation: slideInBackward 200ms ease-out forwards;
 }
 
 .onboarding-step.slide-backward.is-hidden {
-  animation: slideOutRight 200ms ease forwards;
+  animation: slideOutRight 200ms ease-in forwards;
 }
 
 @keyframes slideInForward {
@@ -2098,8 +2186,8 @@ textarea.pref-input {
   background: var(--surface);
   min-width: 72px;
   transition:
-    transform 160ms ease,
-    border-color 160ms ease;
+    transform 160ms ease-out,
+    border-color 160ms ease-out;
 }
 
 .activation-card:hover {

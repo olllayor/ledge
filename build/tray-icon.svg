@@ -1,6 +1,5 @@
 <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-  <!-- Ledge shelf -->
-  <rect x="1.5" y="11.5" width="13" height="3" rx="1.5" fill="black"/>
-  <!-- Item/card resting on the shelf -->
-  <rect x="4.5" y="4" width="7" height="7.5" rx="2" fill="black"/>
+  <!-- Card resting on a ledge tray (template: black on transparent) -->
+  <rect x="5" y="3" width="6" height="6" rx="1" fill="black"/>
+  <path d="M2 9.5 L2 11 Q2 12 3 12 L13 12 Q14 12 14 11 L14 9.5 L12.5 9.5 L12.5 11 L3.5 11 L3.5 9.5 Z" fill="black"/>
 </svg>

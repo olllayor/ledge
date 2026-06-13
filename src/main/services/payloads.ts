@@ -2,12 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import {
-  type FileBackedShelfItem,
   type FileRef,
   type IngestPayload,
   type ShelfItemRecord,
-  fileRefSchema
 } from '@shared/schema'
+import { fileRefSchema } from '@shared/commonSchemas'
 
 export interface PayloadContext {
   assetsDir: string
@@ -19,20 +18,20 @@ export interface PayloadContext {
   }>
 }
 
-export function isFileBackedItem(item: ShelfItemRecord): item is FileBackedShelfItem {
-  return item.kind === 'file' || item.kind === 'folder' || item.kind === 'imageAsset'
-}
+// Cap imported image assets so a huge clipboard paste can’t fill the user’s
+// Application Support directory. Files dropped from the filesystem are not
+// copied and are not affected by this cap.
+const MAX_IMPORTED_IMAGE_BYTES = 25 * 1024 * 1024
 
-export function getFileBackedPath(item: FileBackedShelfItem): string | null {
-  if (!isFileBackedItem(item)) {
-    return null
+export class ImportedImageTooLargeError extends Error {
+  readonly sizeBytes: number
+  readonly maxBytes: number
+  constructor(sizeBytes: number, maxBytes: number) {
+    super(`Imported image is ${formatBytes(sizeBytes)}; the local cap is ${formatBytes(maxBytes)}.`)
+    this.name = 'ImportedImageTooLargeError'
+    this.sizeBytes = sizeBytes
+    this.maxBytes = maxBytes
   }
-
-  if (item.file.isMissing) {
-    return null
-  }
-
-  return item.file.resolvedPath || item.file.originalPath || null
 }
 
 export function detectPayloadFromText(text: string): IngestPayload {
@@ -195,6 +194,9 @@ async function createImageAssetItem(
   const storageName = `${id}-${sanitizeFileName(filenameHint)}.${extension}`
   const assetPath = join(context.assetsDir, storageName)
   const data = Buffer.from(base64, 'base64')
+  if (data.byteLength > MAX_IMPORTED_IMAGE_BYTES) {
+    throw new ImportedImageTooLargeError(data.byteLength, MAX_IMPORTED_IMAGE_BYTES)
+  }
   await fs.writeFile(assetPath, data)
   const bookmarkBase64 = await safeBookmark(assetPath, context)
 

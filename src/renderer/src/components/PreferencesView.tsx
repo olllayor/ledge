@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useAppVersion } from '../hooks/useAppVersion';
 import type { AppState, ShakeSensitivity } from '@shared/schema';
 import { useSync } from '../providers/SyncProvider';
 import { usePlan } from '../hooks/usePlan';
@@ -40,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function PreferencesView({ state }: PreferencesViewProps) {
+  const appVersion = useAppVersion();
   const [activeSection, setActiveSection] = useState('general');
   const [toast, setToast] = useState<{ message: string; kind: 'success' | 'error' } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -90,7 +92,7 @@ export function PreferencesView({ state }: PreferencesViewProps) {
           <div className="settings-app-mark">
             <IconApp />
           </div>
-          <p>Ledge 0.1.9</p>
+          <p>{appVersion ? `Ledge ${appVersion}` : 'Ledge'}</p>
         </div>
       </aside>
 
@@ -152,14 +154,8 @@ function GeneralSettings({ state, showToast }: { state: AppState; showToast(msg:
         <SettingsRow
           icon={<IconMonitor />}
           title="Show in menu bar"
-          copy="Ledge stays available from the menu bar."
-          trailing={
-            <Toggle
-              checked={true}
-              onChange={() => {}}
-              disabled
-            />
-          }
+          copy="Ledge is a menu-bar-only app. The tray icon is always present."
+          trailing={<StatusPill label="Always on" variant="good" />}
         />
       </SettingsGroup>
 
@@ -309,19 +305,6 @@ function ShelfSettings({ state, showToast }: { state: AppState; showToast(msg: s
             </Picker>
           }
         />
-        <SettingsRow
-          title="Shelf edge action"
-          copy="Behavior when interacting with the shelf edge."
-          trailing={
-            <Picker
-              value={interaction.shelfEdgeAction ?? 'dock'}
-              onChange={(v) => void updateShelfInteraction({ shelfEdgeAction: v as 'dock' | 'close' })}
-            >
-              <option value="dock">Dock Shelf</option>
-              <option value="close">Close Shelf</option>
-            </Picker>
-          }
-        />
       </SettingsGroup>
 
       <SettingsGroup title="Automation">
@@ -341,19 +324,8 @@ function ShelfSettings({ state, showToast }: { state: AppState; showToast(msg: s
           {autoClosePrompt}
         </SettingsRow>
         <SettingsRow
-          icon={<IconHand />}
-          title="Snap into place"
-          copy="Items snap to a grid when dropped on a shelf."
-          trailing={
-            <Toggle
-              checked={interaction.snapToGrid ?? false}
-              onChange={(checked) => void updateShelfInteraction({ snapToGrid: checked })}
-            />
-          }
-        />
-        <SettingsRow
           title="Auto-retract"
-          copy="Minimize the shelf after a period of inactivity."
+          copy="Hide the shelf after 60 seconds of inactivity."
           trailing={
             <Toggle
               checked={interaction.autoRetract ?? false}

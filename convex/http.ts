@@ -14,8 +14,18 @@ http.route({
       return json({ error: "Webhook secret is not configured." }, 500);
     }
 
-    const raw = await request.text();
-    const signature = request.headers.get("x-signature") ?? "";
+    // Bound the request body so a malicious or buggy caller can’t exhaust
+  // the worker’s memory with a multi-GB POST. 256KB is far more than any
+  // legitimate Lemon Squeezy webhook payload.
+  const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
+  if (Number.isFinite(contentLength) && contentLength > 256 * 1024) {
+    return json({ error: "Payload too large." }, 413);
+  }
+  const raw = await request.text();
+  if (raw.length > 256 * 1024) {
+    return json({ error: "Payload too large." }, 413);
+  }
+  const signature = request.headers.get("x-signature") ?? "";
     const expected = await hmacSha256(secret, raw);
     if (!constantTimeEqual(signature, expected)) {
       return json({ error: "Invalid signature." }, 401);
@@ -27,6 +37,24 @@ http.route({
     const email = String(attributes.user_email ?? attributes.customer_email ?? "").trim().toLowerCase();
     if (!email) {
       return json({ ok: true, ignored: "missing_email" });
+    }
+
+    // Use the Lemon Squeezy event id when available, otherwise fall back
+    // to subscription id + status. Either way, a duplicate delivery from
+    // Lemon Squeezy or a replay attack against our endpoint becomes a
+    // no-op instead of a stale entitlement reapplication.
+    const subscriptionId = payload.data?.id ? String(payload.data.id) : "";
+    const statusKey = attributes.status ? String(attributes.status) : "";
+    const eventId = subscriptionId
+      ? `ls:${subscriptionId}:${statusKey}`
+      : `ls:${email}:${eventName}:${Date.parse(String(attributes.created_at ?? "0")) || 0}`;
+
+    const isNew = await ctx.runMutation(internal.http.claimWebhookEvent, {
+      source: "lemonsqueezy",
+      eventId,
+    });
+    if (!isNew) {
+      return json({ ok: true, deduped: true });
     }
 
     const userId = await ctx.runMutation(internal.http.upsertUserForWebhook, { email });
@@ -52,6 +80,35 @@ http.route({
 });
 
 export default http;
+
+// Check + record that we've already processed a webhook event with the
+// given (source, eventId) pair. Returns true if this is the first time we
+// see it; false if it's a replay.
+export const claimWebhookEvent = internalMutation({
+  args: { source: v.string(), eventId: v.string() },
+  handler: async (ctx, args) => {
+    if (!args.eventId) {
+      // No event id is a misconfiguration; let the caller process anyway
+      // so we don't drop legitimate traffic.
+      return true;
+    }
+    const existing = await ctx.db
+      .query("processedWebhookEvents")
+      .withIndex("by_event", (q) =>
+        q.eq("source", args.source).eq("eventId", args.eventId),
+      )
+      .unique();
+    if (existing) {
+      return false;
+    }
+    await ctx.db.insert("processedWebhookEvents", {
+      source: args.source,
+      eventId: args.eventId,
+      processedAt: Date.now(),
+    });
+    return true;
+  },
+});
 
 export const upsertUserForWebhook = internalMutation({
   args: { email: v.string() },

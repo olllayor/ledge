@@ -89,13 +89,15 @@ const api: LedgeAPI = {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.removeItem, itemId));
   },
   async renameShelf(name) {
-    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.renameShelf, name));
+    const parsed = z.object({ name: z.string().min(1).max(120) }).parse({ name });
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.renameShelf, parsed));
   },
   async clearShelf() {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.clearShelf));
   },
   async reorderItems(itemIds) {
-    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.reorderItems, itemIds));
+    const parsed = z.object({ itemIds: z.array(z.string().uuid()).max(1024) }).parse({ itemIds });
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.reorderItems, parsed));
   },
   async shareShelfItems(itemIds) {
     return ipcRenderer.invoke(IPC_CHANNELS.shareShelfItems, itemIds);
@@ -134,6 +136,13 @@ const api: LedgeAPI = {
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.stateUpdated, wrapped);
     };
+  },
+  shelfInteractionPing() {
+    ipcRenderer.send(IPC_CHANNELS.shelfInteractionPing);
+  },
+  async getAppVersion() {
+    const version = await ipcRenderer.invoke(IPC_CHANNELS.getAppVersion);
+    return typeof version === 'string' ? version : '';
   },
 };
 

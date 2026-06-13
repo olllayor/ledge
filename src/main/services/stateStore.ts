@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
@@ -19,7 +19,7 @@ import {
   type SyncState,
   type SyncStatePatch
 } from '@shared/schema'
-import { recentShelvesLimitForPlan, shelfColorsForPlan } from '@shared/sync'
+import { recentShelvesLimitForPlan, shelfColorsForPlan } from '@shared/syncUtils'
 
 const persistedStateSchema = appStateSchema.omit({ permissionStatus: true })
 const persistedStateEnvelopeV1Schema = appStateSchema.omit({ permissionStatus: true, sync: true }).extend({
@@ -40,18 +40,37 @@ interface PersistedState {
 interface LoadResult {
   state: PersistedState
   needsMigration: boolean
+  corruption: { backupPath: string; cause: Error } | null
+}
+
+export type PersistenceErrorListener = (error: Error) => void
+
+export interface CorruptionDetails {
+  backupPath: string
+  cause: Error
+}
+
+export type CorruptionListener = (details: CorruptionDetails) => void
+
+export interface StateStoreOptions {
+  onPersistenceError?: PersistenceErrorListener
+  onCorruptionDetected?: CorruptionListener
 }
 
 export class StateStore {
   readonly assetsDir: string
   readonly exportsDir: string
   private readonly statePath: string
+  private readonly onPersistenceError: PersistenceErrorListener | null
+  private readonly onCorruptionDetected: CorruptionListener | null
   private persisted: PersistedState
   private pendingSerialized: string | null = null
   private writeScheduled = false
   private writeQueue = Promise.resolve()
 
-  constructor(userDataDir: string) {
+  constructor(userDataDir: string, options: StateStoreOptions = {}) {
+    this.onPersistenceError = options.onPersistenceError ?? null
+    this.onCorruptionDetected = options.onCorruptionDetected ?? null
     this.assetsDir = join(userDataDir, 'assets')
     this.exportsDir = join(userDataDir, 'exports')
     this.statePath = join(userDataDir, 'state.json')
@@ -316,7 +335,8 @@ export class StateStore {
     if (!existsSync(this.statePath)) {
       return {
         state: this.defaultState(),
-        needsMigration: false
+        needsMigration: false,
+        corruption: null
       }
     }
 
@@ -334,7 +354,8 @@ export class StateStore {
               preferences: envelope.preferences,
               sync: syncStateSchema.parse({})
             },
-            needsMigration: true
+            needsMigration: true,
+            corruption: null
           }
         }
 
@@ -346,7 +367,8 @@ export class StateStore {
             preferences: envelope.preferences,
             sync: envelope.sync
           },
-          needsMigration: false
+          needsMigration: false,
+          corruption: null
         }
       }
 
@@ -355,14 +377,38 @@ export class StateStore {
           ...persistedStateSchema.omit({ sync: true }).parse(parsed),
           sync: syncStateSchema.parse({})
         },
-        needsMigration: true
+        needsMigration: true,
+        corruption: null
       }
-    } catch {
+    } catch (error) {
+      const cause = error instanceof Error ? error : new Error(String(error))
+      const backupPath = this.quarantineCorruptStateFile(cause)
       return {
         state: this.defaultState(),
-        needsMigration: false
+        needsMigration: false,
+        corruption: backupPath ? { backupPath, cause } : null
       }
     }
+  }
+
+  private quarantineCorruptStateFile(cause: Error): string | null {
+    // Move the unreadable file aside so the next save() can write a clean
+    // state.json without clobbering evidence, and so the user can recover
+    // the file from ~/Library/Application Support/Ledge/state.json.corrupt-*
+    // if the corruption was a transient parse error rather than data loss.
+    const backupPath = `${this.statePath}.corrupt-${Date.now()}`
+    try {
+      renameSync(this.statePath, backupPath)
+    } catch (renameError) {
+      console.error('Failed to quarantine corrupt Ledge state file.', renameError)
+      this.onPersistenceError?.(
+        renameError instanceof Error ? renameError : new Error(String(renameError)),
+      )
+      return null
+    }
+    console.error(`Ledge state file was unreadable (${cause.message}); moved to ${backupPath}`)
+    this.onCorruptionDetected?.({ backupPath, cause })
+    return backupPath
   }
 
   private save(): void {
@@ -386,9 +432,19 @@ export class StateStore {
         this.pendingSerialized = null
 
         try {
-          await fs.writeFile(this.statePath, serialized, 'utf8')
+          // Write to a sibling temp file and rename atomically. A direct
+          // `fs.writeFile(statePath, ...)` can be interrupted by a crash
+          // or power loss mid-write, leaving the state file truncated or
+          // partially written; the next launch would then trip the
+          // corruption recovery path and force the user to restore from
+          // a `state.json.corrupt-*` backup. Atomic write avoids that.
+          const tempPath = `${this.statePath}.tmp-${process.pid}`
+          await fs.writeFile(tempPath, serialized, 'utf8')
+          await fs.rename(tempPath, this.statePath)
         } catch (error) {
-          console.error('Failed to persist Ledge state.', error)
+          const err = error instanceof Error ? error : new Error(String(error))
+          console.error('Failed to persist Ledge state.', err)
+          this.onPersistenceError?.(err)
         }
       }
 

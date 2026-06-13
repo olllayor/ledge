@@ -10,68 +10,7 @@ import {
   shelfLimitForPlan,
   storageBytesUsed,
 } from "./model";
-
-const fileRef = v.object({
-  originalPath: v.string(),
-  resolvedPath: v.string(),
-  isStale: v.boolean(),
-  isMissing: v.boolean(),
-});
-
-const preview = v.object({
-  summary: v.string(),
-  detail: v.string(),
-});
-
-const shelfItemBase = {
-  id: v.string(),
-  createdAt: v.string(),
-  order: v.number(),
-  title: v.string(),
-  subtitle: v.string(),
-  preview,
-};
-
-const shelfItemSchema = v.union(
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("file"),
-    file: fileRef,
-    mimeType: v.string(),
-  }),
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("folder"),
-    file: fileRef,
-  }),
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("imageAsset"),
-    file: fileRef,
-    mimeType: v.string(),
-  }),
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("text"),
-    text: v.string(),
-    savedFilePath: v.optional(v.string()),
-  }),
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("url"),
-    url: v.string(),
-    savedFilePath: v.optional(v.string()),
-  }),
-);
-
-const preferencesValues = v.object({
-  launchAtLogin: v.boolean(),
-  shakeEnabled: v.boolean(),
-  shakeSensitivity: v.union(v.literal("gentle"), v.literal("balanced"), v.literal("firm")),
-  excludedBundleIds: v.array(v.string()),
-  globalShortcut: v.string(),
-  hasSeenShelfLimitMigration: v.boolean(),
-});
+import { shelfItemSchema, preferencesValues } from "./sharedSchemas";
 
 const shelfPayload = {
   shelfId: v.string(),
@@ -196,19 +135,46 @@ export const upsertShelf = mutation({
       }
     }
 
+    // Validate the client-supplied timestamp up front, before either the
+    // insert or the patch path. The previous version only validated
+    // inside the `if (existing)` branch, so an attacker could create a
+    // new shelf with a poisoned `localUpdatedAt` and never trip the
+    // guard. See the `upsertShelf` test for the future-skew case.
+    const incoming = Date.parse(args.localUpdatedAt);
+    if (!Number.isFinite(incoming)) {
+      throw new ConvexError("Shelf localUpdatedAt is not a valid timestamp.");
+    }
+    const serverNow = Date.now();
+    if (incoming - serverNow > MAX_FUTURE_SKEW_MS) {
+      throw new ConvexError("Shelf localUpdatedAt is too far in the future.");
+    }
+    const clampedLocalUpdatedAt = new Date(Math.min(incoming, serverNow)).toISOString();
+
     const next = {
       name: args.name,
       color: args.color,
       origin: args.origin,
       items: args.items,
       localCreatedAt: args.localCreatedAt,
-      localUpdatedAt: args.localUpdatedAt,
+      localUpdatedAt: clampedLocalUpdatedAt,
       itemCount: args.items.length,
       imageStorageBytes: Math.max(0, args.imageStorageBytes),
-      updatedAt: Date.now(),
+      updatedAt: serverNow,
     };
 
     if (existing) {
+      // Last-write-wins by `localUpdatedAt`. The previous version of
+      // this check trusted the client timestamp absolutely, so a
+      // device that pushed a `9999-12-31...` timestamp would pin its
+      // write on top of every future legitimate update. The skew
+      // validation above makes that impossible.
+      const existingAt = Date.parse(existing.localUpdatedAt);
+      if (Number.isFinite(existingAt) && incoming < existingAt) {
+        // Slower device is replaying an older snapshot. Keep the
+        // server's copy; the slower device will pick it up on its
+        // next listShelves poll and re-apply.
+        return existing._id;
+      }
       await ctx.db.patch(existing._id, next);
       return existing._id;
     }
@@ -217,7 +183,7 @@ export const upsertShelf = mutation({
       userId,
       shelfId: args.shelfId,
       ...next,
-      createdAt: Date.now(),
+      createdAt: serverNow,
     });
   },
 });
@@ -249,6 +215,19 @@ export const patchPreferences = mutation({
   },
 });
 
+// Cap how many bytes a single user can put in flight (upload URLs issued
+// but never recorded) in a rolling hour. Without this, a Pro user with
+// a valid session could request thousands of upload URLs, push bytes
+// into Convex storage, and never call recordImageAsset — paying the
+// _storage bill without ever recording against the per-user cap.
+const MAX_INFLIGHT_UPLOAD_BYTES_PER_HOUR = 1500 * 1024 * 1024; // 1.5GB
+
+// Maximum allowed clock skew between the client and server. If a client
+// claims a localUpdatedAt more than this far ahead of the server clock,
+// it is either misconfigured (bad wall clock) or actively trying to pin
+// its write on top of every other device. Refuse in either case.
+const MAX_FUTURE_SKEW_MS = 24 * 60 * 60 * 1000;
+
 export const authorizeImageUpload = mutation({
   args: {
     ...sessionArgs,
@@ -258,18 +237,73 @@ export const authorizeImageUpload = mutation({
     mimeType: v.string(),
   },
   handler: async (ctx, args) => {
+    // Plan check only. The size check is deferred to recordImageAsset so the
+    // read and the insert happen in a single atomic transaction. Doing both
+    // checks here would let two parallel uploads each pass the check, then
+    // both insert and overflow the per-user storage cap.
     const userId = await requireUser(ctx, args.sessionToken);
     const plan = await currentPlan(ctx, userId);
     if (plan !== "pro") {
       throw new ConvexError("Image cloud storage requires Pro.");
     }
 
-    const used = await storageBytesUsed(ctx, userId);
-    if (used + args.bytes > PRO_IMAGE_STORAGE_LIMIT_BYTES) {
-      throw new ConvexError("Image storage limit reached.");
+    if (args.bytes <= 0 || args.bytes > PRO_IMAGE_STORAGE_LIMIT_BYTES) {
+      throw new ConvexError("Image payload size is invalid.");
     }
 
-    return await ctx.storage.generateUploadUrl();
+    // Sum the bytes from upload events the client still has "in flight".
+    // An event is in-flight until the client either calls
+    // `recordImageAsset` (success) or `abandonImageUpload` (failure /
+    // give up). Without that distinction, a flaky client that uploads
+    // bytes but never resolves them used to be blocked for the full
+    // hour; with it, the client can fail fast and free the slot.
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const recent = await ctx.db
+      .query("imageUploadEvents")
+      .withIndex("by_user_and_created", (q) =>
+        q.eq("userId", userId).gt("createdAt", oneHourAgo),
+      )
+      .collect();
+    const inFlight = recent
+      .filter((event) => event.status === "in_flight")
+      .reduce((sum, event) => sum + event.bytes, 0);
+    if (inFlight + args.bytes > MAX_INFLIGHT_UPLOAD_BYTES_PER_HOUR) {
+      throw new ConvexError(
+        "Too many images uploading at once. Please wait for previous uploads to finish.",
+      );
+    }
+
+    const eventId = await ctx.db.insert("imageUploadEvents", {
+      userId,
+      bytes: args.bytes,
+      createdAt: Date.now(),
+      status: "in_flight",
+    });
+
+    return {
+      uploadUrl: await ctx.storage.generateUploadUrl(),
+      eventId,
+    };
+  },
+});
+
+export const abandonImageUpload = mutation({
+  args: {
+    ...sessionArgs,
+    eventId: v.id("imageUploadEvents"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx, args.sessionToken);
+    const event = await ctx.db.get(args.eventId);
+    if (!event || event.userId !== userId) {
+      return { ok: false };
+    }
+    if (event.status !== "in_flight") {
+      // Idempotent: a resolved event can't be abandoned.
+      return { ok: true };
+    }
+    await ctx.db.patch(event._id, { status: "abandoned" });
+    return { ok: true };
   },
 });
 
@@ -281,15 +315,55 @@ export const recordImageAsset = mutation({
     storageId: v.id("_storage"),
     bytes: v.number(),
     mimeType: v.string(),
+    // Optional: when the client got here via authorizeImageUpload, pass
+    // back the eventId we returned so we can mark the in-flight event
+    // resolved in the same transaction. Older clients may not pass it.
+    eventId: v.optional(v.id("imageUploadEvents")),
   },
   handler: async (ctx, args) => {
+    // Re-check the plan and the storage cap atomically with the insert.
+    // Authorize happened in a previous mutation; a subscription could have
+    // lapsed in the meantime, and parallel uploads could each have passed
+    // the check there. This mutation is the single source of truth.
     const userId = await requireUser(ctx, args.sessionToken);
+    const plan = await currentPlan(ctx, userId);
+    if (plan !== "pro") {
+      throw new ConvexError("Image cloud storage requires Pro.");
+    }
+
+    if (args.bytes <= 0 || args.bytes > PRO_IMAGE_STORAGE_LIMIT_BYTES) {
+      throw new ConvexError("Image payload size is invalid.");
+    }
+
     const used = await storageBytesUsed(ctx, userId);
     if (used + args.bytes > PRO_IMAGE_STORAGE_LIMIT_BYTES) {
       throw new ConvexError("Image storage limit reached.");
     }
 
-    return await ctx.db.insert("imageAssets", {
+    // Validate and consume the in-flight event (if the client passed one)
+    // atomically with the imageAssets insert. Doing it here, in the same
+    // transaction as the cap check and the insert, means a parallel
+    // authorizeImageUpload can't double-count this event and we can't
+    // record bytes against the cap without also freeing the in-flight slot.
+    if (args.eventId) {
+      const event = await ctx.db.get(args.eventId);
+      if (!event || event.userId !== userId) {
+        throw new ConvexError("Upload authorization event is invalid.");
+      }
+      if (event.status !== "in_flight") {
+        throw new ConvexError("Upload authorization event was already resolved or abandoned.");
+      }
+      if (event.bytes !== args.bytes) {
+        // The client uploaded a different number of bytes than they
+        // claimed in the authorize step. Refuse rather than silently
+        // reconcile — the storage cap is enforced against the larger
+        // of the two and we don't want a future bug to silently
+        // underestimate storage usage.
+        throw new ConvexError("Uploaded bytes do not match authorized bytes.");
+      }
+    }
+
+    const assetId = await ctx.db.insert("imageAssets", {
       userId,
       shelfId: args.shelfId,
       itemId: args.itemId,
@@ -298,6 +372,15 @@ export const recordImageAsset = mutation({
       mimeType: args.mimeType,
       createdAt: Date.now(),
     });
+
+    if (args.eventId) {
+      await ctx.db.patch(args.eventId, {
+        status: "resolved",
+        resolvedAssetId: assetId,
+      });
+    }
+
+    return assetId;
   },
 });
 

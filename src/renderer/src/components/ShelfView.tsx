@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { AppState, IngestPayload, ShelfItemRecord } from '@shared/schema';
 import { getExportableItems, getHeroCountLabel, getHeroMode, type HeroMode, type SessionMode } from './shelfFlow';
 import {
@@ -6,9 +6,7 @@ import {
   IconMenuDots,
   IconChevronDown,
   IconChevronLeft,
-  IconGear,
   IconGrid,
-  IconList,
   IconFolder,
   IconArrowUpRight,
 } from './Icons';
@@ -89,16 +87,28 @@ function EmptyStateIllustration() {
   );
 }
 
-interface ShelfViewProps {
-  state: AppState;
+interface ShelfViewState {
+  liveShelf: AppState['liveShelf'];
+  preferences: {
+    shelfInteraction: AppState['preferences']['shelfInteraction'];
+    shakeEnabled: AppState['preferences']['shakeEnabled'];
+  };
+  permissionStatus: AppState['permissionStatus'];
 }
 
-export function ShelfView({ state }: ShelfViewProps) {
+interface ShelfViewProps {
+  state: ShelfViewState;
+}
+
+function ShelfView({ state }: ShelfViewProps) {
   const liveShelf = state.liveShelf;
   const items = liveShelf?.items ?? [];
   const primaryItem = items[0] ?? null;
   const itemCount = items.length;
   const heroMode = getHeroMode(items);
+  const shelfInteraction = state.preferences.shelfInteraction;
+  const autoCloseShelf = shelfInteraction.autoCloseShelf ?? false;
+  const doubleClickAction = shelfInteraction.doubleClickAction ?? 'open';
   const [isImporting, setIsImporting] = useState(false);
   const [sessionMode, setSessionMode] = useState<SessionMode>('idle');
   const [isHovering, setIsHovering] = useState(false);
@@ -109,6 +119,8 @@ export function ShelfView({ state }: ShelfViewProps) {
   const lastUpdatedAtRef = useRef(liveShelf?.updatedAt ?? '');
   const dragDepthRef = useRef(0);
   const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPingRef = useRef(0);
+  const PING_INTERVAL_MS = 1000;
   const UNDO_TIMEOUT = 5000;
   const isAcceptingDrop = sessionMode === 'acceptingDrop';
   const isExporting = sessionMode === 'exporting';
@@ -207,7 +219,7 @@ export function ShelfView({ state }: ShelfViewProps) {
     };
   }, [sessionMode]);
 
-  async function pushPayloads(payloads: IngestPayload[]) {
+  const pushPayloads = useCallback(async (payloads: IngestPayload[]) => {
     if (payloads.length === 0) {
       return;
     }
@@ -224,14 +236,23 @@ export function ShelfView({ state }: ShelfViewProps) {
     } finally {
       setIsImporting(false);
     }
-  }
+  }, [liveShelf]);
 
-  function resetDropState() {
+  const resetDropState = useCallback(() => {
     dragDepthRef.current = 0;
     setSessionMode((current) => (current === 'acceptingDrop' ? 'idle' : current));
-  }
+  }, []);
 
-  function handleExportAndClear() {
+  const pingInteraction = useCallback(() => {
+    const now = Date.now();
+    if (now - lastPingRef.current < PING_INTERVAL_MS) {
+      return;
+    }
+    lastPingRef.current = now;
+    window.ledge.shelfInteractionPing();
+  }, []);
+
+  const handleExportAndClear = useCallback(() => {
     const exportable = getExportableItems(items);
     if (exportable.length === 0) return false;
 
@@ -256,18 +277,19 @@ export function ShelfView({ state }: ShelfViewProps) {
     }
 
     return didStartDrag;
-  }
+  }, [items]);
 
-  function handleDragEnter(event: React.DragEvent<HTMLElement>) {
+  const handleDragEnter = useCallback((event: React.DragEvent<HTMLElement>) => {
     if (isExporting || !isExternalTransfer(event.dataTransfer)) {
       return;
     }
 
     dragDepthRef.current += 1;
     setSessionMode('acceptingDrop');
-  }
+    pingInteraction();
+  }, [isExporting, pingInteraction]);
 
-  function handleDragLeave(event: React.DragEvent<HTMLElement>) {
+  const handleDragLeave = useCallback((event: React.DragEvent<HTMLElement>) => {
     if (isExporting || !isExternalTransfer(event.dataTransfer)) {
       return;
     }
@@ -278,28 +300,30 @@ export function ShelfView({ state }: ShelfViewProps) {
     if (nextDepth === 0 && !event.currentTarget.contains(event.relatedTarget as Node | null)) {
       setSessionMode((current) => (current === 'acceptingDrop' ? 'idle' : current));
     }
-  }
+  }, [isExporting]);
 
-  function handleDragOver(event: React.DragEvent<HTMLElement>) {
+  const handleDragOver = useCallback((event: React.DragEvent<HTMLElement>) => {
     if (isExporting || !isExternalTransfer(event.dataTransfer)) {
       return;
     }
 
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
+    pingInteraction();
 
     if (sessionMode !== 'acceptingDrop') {
       setSessionMode('acceptingDrop');
     }
-  }
+  }, [isExporting, sessionMode, pingInteraction]);
 
-  async function handleDrop(event: React.DragEvent<HTMLElement>) {
+  const handleDrop = useCallback(async (event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
     resetDropState();
+    pingInteraction();
     await pushPayloads(await payloadsFromTransfer(event.dataTransfer));
-  }
+  }, [resetDropState, pingInteraction, pushPayloads]);
 
-  async function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
+  const handlePaste = useCallback(async (event: React.ClipboardEvent<HTMLDivElement>) => {
     const payloads = await payloadsFromTransfer(event.clipboardData);
     if (payloads.length === 0) {
       return;
@@ -307,23 +331,23 @@ export function ShelfView({ state }: ShelfViewProps) {
 
     event.preventDefault();
     await pushPayloads(payloads);
-  }
+  }, [pushPayloads]);
 
-  async function openOverflowMenu() {
+  const openItemSheet = useCallback(() => {
+    setSessionMode('itemListOpen');
+  }, []);
+
+  const openOverflowMenu = useCallback(async () => {
     if (!liveShelf) {
       return;
     }
     await window.ledge.showShelfContextMenu();
-  }
+  }, [liveShelf]);
 
-  function openItemSheet() {
-    setSessionMode('itemListOpen');
-  }
-
-  function closeTransientSurface() {
+  const closeTransientSurface = useCallback(() => {
     dragDepthRef.current = 0;
     setSessionMode('idle');
-  }
+  }, []);
 
   return (
     <main
@@ -334,6 +358,8 @@ export function ShelfView({ state }: ShelfViewProps) {
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onPointerDown={pingInteraction}
+      onKeyDown={pingInteraction}
       onPointerEnter={() => {
         if (isExporting) {
           setSessionMode('idle');
@@ -347,7 +373,12 @@ export function ShelfView({ state }: ShelfViewProps) {
       <div className="drag-handle" />
 
       {isItemListOpen && liveShelf ? (
-        <ItemSheet items={items} sheetRef={itemSheetRef} onClose={closeTransientSurface} />
+        <ItemSheet
+          items={items}
+          sheetRef={itemSheetRef}
+          doubleClickAction={doubleClickAction}
+          onClose={closeTransientSurface}
+        />
       ) : (
         <>
           <header className="shelf-topbar">
@@ -389,6 +420,8 @@ export function ShelfView({ state }: ShelfViewProps) {
                   isImporting={isImporting}
                   isExporting={isExporting}
                   dragLocked={isMenuOpen || isItemListOpen}
+                  autoCloseShelf={autoCloseShelf}
+                  doubleClickAction={doubleClickAction}
                   onExportStart={() => {
                     setSessionMode('exporting');
                   }}
@@ -450,13 +483,107 @@ export function ShelfView({ state }: ShelfViewProps) {
   );
 }
 
+function shelfItemsEqual(a: ShelfItemRecord[], b: ShelfItemRecord[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const itemA = a[i];
+    const itemB = b[i];
+    if (
+      itemA.id !== itemB.id ||
+      itemA.kind !== itemB.kind ||
+      itemA.title !== itemB.title ||
+      itemA.subtitle !== itemB.subtitle ||
+      itemA.preview.summary !== itemB.preview.summary ||
+      itemA.preview.detail !== itemB.preview.detail ||
+      itemA.order !== itemB.order
+    ) {
+      return false;
+    }
+    if (itemA.kind === 'file' && itemB.kind === 'file') {
+      if (
+        itemA.file.originalPath !== itemB.file.originalPath ||
+        itemA.file.resolvedPath !== itemB.file.resolvedPath ||
+        itemA.file.isStale !== itemB.file.isStale ||
+        itemA.file.isMissing !== itemB.file.isMissing
+      ) {
+        return false;
+      }
+      if (itemA.mimeType !== itemB.mimeType) return false;
+    }
+    if (itemA.kind === 'folder' && itemB.kind === 'folder') {
+      if (
+        itemA.file.originalPath !== itemB.file.originalPath ||
+        itemA.file.resolvedPath !== itemB.file.resolvedPath ||
+        itemA.file.isStale !== itemB.file.isStale ||
+        itemA.file.isMissing !== itemB.file.isMissing
+      ) {
+        return false;
+      }
+    }
+    if (itemA.kind === 'imageAsset' && itemB.kind === 'imageAsset') {
+      if (
+        itemA.file.originalPath !== itemB.file.originalPath ||
+        itemA.file.resolvedPath !== itemB.file.resolvedPath ||
+        itemA.file.isStale !== itemB.file.isStale ||
+        itemA.file.isMissing !== itemB.file.isMissing
+      ) {
+        return false;
+      }
+      if (itemA.mimeType !== itemB.mimeType) return false;
+    }
+    if (itemA.kind === 'text' && itemB.kind === 'text') {
+      if (itemA.text !== itemB.text) return false;
+      if (itemA.savedFilePath !== itemB.savedFilePath) return false;
+    }
+    if (itemA.kind === 'url' && itemB.kind === 'url') {
+      if (itemA.url !== itemB.url) return false;
+      if (itemA.savedFilePath !== itemB.savedFilePath) return false;
+    }
+  }
+  return true;
+}
+
+const ShelfViewMemo = memo(ShelfView, (prevProps, nextProps) => {
+  const prevShelf = prevProps.state.liveShelf;
+  const nextShelf = nextProps.state.liveShelf;
+
+  if (prevShelf?.id !== nextShelf?.id) return false;
+  if (prevShelf?.updatedAt !== nextShelf?.updatedAt) return false;
+  if (!shelfItemsEqual(prevShelf?.items ?? [], nextShelf?.items ?? [])) return false;
+
+  const prevPrefs = prevProps.state.preferences;
+  const nextPrefs = nextProps.state.preferences;
+  if (prevPrefs.shelfInteraction.doubleClickAction !== nextPrefs.shelfInteraction.doubleClickAction) return false;
+  if (prevPrefs.shelfInteraction.autoCloseShelf !== nextPrefs.shelfInteraction.autoCloseShelf) return false;
+  if (prevPrefs.shakeEnabled !== nextPrefs.shakeEnabled) return false;
+
+  const prevPerm = prevProps.state.permissionStatus;
+  const nextPerm = nextProps.state.permissionStatus;
+  if (prevPerm.nativeHelperAvailable !== nextPerm.nativeHelperAvailable) return false;
+  if (prevPerm.accessibilityTrusted !== nextPerm.accessibilityTrusted) return false;
+  if (prevPerm.lastError !== nextPerm.lastError) return false;
+
+  return true;
+});
+
+export { ShelfViewMemo as ShelfView };
+
 interface ItemSheetProps {
   items: ShelfItemRecord[];
   sheetRef: RefObject<HTMLDivElement | null>;
+  doubleClickAction: 'open' | 'reveal';
   onClose(): void;
 }
 
-function ItemSheet({ items, sheetRef, onClose }: ItemSheetProps) {
+function ItemSheet({ items, sheetRef, doubleClickAction, onClose }: ItemSheetProps) {
+  function handleCellDoubleClick(itemId: string) {
+    if (doubleClickAction === 'reveal') {
+      void window.ledge.revealItem(itemId);
+    } else {
+      void window.ledge.openItem(itemId);
+    }
+  }
+
   return (
     <section ref={sheetRef} className="item-sheet" aria-label="Shelf items">
       <header className="item-sheet-header">
@@ -467,16 +594,10 @@ function ItemSheet({ items, sheetRef, onClose }: ItemSheetProps) {
           <p className="item-sheet-title">{items.length} Files</p>
           <p className="item-sheet-copy">{items.length > 0 ? 'Items in shelf' : ''}</p>
         </div>
-        <div className="item-sheet-actions">
-          <button className="ghost-button icon-button" aria-label="Settings">
-            <IconGear />
-          </button>
-          <button className="ghost-button icon-button active" aria-label="Grid View">
+        <div className="item-sheet-actions" aria-hidden="true">
+          <span className="ghost-button icon-button active" aria-label="Grid view (only mode)">
             <IconGrid />
-          </button>
-          <button className="ghost-button icon-button" aria-label="List View">
-            <IconList />
-          </button>
+          </span>
         </div>
       </header>
       <div className="item-sheet-grid">
@@ -488,6 +609,7 @@ function ItemSheet({ items, sheetRef, onClose }: ItemSheetProps) {
               e.preventDefault();
               window.ledge.showItemContextMenu(item.id);
             }}
+            onDoubleClick={() => handleCellDoubleClick(item.id)}
           >
             <div className="item-grid-preview">
               {getHeroPreviewSource(item) ? (
@@ -520,6 +642,8 @@ interface HeroItemProps {
   isImporting: boolean;
   isExporting: boolean;
   dragLocked: boolean;
+  autoCloseShelf: boolean;
+  doubleClickAction: 'open' | 'reveal';
   onExportStart(): void;
   onExportEnd(): void;
   onExportItems(): boolean;
@@ -533,6 +657,8 @@ function HeroItem({
   isImporting,
   isExporting,
   dragLocked,
+  autoCloseShelf,
+  doubleClickAction,
   onExportStart,
   onExportEnd,
   onExportItems,
@@ -565,14 +691,30 @@ function HeroItem({
     }
   }
 
+  function handleHeroDoubleClick() {
+    if (isExporting) {
+      return;
+    }
+    if (doubleClickAction === 'reveal') {
+      void window.ledge.revealItem(item.id);
+    } else {
+      void window.ledge.openItem(item.id);
+    }
+  }
+
   return (
     <div
       className={`hero-item is-${heroMode}${canDragOut ? ' is-draggable' : ''}${isExporting ? ' is-exporting' : ''}`}
       draggable={canDragOut}
       onDragStart={handleHeroDragStart}
       onDragEnd={() => {
+        const wasExporting = isExporting;
         onExportEnd();
+        if (autoCloseShelf && wasExporting) {
+          void window.ledge.closeShelf();
+        }
       }}
+      onDoubleClick={handleHeroDoubleClick}
       onContextMenu={(e) => {
         e.preventDefault();
         window.ledge.showItemContextMenu(item.id);
@@ -626,7 +768,7 @@ function HeroItem({
         className={`hero-count-button${isExporting ? ' is-exporting' : ''}`}
         onClick={onOpenItemSheet}
         disabled={items.length < 2}
-        aria-label={`Show ${statusLabel}`}
+        aria-label={isImporting ? "Importing items" : `Open shelf with ${items.length} ${items.length === 1 ? "item" : "items"}`}
       >
         <span>{statusLabel}</span>
         {items.length >= 2 ? <IconChevronDown /> : null}
