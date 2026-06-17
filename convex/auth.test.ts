@@ -50,22 +50,88 @@ test("verifyOtp locks an OTP after repeated wrong-code attempts", async () => {
   delete process.env.RESEND_API_KEY;
   try {
     const email = "lockout@example.com";
-    await t.action(api.auth.requestOtp, { email });
+    // Insert the OTP row by hand so we know the code. This is the only
+    // way to verify the lockout end-to-end without monkey-patching
+    // requestOtp to return the generated code.
+    const code = "123456";
+    const codeHash = await sha256Local(`${email}:${code}`);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("authOtps", {
+        email,
+        codeHash,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        createdAt: Date.now(),
+      });
+    });
 
-    // 5 wrong attempts: each must be rejected, and the OTP must end up
-    // locked so even a 6th attempt with a hypothetical correct code would
-    // be refused. (We don’t have access to the real code, so we just
-    // verify the locked state is reachable.)
-    for (let i = 0; i < 5; i += 1) {
-      await expect(
-        t.mutation(api.auth.verifyOtp, { email, code: `00000${i}` }),
-      ).rejects.toThrow(/Invalid or expired/);
+    // 4 wrong attempts: each returns `{ ok: false, reason: 'invalid' }`,
+    // and the lockout counter is bumped. After 4 attempts the row
+    // should still be open (failedAttempts == 4, not yet at the cap).
+    for (let i = 0; i < 4; i += 1) {
+      const result = await t.mutation(api.auth.verifyOtp, {
+        email,
+        code: `00000${i}`,
+      });
+      expect(result).toEqual({ ok: false, reason: "invalid" });
     }
 
-    // The 6th attempt must still be rejected, even with a fresh code guess.
-    await expect(
-      t.mutation(api.auth.verifyOtp, { email, code: "999999" }),
-    ).rejects.toThrow(/Invalid or expired/);
+    // The correct code still works after 4 wrong attempts and returns
+    // the success shape.
+    const success = await t.mutation(api.auth.verifyOtp, { email, code });
+    expect(success.ok).toBeUndefined();
+    expect(success.sessionToken).toBeTypeOf("string");
+    expect(success.email).toBe(email);
+  } finally {
+    if (previousKey !== undefined) {
+      process.env.RESEND_API_KEY = previousKey;
+    }
+  }
+});
+
+test("verifyOtp locks the row after 5 wrong attempts and refuses the right code", async () => {
+  const t = convexTest(schema, modules);
+  const previousKey = process.env.RESEND_API_KEY;
+  delete process.env.RESEND_API_KEY;
+  try {
+    const email = "strict-lockout@example.com";
+    const code = "654321";
+    const codeHash = await sha256Local(`${email}:${code}`);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("authOtps", {
+        email,
+        codeHash,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        createdAt: Date.now(),
+      });
+    });
+
+    // 5 wrong attempts: each rejected, and on the 5th the row is locked
+    // (consumedAt set, failedAttempts == 5).
+    for (let i = 0; i < 5; i += 1) {
+      const result = await t.mutation(api.auth.verifyOtp, {
+        email,
+        code: `00000${i}`,
+      });
+      expect(result).toEqual({ ok: false, reason: "invalid" });
+    }
+
+    // The correct code now also returns `{ ok: false, reason: 'invalid' }`
+    // because the row is locked (consumedAt set, failedAttempts == 5).
+    const locked = await t.mutation(api.auth.verifyOtp, { email, code });
+    expect(locked).toEqual({ ok: false, reason: "invalid" });
+
+    // Inspect the row to confirm the lockout state: consumedAt set,
+    // failedAttempts == 5.
+    const row = await t.run(async (ctx) => {
+      const rows = await ctx.db
+        .query("authOtps")
+        .withIndex("by_email_and_createdAt", (q) => q.eq("email", email))
+        .collect();
+      return rows[0] ?? null;
+    });
+    expect(row).not.toBeNull();
+    expect(row!.consumedAt).toBeDefined();
+    expect(row!.failedAttempts).toBe(5);
   } finally {
     if (previousKey !== undefined) {
       process.env.RESEND_API_KEY = previousKey;

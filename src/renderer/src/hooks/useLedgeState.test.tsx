@@ -169,4 +169,41 @@ describe('useLedgeState', () => {
     // re-renders, so renderCount should not change here.
     expect(renderCount).toBe(rendersAfterMount);
   });
+
+  it('delivers the new slice in the same render the full state updates', async () => {
+    // Regression: the previous implementation projected the slice
+    // inside a useEffect, so `state` lagged one render behind
+    // `fullState`. A consumer reading `state` in JSX would render
+    // once with the stale slice and then again with the fresh one.
+    // The new implementation projects during render and returns the
+    // fresh slice immediately, so this test asserts the consumer
+    // only ever sees the latest value.
+    const fake = installFakeLedge();
+    interface Observed { state: number | null; fullState: AppState | null }
+    const seen: Observed[] = [];
+    function TrackingProbe() {
+      const { state, fullState } = useLedgeState(
+        (s) => s.recentShelves.length,
+      );
+      seen.push({ state, fullState });
+      return <div data-testid="state">{String(state)}</div>;
+    }
+    render(<TrackingProbe />);
+    await waitFor(() => {
+      expect(seen.at(-1)?.state).toBe(0);
+    });
+    // Publish a state with a different slice value.
+    fake.publish({ ...makeState(), recentShelves: [{}, {}] as never });
+    // Wait for the listener to fire and React to flush the re-render.
+    await waitFor(() => {
+      expect(seen.at(-1)?.state).toBe(2);
+    });
+    // Every recorded observation should have a state that matches
+    // the corresponding fullState's slice, not lag behind it.
+    for (const obs of seen) {
+      if (obs.fullState === null) continue;
+      const expected = obs.fullState.recentShelves.length;
+      expect(obs.state).toBe(expected);
+    }
+  });
 });

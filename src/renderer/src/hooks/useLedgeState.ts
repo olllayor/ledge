@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppState } from '@shared/schema';
 import { shallowEqual } from './shallowEqual';
 import { projectAppState } from './projectAppState';
@@ -15,7 +15,36 @@ export function useLedgeState<T = AppState>(
 ): UseLedgeStateResult<T> {
   const [fullState, setFullState] = useState<AppState | null>(null);
   const [error, setError] = useState<string>('');
+  // Keep the most recently projected slice in a ref so we can
+  // return it synchronously during render. The previous
+  // implementation drove the slice from a useEffect, which made
+  // `state` lag one render behind `fullState` — every push
+  // produced a transient render with the old (or null) slice, which
+  // surfaced as a brief "loading" flash in the UI.
+  const sliceRef = useRef<T | null>(null);
   const [state, setState] = useState<T | null>(null);
+  // Synchronize the ref with state immediately so consumers reading
+  // `sliceRef.current` from inside the projection see the latest
+  // value (e.g. event handlers that close over it).
+  sliceRef.current = state;
+
+  // Derive the projected slice during render, not in an effect. When
+  // `fullState` changes, the consumer receives the new slice in the
+  // same render — there's no intermediate render with the stale
+  // value. We compare against the previous slice via the equality
+  // function so React bails out of re-rendering the consumer when
+  // nothing actually changed. Returning `projected` (not `state`)
+  // is the key to closing the one-render lag: `setState` would only
+  // take effect on the next render, so to deliver the fresh slice
+  // in *this* render we have to hand the value back directly.
+  const projected = useMemo(
+    () => projectAppState(state, fullState, selector, equalityFn),
+    [fullState, selector, equalityFn],
+  );
+  if (projected !== state) {
+    sliceRef.current = projected;
+    setState(projected);
+  }
 
   // Fetch the initial state once and subscribe to subsequent updates.
   // The mount-only effect uses a clean-up `active` flag so a re-render
@@ -57,14 +86,6 @@ export function useLedgeState<T = AppState>(
     };
   }, []);
 
-  // Derive the selected slice from `fullState`. A separate effect keeps
-  // the projection logic out of the render path, so a render that
-  // doesn't change `fullState` won't redo the projection. The actual
-  // projection + reference-preservation lives in `projectAppState` and
-  // is unit-tested independently of React.
-  useEffect(() => {
-    setState((current) => projectAppState(current, fullState, selector, equalityFn));
-  }, [fullState, selector, equalityFn]);
 
-  return { state, error, fullState };
+  return { state: projected, error, fullState };
 }

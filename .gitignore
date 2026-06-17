@@ -28,6 +28,15 @@ build/icon.png
 opencode.json
 .git.save
 
+# AI skill tooling lockfiles. These pin the exact skills a single
+# developer has installed locally (with content hashes from the
+# upstream GitHub repos) and drift per-machine. Keep them out of git
+# so contributors can curate their own skill set.
+skills-lock.json
+.opencode/installed.json
+.opencode/skills.lock
+.claude/skills.lock
+
 # Vim / editor swap files. The repo doesn't pin an editor, but stray
 # .swp / .swo / ~ files have shown up before.
 *.swp

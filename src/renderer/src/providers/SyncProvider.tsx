@@ -341,10 +341,18 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const verifyOtp = useCallback(
     async (nextEmail: string, code: string) => {
       const result = await verifyOtpMutation({ email: nextEmail, code });
-      localStorage.setItem(SESSION_KEY, result.sessionToken);
-      localStorage.setItem(EMAIL_KEY, result.email);
-      setSessionToken(result.sessionToken);
-      setEmail(result.email);
+      // verifyOtp returns `{ ok: false, reason: ... }` for failed
+      // attempts (wrong / expired / locked code) and the success
+      // shape `{ sessionToken, email }` on a valid code. Match the
+      // previous `ConvexError` user-facing message.
+      if (!("sessionToken" in result)) {
+        throw new Error("Invalid or expired sign-in code.");
+      }
+      const success = result as { sessionToken: string; email: string };
+      localStorage.setItem(SESSION_KEY, success.sessionToken);
+      localStorage.setItem(EMAIL_KEY, success.email);
+      setSessionToken(success.sessionToken);
+      setEmail(success.email);
     },
     [verifyOtpMutation],
   );

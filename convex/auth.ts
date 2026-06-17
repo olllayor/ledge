@@ -130,7 +130,7 @@ export const tryStoreOtp = internalMutation({
     const now = Date.now();
     const active = await ctx.db
       .query("authOtps")
-      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .withIndex("by_email_and_createdAt", (q) => q.eq("email", args.email))
       .collect();
     const activeCount = active.filter(
       (otp) => otp.consumedAt === undefined && otp.expiresAt > now,
@@ -156,14 +156,9 @@ export const verifyOtp = mutation({
   handler: async (ctx, args) => {
     const email = normalizeEmail(args.email);
     const codeHash = await sha256(`${email}:${args.code.trim()}`);
-    // Look up the specific OTP row matching this code. The previous
-    // implementation did `by_email … order("desc").first()`, which
-    // silently selected the newest code even when the user was entering
-    // a still-valid older one — and (worse) a wrong-code attempt would
-    // increment the lockout counter on whatever row happened to be
-    // newest, not the row the user was actually trying. The hash is
-    // stored on insert, so a (email, codeHash) lookup is unique and
-    // finds exactly the row that issued this code.
+    // Look up the specific OTP row matching this code. The hash is
+    // stored on insert, so a (email, codeHash) lookup is unique in
+    // practice and finds exactly the row that issued this code.
     const candidates = await ctx.db
       .query("authOtps")
       .withIndex("by_email_and_code_hash", (q) =>
@@ -178,7 +173,33 @@ export const verifyOtp = mutation({
       .sort((a, b) => b.createdAt - a.createdAt)[0];
 
     if (!otp) {
-      throw new ConvexError("Invalid or expired sign-in code.");
+      // No row matched this (email, code). The user typed a wrong
+      // code. We bump `failedAttempts` on the most recent unconsumed
+      // OTP for this email so the lockout counter advances. Because
+      // this transaction only contains a single `db.patch` and no
+      // `throw`, the patch commits atomically. The renderer treats
+      // `{ ok: false }` as an error and surfaces the same user-facing
+      // message a thrown ConvexError used to.
+      const active = await ctx.db
+        .query("authOtps")
+        .withIndex("by_email_and_createdAt", (q) => q.eq("email", email))
+        .order("desc")
+        .first();
+      if (active && active.consumedAt === undefined && active.expiresAt > Date.now()) {
+        const next = (active.failedAttempts ?? 0) + 1;
+        if (next >= MAX_FAILED_VERIFY_ATTEMPTS) {
+          // Lock the row by marking it consumed. The OTP can no
+          // longer be verified even with the right code; the user
+          // must wait for it to expire (or request a new one).
+          await ctx.db.patch(active._id, {
+            failedAttempts: next,
+            consumedAt: Date.now(),
+          });
+        } else {
+          await ctx.db.patch(active._id, { failedAttempts: next });
+        }
+      }
+      return { ok: false as const, reason: "invalid" as const };
     }
 
     if (
@@ -186,7 +207,12 @@ export const verifyOtp = mutation({
       otp.expiresAt <= Date.now() ||
       (otp.failedAttempts ?? 0) >= MAX_FAILED_VERIFY_ATTEMPTS
     ) {
-      throw new ConvexError("Invalid or expired sign-in code.");
+      // Already consumed, expired, or locked. We deliberately do not
+      // bump `failedAttempts` here — the row is in a terminal state
+      // for this code, so the lockout counter would never reach the
+      // 5-attempt threshold anyway. Returning `{ ok: false }` lets the
+      // renderer surface the same user-facing message.
+      return { ok: false as const, reason: "invalid" as const };
     }
 
     await ctx.db.patch(otp._id, { consumedAt: Date.now() });
@@ -223,6 +249,8 @@ export const verifyOtp = mutation({
     });
 
     return { sessionToken, email };
+    // Note: the success return shape is unchanged, so the renderer's
+    // `result.sessionToken` access still works.
   },
 });
 

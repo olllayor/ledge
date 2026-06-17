@@ -31,7 +31,19 @@ export default defineSchema({
     // the user is trying to consume, instead of "the newest row for this
     // email". `codeHash` includes the email salt (see `sha256(`${email}:${code}`)`),
     // so the lookup is unique in practice.
-    .index("by_email_and_code_hash", ["email", "codeHash"]),
+    .index("by_email_and_code_hash", ["email", "codeHash"])
+    // Used by `verifyOtp` to find the most recent unconsumed OTP for a
+    // given email when the user enters a wrong code (so we can bump
+    // `failedAttempts` on the row they were actually trying to consume,
+    // not whichever row was newest). Ordered DESC at the call site.
+    .index("by_email_and_createdAt", ["email", "createdAt"])
+    // Cleanup cron: deletes any row whose `expiresAt` is in the past
+    // (consumed or not). Indexing by `expiresAt` keeps the take()
+    // bounded to expired candidates.
+    .index("by_expiresAt", ["expiresAt"])
+    // Lets the cleanup cron pick up consumed-but-not-yet-expired
+    // OTPs in O(rows-with-consumedAt) time.
+    .index("by_consumedAt", ["consumedAt"]),
 
   authSessions: defineTable({
     userId: v.id("users"),
@@ -39,7 +51,18 @@ export default defineSchema({
     expiresAt: v.number(),
     revokedAt: v.optional(v.number()),
     createdAt: v.number(),
-  }).index("by_token_hash", ["tokenHash"]),
+  })
+    .index("by_token_hash", ["tokenHash"])
+    // The cleanup cron deletes any session whose `expiresAt` is in the
+    // past or whose `revokedAt` is set. Indexing by `expiresAt` makes
+    // the take() bounded to candidates, not "the first 100 ever
+    // created" — otherwise an active session created recently would
+    // starve an older expired one.
+    .index("by_expiresAt", ["expiresAt"])
+    // Lets the cleanup cron pick up revoked-but-not-yet-expired
+    // sessions in O(rows-with-revokedAt) time. Without this index
+    // the cron would have to scan the whole table.
+    .index("by_revokedAt", ["revokedAt"]),
 
   devices: defineTable({
     userId: v.id("users"),
@@ -139,7 +162,10 @@ export default defineSchema({
     // Lets us look up the specific event when the client calls
     // recordImageAsset or abandonImageUpload with the id we returned
     // from authorizeImageUpload.
-    .index("by_user_and_status", ["userId", "status"]),
+    .index("by_user_and_status", ["userId", "status"])
+    // Cleanup cron: deletes events older than 24h. Indexing by
+    // `createdAt` keeps the take() bounded to old candidates.
+    .index("by_createdAt", ["createdAt"]),
 
   // Dedupe key for inbound billing webhooks. We persist the Lemon Squeezy
   // event id (or a synthetic id derived from subscription id + status) so
