@@ -6,6 +6,18 @@ import { requireUserWithSession, sessionArgs, sha256 } from "./model";
 const OTP_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
+// Minimum gap between two successful `refreshSession` calls on the
+// same session. Without this, a holder of a valid session token could
+// pin `expiresAt` to `now + 90d` forever, effectively turning a
+// 90-day session into a non-expiring one.
+const REFRESH_MIN_INTERVAL_MS = 60 * 60 * 1000;
+
+// Hard cap on a session's total lifetime, measured from its
+// `createdAt`. Even with frequent refreshes, no session may outlive
+// this. 365 days matches the longest reasonable user expectation;
+// after that, the user must re-authenticate.
+const SESSION_MAX_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
+
 // At most this many OTPs per email in the rolling window. The window
 // equals the OTP TTL so a single user can never accumulate more than
 // this many active codes at once; an attacker spamming requestOtp gets
@@ -180,12 +192,25 @@ export const verifyOtp = mutation({
       // `throw`, the patch commits atomically. The renderer treats
       // `{ ok: false }` as an error and surfaces the same user-facing
       // message a thrown ConvexError used to.
-      const active = await ctx.db
+      //
+      // The `by_email_and_createdAt` index is sorted by `createdAt`
+      // (descending at the call site), but it does NOT filter on
+      // `consumedAt` or `expiresAt`. The previous implementation
+      // took `.first()` and then re-checked the row in JS — if the
+      // newest row was already consumed/expired, the lockout counter
+      // never advanced and the user could brute-force forever against
+      // an older, still-active row. Walk the small bounded set of
+      // rows for this email and pick the newest *active* one.
+      const now = Date.now();
+      const recentForEmail = await ctx.db
         .query("authOtps")
         .withIndex("by_email_and_createdAt", (q) => q.eq("email", email))
         .order("desc")
-        .first();
-      if (active && active.consumedAt === undefined && active.expiresAt > Date.now()) {
+        .take(MAX_ACTIVE_OTPS_PER_EMAIL);
+      const active = recentForEmail.find(
+        (row) => row.consumedAt === undefined && row.expiresAt > now,
+      );
+      if (active) {
         const next = (active.failedAttempts ?? 0) + 1;
         if (next >= MAX_FAILED_VERIFY_ATTEMPTS) {
           // Lock the row by marking it consumed. The OTP can no
@@ -273,8 +298,31 @@ export const refreshSession = mutation({
   args: sessionArgs,
   handler: async (ctx, args) => {
     const { session } = await requireUserWithSession(ctx, args.sessionToken);
-    const newExpiresAt = Date.now() + SESSION_TTL_MS;
-    await ctx.db.patch(session._id, { expiresAt: newExpiresAt });
+    const now = Date.now();
+    // Enforce a minimum gap between refreshes. `lastRefreshedAt` is
+    // `undefined` for sessions that have never been refreshed, in
+    // which case the first refresh is always allowed.
+    const lastRefresh = session.lastRefreshedAt ?? session.createdAt;
+    if (now - lastRefresh < REFRESH_MIN_INTERVAL_MS) {
+      throw new ConvexError(
+        "Session was refreshed too recently. Please try again later.",
+      );
+    }
+    // Enforce a hard cap on total session lifetime so a stolen token
+    // can't be perpetually renewed into a non-expiring credential.
+    const maxAllowedExpiry = session.createdAt + SESSION_MAX_LIFETIME_MS;
+    const newExpiresAt = Math.min(now + SESSION_TTL_MS, maxAllowedExpiry);
+    if (newExpiresAt <= session.expiresAt) {
+      // The lifetime cap has been reached; refuse rather than no-op
+      // so the renderer can prompt the user to re-authenticate.
+      throw new ConvexError(
+        "Session has reached its maximum lifetime. Please sign in again.",
+      );
+    }
+    await ctx.db.patch(session._id, {
+      expiresAt: newExpiresAt,
+      lastRefreshedAt: now,
+    });
     return { ok: true, expiresAt: newExpiresAt };
   },
 });
@@ -286,3 +334,7 @@ function normalizeEmail(email: string): string {
   }
   return normalized;
 }
+
+
+// Minimum gap between two successful `refreshSession` calls on the
+// same session. Without this, a holder of a valid session token could

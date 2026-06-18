@@ -51,6 +51,11 @@ export default defineSchema({
     expiresAt: v.number(),
     revokedAt: v.optional(v.number()),
     createdAt: v.number(),
+    // Wall-clock time of the most recent successful `refreshSession`
+    // call against this session. Optional so existing rows (pre-fix)
+    // continue to validate; the refresh handler treats `undefined` as
+    // "never refreshed", which always allows a first refresh.
+    lastRefreshedAt: v.optional(v.number()),
   })
     .index("by_token_hash", ["tokenHash"])
     // The cleanup cron deletes any session whose `expiresAt` is in the

@@ -49,7 +49,17 @@ import {
   validateGlobalShortcut,
 } from './services/systemUtils';
 import { StateStore } from './services/stateStore';
-import { sanitizeRemoteFileRefs } from './remoteShelf';
+import { decideRemoteShelfApply, sanitizeRemoteFileRefs } from './remoteShelf';
+
+/**
+ * Per-shelf watermark of the most recent remote `updatedAt` we have
+ * applied. Used by `applyRemoteShelfSnapshot` to decide whether a new
+ * remote snapshot carries state we haven't seen yet. In-memory only —
+ * the renderer already debounces re-sends of identical timestamps via
+ * `lastAppliedRemoteByShelf`, so a fresh app launch simply re-applies
+ * the most recent remote, which is idempotent.
+ */
+const remoteShelfWatermarks = new Map<string, number>();
 import { InactivityTimer } from './services/inactivityTimer';
 import { PreferencesWindow } from './windows/preferencesWindow';
 import { ShelfWindow } from './windows/shelfWindow';
@@ -84,7 +94,7 @@ process.on('unhandledRejection', (reason: unknown) => {
     window.webContents.send(IPC_CHANNELS.showToast, {
       message: 'Ledge hit an unexpected error. The app should still respond; please report this if it repeats.',
       kind: 'error',
-    }, 'error')
+    })
   }
 })
 
@@ -153,7 +163,7 @@ app.whenReady().then(async () => {
         window.webContents.send(IPC_CHANNELS.showToast, {
           message: 'Ledge couldn’t save your latest changes. The state file may be read-only or full.',
           kind: 'error',
-        }, 'error')
+        })
       }
     },
     onCorruptionDetected: ({ backupPath }) => {
@@ -163,7 +173,7 @@ app.whenReady().then(async () => {
       const message = `Ledge couldn’t read your saved state. A backup was kept at ${backupPath}.`
       for (const window of BrowserWindow.getAllWindows()) {
         if (window.isDestroyed()) continue
-        window.webContents.send(IPC_CHANNELS.showToast, { message, kind: 'error' }, 'error')
+        window.webContents.send(IPC_CHANNELS.showToast, { message, kind: 'error' })
       }
     },
   });
@@ -237,10 +247,49 @@ app.on('activate', () => {
   void preferencesWindow.show();
 });
 
-app.on('before-quit', () => {
+let isFlushingStateForQuit = false;
+// Cap how long we'll wait for the in-flight state.json write to
+// finish before letting the app exit. Most writes complete in <50ms;
+// the 1500ms ceiling is well below the user's tolerance for an
+// unresponsive quit dialog, and it bounds the worst case (a stalled
+// EACCES write that's blocking the write queue).
+const QUIT_FLUSH_TIMEOUT_MS = 1500;
+
+app.on('before-quit', (event) => {
   if (process.platform === 'darwin' && app.dock) {
     app.dock.hide();
   }
+  // Drain the state-store write queue before letting the app exit.
+  // Without this, a quick drop-then-quit (or any IPC reply that
+  // triggered a save) can leave state.json half-written as a
+  // `.tmp-PID` sibling; the next launch would then trip the
+  // corruption handler and lose the most recent change. The first
+  // time `before-quit` fires, we cancel the default quit, flush,
+  // and re-quit. Subsequent firings (the re-quit) pass through.
+  if (isFlushingStateForQuit) {
+    return;
+  }
+  if (!stateStore || stateStore.whenIdle === undefined) {
+    return;
+  }
+  event.preventDefault();
+  isFlushingStateForQuit = true;
+  const flush = stateStore.whenIdle().catch((error: unknown) => {
+    console.error('[ledge] failed to flush state on quit:', error);
+  });
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<void>((resolve) => {
+    timeoutHandle = setTimeout(() => {
+      console.warn(`[ledge] state flush exceeded ${QUIT_FLUSH_TIMEOUT_MS}ms; forcing quit`);
+      resolve();
+    }, QUIT_FLUSH_TIMEOUT_MS);
+  });
+  void Promise.race([flush, timeout]).finally(() => {
+    if (timeoutHandle !== null) {
+      clearTimeout(timeoutHandle);
+    }
+    app.quit();
+  });
 });
 
 const itemIdParamSchema = z.string().uuid()
@@ -557,28 +606,39 @@ async function createShelf(
 }
 
 function applyRemoteShelfSnapshot(remoteShelf: ShelfRecord): void {
-  // Three cases:
-  //   1. No live shelf, or live shelf id matches the remote -> replace live if remote is newer.
-  //   2. Recent shelf id matches the remote -> replace that recent entry if newer.
-  //   3. Neither -> drop. The user has a different shelf open locally and no
-  //      history of this one; silently adopting it would clobber the user's work.
+  // Routing:
+  //   1. Live shelf id matches remote (or there is no live shelf) -> the
+  //      live shelf is the destination.
+  //   2. A recent shelf id matches remote -> that recent entry is the
+  //      destination.
+  //   3. Neither -> drop. The user has a different shelf open locally and
+  //      no history of this one; silently adopting it would clobber the
+  //      user's work.
   const sanitized = sanitizeRemoteFileRefs(remoteShelf);
-  const remoteUpdatedAt = Date.parse(remoteShelf.updatedAt);
   const liveShelf = stateStore.getLiveShelf();
+  const recentShelf = liveShelf?.id === remoteShelf.id
+    ? null
+    : stateStore.getRecentShelves().find((shelf) => shelf.id === remoteShelf.id) ?? null;
+  const local = liveShelf?.id === remoteShelf.id ? liveShelf : recentShelf;
+  const lastSynced = remoteShelfWatermarks.get(remoteShelf.id) ?? null;
 
-  if (!liveShelf || liveShelf.id === remoteShelf.id) {
-    if (!liveShelf || remoteUpdatedAt > Date.parse(liveShelf.updatedAt)) {
-      stateStore.replaceLiveShelf(sanitized);
-    }
+  const decision = decideRemoteShelfApply({
+    remote: remoteShelf,
+    local,
+    lastSyncedRemoteUpdatedAt: lastSynced
+  });
+  remoteShelfWatermarks.set(remoteShelf.id, decision.nextWatermark);
+
+  if (!decision.apply) {
     return;
   }
 
-  const recentShelf = stateStore.getRecentShelves().find((shelf) => shelf.id === remoteShelf.id);
-  if (!recentShelf) {
-    return;
-  }
-
-  if (remoteUpdatedAt > Date.parse(recentShelf.updatedAt)) {
+  if (local === liveShelf || (!local && !liveShelf)) {
+    // No live shelf, or the live shelf's id matches the remote. In both
+    // cases the live shelf is the destination — including the
+    // first-contact case where the device has never seen this shelf.
+    stateStore.replaceLiveShelf(sanitized);
+  } else {
     stateStore.replaceRecentShelf(sanitized);
   }
 }
@@ -679,7 +739,7 @@ async function addPayloadsToLiveShelf(
     if (oversizedError) {
       for (const window of BrowserWindow.getAllWindows()) {
         if (window.isDestroyed()) continue
-        window.webContents.send(IPC_CHANNELS.showToast, { message: oversizedError.message, kind: 'error' }, 'error')
+        window.webContents.send(IPC_CHANNELS.showToast, { message: oversizedError.message, kind: 'error' })
       }
     }
     return false;

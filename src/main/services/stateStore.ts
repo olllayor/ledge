@@ -449,6 +449,10 @@ export class StateStore {
       }
 
       this.writeScheduled = false
+    }).catch(() => {
+      // Swallow rejections from the async writer so the chain stays resolved
+      // and subsequent save() calls continue to flush pendingSerialized.
+      // Errors are already reported via onPersistenceError above.
     })
   }
 

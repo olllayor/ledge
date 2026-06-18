@@ -209,7 +209,11 @@ export class NativeAgentClient extends EventEmitter {
 
   async configureGesture(preferences: PreferencesRecord): Promise<void> {
     this.lastPreferences = preferences
-    this.gestureEnabled = preferences.shakeEnabled
+    // Don't flip gestureEnabled to true until the helper actually
+    // accepts gesture.start. Otherwise a rejection would leave
+    // `shakeReady` reporting "Ready" while the helper is silently
+    // refusing to listen, with no diagnostic surfaced to the UI.
+    const desiredEnabled = preferences.shakeEnabled
 
     if (!this.child) {
       this.updateStatus({})
@@ -218,15 +222,25 @@ export class NativeAgentClient extends EventEmitter {
 
     try {
       await this.call('gesture.start', {
-        enabled: preferences.shakeEnabled,
+        enabled: desiredEnabled,
         excludedBundleIds: preferences.excludedBundleIds,
         sensitivity: preferences.shakeSensitivity
       })
-    } catch {
-      // The helper may be restarting. Preserve the desired preference and let recovery reapply it.
+      this.gestureEnabled = desiredEnabled
+      // Clear any prior gesture-start failure so a successful retry
+      // doesn't leave the banner stuck on a stale message.
+      this.updateStatus({ lastError: '' })
+    } catch (error) {
+      // The helper may be restarting. Preserve the desired preference
+      // and let recovery reapply it. But surface the rejection: if
+      // gesture.start is failing for any other reason (e.g. the user
+      // revoked Accessibility between permissions.getStatus and the
+      // gesture call), the renderer would otherwise keep showing
+      // "Ready" in Preferences while shakes silently don't work.
+      const message = error instanceof Error ? error.message : 'Native helper rejected gesture.start'
+      this.gestureEnabled = false
+      this.updateStatus({ lastError: message })
     }
-
-    this.updateStatus({})
   }
 
   async stopGesture(): Promise<void> {

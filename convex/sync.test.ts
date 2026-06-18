@@ -433,6 +433,21 @@ test("refreshSession: extends the session expiry", async () => {
   const { sessionToken } = await setupUser(t, "refresh@example.com", "free");
   const tokenHash = await sha256(sessionToken);
   const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+  // Backdate the session to 2 hours ago so the rate-limit guard
+  // (1 hour minimum gap between refreshes) doesn't reject the call.
+  // The fix for #4 added that guard to prevent a stolen session
+  // token from being perpetually renewed; the test now has to
+  // simulate a long-lived session instead of a freshly-created one.
+  const TWO_HOURS_AGO = Date.now() - 2 * 60 * 60 * 1000;
+  await t.run(async (ctx) => {
+    const session = await ctx.db
+      .query("authSessions")
+      .withIndex("by_token_hash", (q) => q.eq("tokenHash", tokenHash))
+      .unique();
+    if (session) {
+      await ctx.db.patch(session._id, { createdAt: TWO_HOURS_AGO });
+    }
+  });
   const originalExpires = await t.run(async (ctx) => {
     const session = await ctx.db
       .query("authSessions")

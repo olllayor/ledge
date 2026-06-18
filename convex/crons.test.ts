@@ -69,7 +69,14 @@ test("cleanupExpiredOtps deletes expired and consumed OTPs", async () => {
       email: "c@example.com",
       codeHash: "consumed-hash",
       expiresAt: now + 60 * 60 * 1000,
-      consumedAt: now,
+      // Backdate the consumedAt by 1ms so the cron's `q.lt("consumedAt", now)`
+      // check is unambiguously true. Using `now` directly is racy: the
+      // mutation's `Date.now()` can be captured at the same instant as
+      // the test's, so the row can fall outside the consumed window and
+      // survive the cleanup. This wasn't a problem when the test ran in
+      // isolation, but became flaky once neighboring tests started
+      // shifting overall timing.
+      consumedAt: now - 1,
       createdAt: now,
     });
   });
