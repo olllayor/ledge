@@ -40,6 +40,7 @@ import type { ShelfWindow } from './windows/shelfWindow'
 import type { QuickPasteWindow } from './windows/quickPasteWindow'
 import type { PeekWindow } from './windows/peekWindow'
 import type { ClipboardMonitor } from './services/clipboardMonitor'
+import type { ShelfItemOps } from './services/shelfItemOps'
 import { decideRemoteShelfApply } from './remoteShelf'
 
 export interface IpcRegistrarDeps {
@@ -51,6 +52,7 @@ export interface IpcRegistrarDeps {
   clipboardMonitor: ClipboardMonitor
   shelfController: ShelfController
   shelfActions: ShelfActions
+  shelfOps: ShelfItemOps
   preferencesSync: PreferencesSyncService
   broadcastState(): AppState
   onInactivityTick(): void
@@ -127,26 +129,13 @@ export class IpcRegistrar {
       this.deps.onInactivityTick()
       return this.deps.broadcastState()
     })
-    ipcMain.handle(IPC_CHANNELS.renameShelf, async (_event, input: unknown) => {
-      this.deps.stateStore.renameLiveShelf(renameShelfInputSchema.parse(input).name)
-      this.deps.onInactivityTick()
-      return this.deps.broadcastState()
-    })
-    ipcMain.handle(IPC_CHANNELS.clearShelf, async () => {
-      this.deps.stateStore.clearLiveShelf()
-      this.deps.onInactivityTick()
-      return this.deps.broadcastState()
-    })
-    ipcMain.handle(IPC_CHANNELS.reorderItems, async (_event, input: unknown) => {
-      this.deps.stateStore.reorderItems(reorderItemsInputSchema.parse(input).itemIds)
-      this.deps.onInactivityTick()
-      return this.deps.broadcastState()
-    })
-    ipcMain.handle(IPC_CHANNELS.removeItem, async (_event, itemId: unknown) => {
-      this.deps.stateStore.removeItem(shelfItemIdParamSchema.parse(itemId))
-      this.deps.onInactivityTick()
-      return this.deps.broadcastState()
-    })
+    ipcMain.handle(IPC_CHANNELS.renameShelf, async (_event, input: unknown) =>
+      this.deps.shelfOps.rename(renameShelfInputSchema.parse(input).name))
+    ipcMain.handle(IPC_CHANNELS.clearShelf, async () => this.deps.shelfOps.clear())
+    ipcMain.handle(IPC_CHANNELS.reorderItems, async (_event, input: unknown) =>
+      this.deps.shelfOps.reorder(reorderItemsInputSchema.parse(input).itemIds))
+    ipcMain.handle(IPC_CHANNELS.removeItem, async (_event, itemId: unknown) =>
+      this.deps.shelfOps.remove(shelfItemIdParamSchema.parse(itemId)))
     ipcMain.handle(IPC_CHANNELS.shareShelfItems, async (_event, itemIds: unknown) =>
       this.deps.shelfActions.shareItems(shareShelfItemsInputSchema.parse(itemIds)),
     )
@@ -218,11 +207,7 @@ export class IpcRegistrar {
       { type: 'separator' },
       {
         label: 'Remove Item',
-        click: () => {
-          this.deps.stateStore.removeItem(item.id)
-          this.deps.onInactivityTick()
-          this.deps.broadcastState()
-        },
+        click: () => this.deps.shelfOps.remove(item.id),
       },
     )
 
@@ -253,11 +238,7 @@ export class IpcRegistrar {
       {
         label: 'Clear Shelf',
         enabled: items.length > 0,
-        click: () => {
-          this.deps.stateStore.clearLiveShelf()
-          this.deps.onInactivityTick()
-          this.deps.broadcastState()
-        },
+        click: () => this.deps.shelfOps.clear(),
       },
       {
         label: 'Close Shelf',

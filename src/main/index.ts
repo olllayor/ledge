@@ -16,6 +16,7 @@ import { ClipboardMonitor } from './services/clipboardMonitor'
 import { TrayController } from './tray'
 import { ShelfController, currentCursorPoint } from './services/shelfController'
 import { ShelfActions } from './services/shelfActions'
+import { ShelfItemOps } from './services/shelfItemOps'
 import { ClipboardHistoryService } from './services/clipboardHistory'
 import { PreferencesSyncService } from './services/preferencesSync'
 import { resolveAllowedAssetPath } from './services/assetPathResolver'
@@ -54,6 +55,7 @@ let clipboardHistory: ClipboardHistoryService
 let inactivityTimer: InactivityTimer
 let shelfController: ShelfController
 let shelfActions: ShelfActions
+let shelfOps: ShelfItemOps
 let preferencesSync: PreferencesSyncService
 let ipcRegistrar: IpcRegistrar
 let isFlushingStateForQuit = false
@@ -214,6 +216,10 @@ app.whenReady().then(async () => {
     preferencesWindow,
     onStateChange: () => broadcastState(),
   })
+  shelfOps = new ShelfItemOps(stateStore, {
+    onInactivityTick: () => tickInactivity(),
+    broadcastState: () => broadcastState(),
+  })
   preferencesSync = new PreferencesSyncService(
     stateStore,
     nativeAgent,
@@ -274,6 +280,7 @@ app.whenReady().then(async () => {
     clipboardMonitor,
     shelfController,
     shelfActions,
+    shelfOps,
     preferencesSync,
     broadcastState: () => broadcastState(),
     onInactivityTick: () => tickInactivity(),
