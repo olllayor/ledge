@@ -1,4 +1,4 @@
-import { app, nativeImage, type WebContents } from 'electron'
+import { app, nativeImage, type NativeImage, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -21,12 +21,26 @@ export function pathsExist(paths: string[]): boolean {
   return true
 }
 
+export interface DragOptions {
+  /**
+   * Override the icon resolver. Used by tests to avoid touching
+   * `app.getAppPath()` (which is undefined under vitest). Production
+   * callers leave this unset and get the bundled `.icns`/`icon.png`
+   * fallback chain.
+   */
+  resolveIcon?: (paths: string[]) => NativeImage | null
+}
+
 /**
  * Kick off a native file drag with the supplied paths. Returns silently
  * when no path can be resolved or any path is missing; the caller is
  * expected to do its own user-facing error reporting if needed.
  */
-export function startNativeDrag(webContents: WebContents, paths: string[]): void {
+export function startNativeDrag(
+  webContents: WebContents,
+  paths: string[],
+  options: DragOptions = {},
+): void {
   const [firstPath] = paths
   if (!firstPath) {
     return
@@ -35,24 +49,25 @@ export function startNativeDrag(webContents: WebContents, paths: string[]): void
     return
   }
 
-  const icon = dragIconImage(paths)
+  const icon = options.resolveIcon ? options.resolveIcon(paths) : null
+  const resolvedIcon = icon ?? defaultDragIconImage(paths)
 
   const dragPayload =
     paths.length > 1
       ? {
           file: firstPath,
           files: paths,
-          icon,
+          icon: resolvedIcon,
         }
       : {
           file: firstPath,
-          icon,
+          icon: resolvedIcon,
         }
 
   webContents.startDrag(dragPayload)
 }
 
-function dragIconImage(paths: string[]) {
+function defaultDragIconImage(paths: string[]): NativeImage {
   const iconCandidates = [
     ...paths,
     join(app.getAppPath(), 'build', 'app.icns'),
@@ -66,7 +81,6 @@ function dragIconImage(paths: string[]) {
     if (image.isEmpty()) {
       continue
     }
-
     return image.resize({ width: 72, height: 72, quality: 'best' })
   }
 

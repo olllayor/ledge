@@ -199,7 +199,7 @@ export class ClipboardHistoryService {
   }
 }
 
-function hexFromText(text: string): string | null {
+export function hexFromText(text: string): string | null {
   const trimmed = text.trim()
   // 6 or 8 hex digits, with or without leading '#'.
   const match = /^#?([0-9a-fA-F]{6}([0-9a-fA-F]{2})?)$/.exec(trimmed)
@@ -207,7 +207,7 @@ function hexFromText(text: string): string | null {
   return `#${match[1].toLowerCase()}`
 }
 
-function looksLikeCode(text: string): boolean {
+export function looksLikeCode(text: string): boolean {
   // Light heuristic — proper language detection is out of scope.
   if (text.length < 16) return false
   if (/\n\s{2,}/.test(text)) return true
