@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, Menu, screen } from 'electron'
+import { BrowserWindow, ipcMain, screen } from 'electron'
 import { z } from 'zod'
 import { IPC_CHANNELS, type ToastPayload } from '@shared/ipc'
 import {
@@ -9,7 +9,7 @@ import {
   type AppState,
   type ShelfItemRecord,
 } from '@shared/schema'
-import { isFileBackedItem } from '@shared/fileUtils'
+
 import {
   clipboardCategoryCreateInputSchema,
   clipboardCategoryIdInputSchema,
@@ -41,6 +41,7 @@ import type { QuickPasteWindow } from './windows/quickPasteWindow'
 import type { PeekWindow } from './windows/peekWindow'
 import type { ClipboardMonitor } from './services/clipboardMonitor'
 import type { ShelfItemOps } from './services/shelfItemOps'
+import type { ShelfContextMenus } from './services/contextMenus'
 import { decideRemoteShelfApply } from './remoteShelf'
 
 export interface IpcRegistrarDeps {
@@ -53,6 +54,7 @@ export interface IpcRegistrarDeps {
   shelfController: ShelfController
   shelfActions: ShelfActions
   shelfOps: ShelfItemOps
+  contextMenus: ShelfContextMenus
   preferencesSync: PreferencesSyncService
   broadcastState(): AppState
   onInactivityTick(): void
@@ -171,87 +173,13 @@ export class IpcRegistrar {
       const validId = shelfItemIdParamSchema.parse(itemId)
       const item = this.liveItems().find((i) => i.id === validId)
       if (!item) return false
-      this.popupItemMenu(item)
+      this.deps.contextMenus.popupForItem(item)
       return true
     })
     ipcMain.handle(IPC_CHANNELS.showShelfContextMenu, async () => {
-      this.popupShelfMenu(this.liveItems())
+      this.deps.contextMenus.popupForShelf(this.liveItems())
       return true
     })
-  }
-
-  private popupItemMenu(item: ShelfItemRecord): void {
-    const missing = isFileBackedItem(item) && item.file.isMissing
-    const template: Electron.MenuItemConstructorOptions[] = []
-
-    if (isFileBackedItem(item)) {
-      template.push(
-        { label: 'Quick Look', enabled: !missing, click: () => this.deps.shelfActions.previewItem(item.id) },
-        { label: 'Reveal in Finder', enabled: !missing, click: () => this.deps.shelfActions.revealItem(item.id) },
-        { label: 'Open', enabled: !missing, click: () => this.deps.shelfActions.openItem(item.id) },
-        { label: 'Relink…', click: () => void this.deps.shelfActions.relinkItem(item.id) },
-        { type: 'separator' },
-        { label: 'Share', enabled: true, click: () => void this.deps.shelfActions.shareItems([item.id]) },
-      )
-    } else if (item.kind === 'text' || item.kind === 'url') {
-      template.push(
-        { label: 'Copy', click: () => void this.deps.shelfActions.copyItem(item.id) },
-        { label: 'Save', click: () => void this.deps.shelfActions.saveItem(item.id) },
-      )
-      if (item.kind === 'url') {
-        template.push({ label: 'Open', click: () => void this.deps.shelfActions.openItem(item.id) })
-      }
-    }
-
-    template.push(
-      { type: 'separator' },
-      {
-        label: 'Remove Item',
-        click: () => this.deps.shelfOps.remove(item.id),
-      },
-    )
-
-    const menu = Menu.buildFromTemplate(template)
-    menu.popup({ window: this.deps.shelfWindow.getBrowserWindow() ?? undefined })
-  }
-
-  private popupShelfMenu(items: ShelfItemRecord[]): void {
-    const template: Electron.MenuItemConstructorOptions[] = []
-
-    if (items.length > 0) {
-      const primaryItem = items[0]
-      const missing = isFileBackedItem(primaryItem) && primaryItem.file.isMissing
-
-      template.push(
-        { label: 'Quick Look', enabled: !missing, click: () => this.deps.shelfActions.previewItem(primaryItem.id) },
-        { label: 'Reveal in Finder', enabled: !missing, click: () => this.deps.shelfActions.revealItem(primaryItem.id) },
-        { label: 'Open', enabled: !missing, click: () => this.deps.shelfActions.openItem(primaryItem.id) },
-        { label: 'Copy', click: () => void this.deps.shelfActions.copyItem(primaryItem.id) },
-        { label: 'Save', click: () => void this.deps.shelfActions.saveItem(primaryItem.id) },
-        { type: 'separator' },
-      )
-    }
-
-    template.push(
-      { label: 'Share All', enabled: items.length > 0, click: () => void this.deps.shelfActions.shareItems() },
-      { type: 'separator' },
-      {
-        label: 'Clear Shelf',
-        enabled: items.length > 0,
-        click: () => this.deps.shelfOps.clear(),
-      },
-      {
-        label: 'Close Shelf',
-        click: () => {
-          this.deps.shelfController.closeShelf()
-          this.deps.onInactivityTick()
-          this.deps.broadcastState()
-        },
-      },
-    )
-
-    const menu = Menu.buildFromTemplate(template)
-    menu.popup({ window: this.deps.shelfWindow.getBrowserWindow() ?? undefined })
   }
 
   private liveItems(): ShelfItemRecord[] {
@@ -306,6 +234,19 @@ export class IpcRegistrar {
 
   // ---- Clipboard ----
 
+  /**
+   * Run a mutator against the state store and broadcast the new
+   * state. Returns whatever the mutator returns (often the new
+   * resource the caller wants to echo back, sometimes nothing).
+   * Centralizes the "mutate + broadcast" boilerplate that every
+   * clipboard IPC handler used to repeat by hand.
+   */
+  private async mutateAndBroadcast<T>(mutate: () => T): Promise<T> {
+    const result = mutate()
+    this.deps.broadcastState()
+    return result
+  }
+
   private registerClipboardIpc(): void {
     ipcMain.handle(IPC_CHANNELS.clipboardGetRecent, async (_event, input: unknown) => {
       const { limit } = clipboardGetRecentInputSchema.parse(input ?? { limit: 200 })
@@ -321,43 +262,46 @@ export class IpcRegistrar {
     })
     ipcMain.handle(IPC_CHANNELS.clipboardCategoryCreate, async (_event, payload: unknown) => {
       const parsed = clipboardCategoryCreateInputSchema.parse(payload)
-      const created = this.deps.stateStore.createClipboardCategory(parsed.name, parsed.color)
-      this.deps.broadcastState()
-      return created
+      return this.mutateAndBroadcast(() =>
+        this.deps.stateStore.createClipboardCategory(parsed.name, parsed.color),
+      )
     })
     ipcMain.handle(IPC_CHANNELS.clipboardCategoryRename, async (_event, payload: unknown) => {
       const parsed = clipboardCategoryRenameInputSchema.parse(payload)
-      this.deps.stateStore.renameClipboardCategory(parsed.id, parsed.name)
-      this.deps.broadcastState()
+      return this.mutateAndBroadcast(() =>
+        this.deps.stateStore.renameClipboardCategory(parsed.id, parsed.name),
+      )
     })
     ipcMain.handle(IPC_CHANNELS.clipboardCategoryRemove, async (_event, payload: unknown) => {
       const parsed = clipboardCategoryIdInputSchema.parse(payload)
-      this.deps.stateStore.removeClipboardCategory(parsed.id)
-      this.deps.broadcastState()
+      return this.mutateAndBroadcast(() =>
+        this.deps.stateStore.removeClipboardCategory(parsed.id),
+      )
     })
     ipcMain.handle(IPC_CHANNELS.clipboardEntryAssign, async (_event, payload: unknown) => {
       const parsed = clipboardEntryCategoryAssignInputSchema.parse(payload)
-      this.deps.stateStore.assignEntryToCategory(parsed.entryId, parsed.categoryId)
-      this.deps.broadcastState()
+      return this.mutateAndBroadcast(() =>
+        this.deps.stateStore.assignEntryToCategory(parsed.entryId, parsed.categoryId),
+      )
     })
     ipcMain.handle(IPC_CHANNELS.clipboardEntryUnassign, async (_event, payload: unknown) => {
       const parsed = clipboardEntryCategoryAssignInputSchema.parse(payload)
-      this.deps.stateStore.unassignEntryFromCategory(parsed.entryId, parsed.categoryId)
-      this.deps.broadcastState()
+      return this.mutateAndBroadcast(() =>
+        this.deps.stateStore.unassignEntryFromCategory(parsed.entryId, parsed.categoryId),
+      )
     })
     ipcMain.handle(IPC_CHANNELS.clipboardEntryRemove, async (_event, payload: unknown) => {
       const parsed = clipboardEntryIdInputSchema.parse(payload)
-      this.deps.stateStore.removeClipboardEntry(parsed.entryId)
-      this.deps.broadcastState()
+      return this.mutateAndBroadcast(() =>
+        this.deps.stateStore.removeClipboardEntry(parsed.entryId),
+      )
     })
-    ipcMain.handle(IPC_CHANNELS.clipboardEntryClearAll, async () => {
-      this.deps.stateStore.clearClipboardHistory()
-      this.deps.broadcastState()
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardPruneNow, async () => {
-      this.deps.stateStore.pruneClipboardHistory()
-      this.deps.broadcastState()
-    })
+    ipcMain.handle(IPC_CHANNELS.clipboardEntryClearAll, async () =>
+      this.mutateAndBroadcast(() => this.deps.stateStore.clearClipboardHistory()),
+    )
+    ipcMain.handle(IPC_CHANNELS.clipboardPruneNow, async () =>
+      this.mutateAndBroadcast(() => this.deps.stateStore.pruneClipboardHistory()),
+    )
 
     ipcMain.on(IPC_CHANNELS.clipboardStartItemDrag, (event, payload: unknown) => {
       const parsed = clipboardEntryIdInputSchema.parse(payload)
