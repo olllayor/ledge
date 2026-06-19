@@ -1,115 +1,88 @@
-import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
-import { promises as fs } from 'node:fs'
-import { join } from 'node:path'
-import { z } from 'zod'
+import { appStateSchema, type AppState, type PermissionStatus } from '@shared/schema'
+import { ShelfStore } from './state/shelfStore'
+import { ClipboardStore, type ClipboardEntryInput } from './state/clipboardStore'
+import { PreferencesStore } from './state/preferencesStore'
+import { SyncStore } from './state/syncStore'
 import {
-  appStateSchema,
-  preferencesRecordSchema,
-  syncStateSchema,
-  type AppState,
-  type BillingPlan,
-  type ClipboardCategory,
-  type ClipboardEntry,
-  type ClipboardSettings,
-  type PermissionStatus,
-  type PreferencePatch,
-  type PreferencesRecord,
-  type ShelfColor,
-  type ShelfItemRecord,
-  type ShelfOrigin,
-  type ShelfRecord,
-  type FileRef,
-  type SyncState,
-  type SyncStatePatch
-} from '@shared/schema'
-import { recentShelvesLimitForPlan, shelfColorsForPlan } from '@shared/syncUtils'
+  StatePersister,
+  buildStateFileLayout,
+  defaultClipboardSettingsRecord,
+  defaultPreferences,
+  defaultSyncStateRecord,
+  type CorruptionListener,
+  type PersistenceErrorListener,
+} from './state/persister'
+import type { PersistedState } from './state/types'
 
-const persistedStateSchema = appStateSchema.omit({ permissionStatus: true })
-const persistedStateEnvelopeV1Schema = appStateSchema.omit({ permissionStatus: true, sync: true }).extend({
-  version: z.literal(1)
-})
-const persistedStateEnvelopeV2Schema = persistedStateSchema.extend({
-  version: z.literal(2)
-})
-const persistedStateEnvelopeV3Schema = persistedStateSchema.extend({
-  version: z.literal(3)
-})
-const persistedStateVersion = 3
-
-interface PersistedState {
-  liveShelf: ShelfRecord | null
-  recentShelves: ShelfRecord[]
-  preferences: PreferencesRecord
-  sync: SyncState
-  clipboardHistory: ClipboardEntry[]
-  clipboardCategories: ClipboardCategory[]
-  clipboardSettings: ClipboardSettings
-}
-
-export interface ClipboardEntryInput {
-  capturedAt: string
-  sourceBundleId: string
-  sourceAppName: string
-  item: ShelfItemRecord
-  thumbnailDataUri?: string
-  categoryIds?: string[]
-}
-
-interface LoadResult {
-  state: PersistedState
-  needsMigration: boolean
-  corruption: { backupPath: string; cause: Error } | null
-}
-
-export type PersistenceErrorListener = (error: Error) => void
-
-export interface CorruptionDetails {
-  backupPath: string
-  cause: Error
-}
-
-export type CorruptionListener = (details: CorruptionDetails) => void
+export type { ClipboardEntryInput } from './state/clipboardStore'
 
 export interface StateStoreOptions {
   onPersistenceError?: PersistenceErrorListener
   onCorruptionDetected?: CorruptionListener
 }
 
+export type { CorruptionListener, PersistenceErrorListener }
+
+/**
+ * Thin facade over the per-domain stores (`ShelfStore`,
+ * `ClipboardStore`, `PreferencesStore`, `SyncStore`) sharing one
+ * atomic-write `StatePersister`. The public API is the union of
+ * their methods so existing call sites (`ShelfController`,
+ * `IpcRegistrar`, `ClipboardHistoryService`, …) keep working
+ * unchanged.
+ *
+ * The split exists so each domain can be reasoned about — and
+ * unit-tested — independently, and so the file-format details
+ * (migrations, atomic writes) live in one place (`StatePersister`)
+ * rather than being mixed with shelf-lifecycle code.
+ */
 export class StateStore {
   readonly assetsDir: string
   readonly exportsDir: string
-  private readonly statePath: string
-  private readonly onPersistenceError: PersistenceErrorListener | null
-  private readonly onCorruptionDetected: CorruptionListener | null
-  private persisted: PersistedState
-  private pendingSerialized: string | null = null
-  private writeScheduled = false
-  private writeQueue = Promise.resolve()
+  readonly statePath: string
+  readonly shelves: ShelfStore
+  readonly clipboard: ClipboardStore
+  readonly preferences: PreferencesStore
+  readonly sync: SyncStore
+
+  private readonly persister: StatePersister
+  private readonly persisted: PersistedState
 
   constructor(userDataDir: string, options: StateStoreOptions = {}) {
-    this.onPersistenceError = options.onPersistenceError ?? null
-    this.onCorruptionDetected = options.onCorruptionDetected ?? null
-    this.assetsDir = join(userDataDir, 'assets')
-    this.exportsDir = join(userDataDir, 'exports')
-    this.statePath = join(userDataDir, 'state.json')
-    mkdirSync(userDataDir, { recursive: true })
-    mkdirSync(this.assetsDir, { recursive: true })
-    mkdirSync(this.exportsDir, { recursive: true })
-    const loaded = this.load()
+    const layout = buildStateFileLayout(userDataDir)
+    this.assetsDir = layout.assetsDir
+    this.exportsDir = layout.exportsDir
+    this.statePath = layout.statePath
+
+    const defaultState: PersistedState = {
+      liveShelf: null,
+      recentShelves: [],
+      preferences: defaultPreferences(),
+      sync: defaultSyncStateRecord(),
+      clipboardHistory: [],
+      clipboardCategories: [],
+      clipboardSettings: defaultClipboardSettingsRecord()
+    }
+
+    this.persister = new StatePersister({
+      statePath: layout.statePath,
+      onPersistenceError: options.onPersistenceError,
+      onCorruptionDetected: options.onCorruptionDetected
+    })
+
+    const loaded = this.persister.load(defaultState)
     this.persisted = loaded.state
 
-    if (loaded.needsMigration) {
-      this.save()
+    this.shelves = new ShelfStore(this.persister, () => this.persisted)
+    this.clipboard = new ClipboardStore(this.persister, () => this.persisted)
+    this.preferences = new PreferencesStore(this.persister, () => this.persisted)
+    this.sync = new SyncStore(this.persister, () => this.persisted)
+
+    if (loaded.didMigrate) {
+      this.persister.save(this.persisted)
     }
 
-    if (!this.persisted.sync.deviceId) {
-      this.persisted.sync = syncStateSchema.parse({
-        ...this.persisted.sync,
-        deviceId: randomUUID()
-      })
-      this.save()
-    }
+    this.sync.ensureDeviceId()
   }
 
   snapshot(permissionStatus: PermissionStatus): AppState {
@@ -119,537 +92,152 @@ export class StateStore {
     })
   }
 
-  getPreferences(): PreferencesRecord {
-    return this.persisted.preferences
-  }
-
-  getRecentShelves(): ShelfRecord[] {
-    return [...this.persisted.recentShelves]
-  }
-
-  getLiveShelf(): ShelfRecord | null {
-    return this.persisted.liveShelf
-  }
-
-  getAllShelves(): ShelfRecord[] {
-    return [this.persisted.liveShelf, ...this.persisted.recentShelves].filter((shelf): shelf is ShelfRecord =>
-      Boolean(shelf)
-    )
-  }
-
-  getSyncState(): SyncState {
-    return this.persisted.sync
-  }
-
   whenIdle(): Promise<void> {
-    return this.writeQueue
+    return this.persister.whenIdle()
   }
 
-  createShelf(origin: ShelfOrigin): ShelfRecord {
-    this.archiveLiveShelf()
-    this.persisted.liveShelf = {
-      id: randomUUID(),
-      name: defaultShelfName(),
-      color: nextShelfColor(this.persisted.recentShelves.length, this.currentPlan()),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      origin,
-      items: []
-    }
-    this.save()
-    return this.persisted.liveShelf
+  // ---- Shelf facade (delegated to `ShelfStore`) ----
+
+  getLiveShelf() {
+    return this.shelves.getLiveShelf()
   }
 
-  ensureLiveShelf(origin: ShelfOrigin): ShelfRecord {
-    return this.persisted.liveShelf ?? this.createShelf(origin)
+  getRecentShelves() {
+    return this.shelves.getRecentShelves()
   }
 
-  appendItems(items: ShelfItemRecord[]): ShelfRecord {
-    const liveShelf = this.ensureLiveShelf('manual')
-    const nextOrder = liveShelf.items.length
-    liveShelf.items.push(
-      ...items.map((item, index) => ({
-        ...item,
-        order: nextOrder + index
-      }))
-    )
-    liveShelf.updatedAt = new Date().toISOString()
-    this.save()
-    return liveShelf
+  getAllShelves() {
+    return this.shelves.getAllShelves()
   }
 
-  renameLiveShelf(name: string): ShelfRecord | null {
-    if (!this.persisted.liveShelf) {
-      return null
-    }
-
-    this.persisted.liveShelf.name = name.trim() || defaultShelfName()
-    this.persisted.liveShelf.updatedAt = new Date().toISOString()
-    this.save()
-    return this.persisted.liveShelf
+  createShelf(origin: Parameters<ShelfStore['createShelf']>[0]) {
+    return this.shelves.createShelf(origin)
   }
 
-  removeItem(itemId: string): ShelfRecord | null {
-    if (!this.persisted.liveShelf) {
-      return null
-    }
-
-    this.persisted.liveShelf.items = this.persisted.liveShelf.items
-      .filter((item) => item.id !== itemId)
-      .map((item, index) => ({
-        ...item,
-        order: index
-      }))
-    this.persisted.liveShelf.updatedAt = new Date().toISOString()
-    this.save()
-    return this.persisted.liveShelf
+  ensureLiveShelf(origin: Parameters<ShelfStore['ensureLiveShelf']>[0]) {
+    return this.shelves.ensureLiveShelf(origin)
   }
 
-  clearLiveShelf(): ShelfRecord | null {
-    if (!this.persisted.liveShelf) {
-      return null
-    }
-
-    this.persisted.liveShelf.items = []
-    this.persisted.liveShelf.updatedAt = new Date().toISOString()
-    this.save()
-    return this.persisted.liveShelf
+  appendItems(items: Parameters<ShelfStore['appendItems']>[0]) {
+    return this.shelves.appendItems(items)
   }
 
-  reorderItems(itemIds: string[]): ShelfRecord | null {
-    const liveShelf = this.persisted.liveShelf
-    if (!liveShelf) {
-      return null
-    }
-
-    const byId = new Map(liveShelf.items.map((item) => [item.id, item]))
-    const reordered = itemIds
-      .map((id) => byId.get(id))
-      .filter((item): item is ShelfItemRecord => Boolean(item))
-
-    const missing = liveShelf.items.filter((item) => !itemIds.includes(item.id))
-    liveShelf.items = [...reordered, ...missing].map((item, index) => ({
-      ...item,
-      order: index
-    }))
-    liveShelf.updatedAt = new Date().toISOString()
-    this.save()
-    return liveShelf
+  renameLiveShelf(name: string) {
+    return this.shelves.renameLiveShelf(name)
   }
 
-  replaceLiveShelf(shelf: ShelfRecord | null): void {
-    this.persisted.liveShelf = shelf
-    this.save()
+  removeItem(itemId: string) {
+    return this.shelves.removeItem(itemId)
   }
 
-  replaceRecentShelf(shelf: ShelfRecord): void {
-    const index = this.persisted.recentShelves.findIndex((entry) => entry.id === shelf.id)
-    if (index === -1) {
-      return
-    }
-
-    this.persisted.recentShelves[index] = shelf
-    this.save()
+  clearLiveShelf() {
+    return this.shelves.clearLiveShelf()
   }
 
-  closeShelf(): void {
-    this.archiveLiveShelf()
-    this.save()
+  reorderItems(itemIds: string[]) {
+    return this.shelves.reorderItems(itemIds)
   }
 
-  restoreShelf(id: string): ShelfRecord | null {
-    const shelf = this.persisted.recentShelves.find((entry) => entry.id === id)
-    if (!shelf) {
-      return null
-    }
-
-    this.archiveLiveShelf()
-    this.persisted.recentShelves = this.persisted.recentShelves.filter((entry) => entry.id !== id)
-    this.persisted.liveShelf = {
-      ...shelf,
-      origin: 'restore',
-      updatedAt: new Date().toISOString()
-    }
-    this.save()
-    return this.persisted.liveShelf
+  replaceLiveShelf(shelf: Parameters<ShelfStore['replaceLiveShelf']>[0]) {
+    return this.shelves.replaceLiveShelf(shelf)
   }
 
-  setPreferences(patch: PreferencePatch): PreferencesRecord {
-    this.persisted.preferences = preferencesRecordSchema.parse({
-      ...this.persisted.preferences,
-      ...patch
-    })
-    this.save()
-    return this.persisted.preferences
+  replaceRecentShelf(shelf: Parameters<ShelfStore['replaceRecentShelf']>[0]) {
+    return this.shelves.replaceRecentShelf(shelf)
   }
 
-  setSyncState(patch: SyncStatePatch): SyncState {
-    this.persisted.sync = syncStateSchema.parse({
-      ...this.persisted.sync,
-      ...patch
-    })
-    this.applyPlanLimits()
-    this.save()
-    return this.persisted.sync
+  closeShelf() {
+    return this.shelves.closeShelf()
   }
 
-  currentPlan(): BillingPlan {
-    return this.persisted.sync.plan
+  restoreShelf(id: string) {
+    return this.shelves.restoreShelf(id)
   }
 
-  private applyPlanLimits(): void {
-    const recentsLimit = recentShelvesLimitForPlan(this.currentPlan())
-    if (this.persisted.recentShelves.length > recentsLimit) {
-      this.persisted.recentShelves = this.persisted.recentShelves.slice(0, recentsLimit)
-    }
+  relinkFileBackedItem(
+    itemId: string,
+    fileRef: Parameters<ShelfStore['relinkFileBackedItem']>[1],
+  ) {
+    return this.shelves.relinkFileBackedItem(itemId, fileRef)
   }
 
-  relinkFileBackedItem(itemId: string, fileRef: Pick<FileRef, 'originalPath' | 'bookmarkBase64' | 'resolvedPath'>): ShelfRecord | null {
-    const liveShelf = this.persisted.liveShelf
-    if (!liveShelf) {
-      return null
-    }
+  // ---- Preferences facade (delegated to `PreferencesStore`) ----
 
-    const itemIndex = liveShelf.items.findIndex((item) => item.id === itemId)
-    if (itemIndex === -1) {
-      return null
-    }
-
-    const item = liveShelf.items[itemIndex]
-    if (!('file' in item)) {
-      return null
-    }
-
-    liveShelf.items[itemIndex] = {
-      ...item,
-      file: {
-        ...item.file,
-        ...fileRef,
-        isMissing: false,
-        isStale: false
-      }
-    }
-    liveShelf.updatedAt = new Date().toISOString()
-    this.save()
-    return liveShelf
+  getPreferences() {
+    return this.preferences.get()
   }
 
-  // ---- Clipboard history (local-first; never reaches Convex) ----
-
-  getClipboardEntries(): ClipboardEntry[] {
-    return [...this.persisted.clipboardHistory]
+  setPreferences(patch: Parameters<PreferencesStore['set']>[0]) {
+    return this.preferences.set(patch)
   }
 
-  getClipboardCategories(): ClipboardCategory[] {
-    return [...this.persisted.clipboardCategories]
+  // ---- Sync facade (delegated to `SyncStore`) ----
+
+  getSyncState() {
+    return this.sync.get()
   }
 
-  getClipboardSettings(): ClipboardSettings {
-    return this.persisted.clipboardSettings
+  setSyncState(patch: Parameters<SyncStore['set']>[0]) {
+    const next = this.sync.set(patch)
+    this.shelves.applyPlanLimits()
+    return next
   }
 
-  appendClipboardEntry(input: ClipboardEntryInput): ClipboardEntry {
-    const entry: ClipboardEntry = {
-      id: randomUUID(),
-      capturedAt: input.capturedAt,
-      sourceBundleId: input.sourceBundleId,
-      sourceAppName: input.sourceAppName,
-      item: input.item,
-      thumbnailDataUri: input.thumbnailDataUri,
-      categoryIds: input.categoryIds ?? []
-    }
-    this.persisted.clipboardHistory.unshift(entry)
-    this.pruneClipboardHistory()
-    this.save()
-    return entry
+  currentPlan() {
+    return this.sync.get().plan
   }
 
-  removeClipboardEntry(id: string): void {
-    this.persisted.clipboardHistory = this.persisted.clipboardHistory.filter(
-      (entry) => entry.id !== id
-    )
-    this.save()
+  // ---- Clipboard facade (delegated to `ClipboardStore`) ----
+
+  getClipboardEntries() {
+    return this.clipboard.getEntries()
   }
 
-  clearClipboardHistory(): void {
-    this.persisted.clipboardHistory = []
-    // Categories are intentionally kept; they're orthogonal workspace.
-    this.save()
+  getClipboardCategories() {
+    return this.clipboard.getCategories()
   }
 
-  pruneClipboardHistory(): void {
-    const settings = this.persisted.clipboardSettings
-    const limit = Math.max(1, settings.historyLimit)
-    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
-
-    this.persisted.clipboardHistory = this.persisted.clipboardHistory
-      .filter((entry) => {
-        const t = Date.parse(entry.capturedAt)
-        return Number.isFinite(t) && t >= thirtyDaysAgo
-      })
-      .slice(0, limit)
+  getClipboardSettings() {
+    return this.clipboard.getSettings()
   }
 
-  createClipboardCategory(name: string, color: ShelfColor): ClipboardCategory {
-    const category: ClipboardCategory = {
-      id: randomUUID(),
-      name: name.trim(),
-      color,
-      createdAt: new Date().toISOString()
-    }
-    this.persisted.clipboardCategories.push(category)
-    this.save()
-    return category
+  appendClipboardEntry(input: ClipboardEntryInput) {
+    return this.clipboard.appendEntry(input)
   }
 
-  renameClipboardCategory(id: string, name: string): void {
-    const category = this.persisted.clipboardCategories.find((c) => c.id === id)
-    if (!category) return
-    const trimmed = name.trim()
-    if (!trimmed) return
-    category.name = trimmed
-    this.save()
+  removeClipboardEntry(id: string) {
+    return this.clipboard.removeEntry(id)
   }
 
-  removeClipboardCategory(id: string): void {
-    this.persisted.clipboardCategories = this.persisted.clipboardCategories.filter(
-      (c) => c.id !== id
-    )
-    // Strip the id from every entry that referenced it.
-    for (const entry of this.persisted.clipboardHistory) {
-      entry.categoryIds = entry.categoryIds.filter((cid) => cid !== id)
-    }
-    this.save()
+  clearClipboardHistory() {
+    return this.clipboard.clearHistory()
   }
 
-  assignEntryToCategory(entryId: string, categoryId: string): void {
-    const entry = this.persisted.clipboardHistory.find((e) => e.id === entryId)
-    if (!entry) return
-    if (!this.persisted.clipboardCategories.some((c) => c.id === categoryId)) return
-    if (!entry.categoryIds.includes(categoryId)) {
-      entry.categoryIds = [...entry.categoryIds, categoryId]
-      this.save()
-    }
+  pruneClipboardHistory() {
+    return this.clipboard.prune()
   }
 
-  unassignEntryFromCategory(entryId: string, categoryId: string): void {
-    const entry = this.persisted.clipboardHistory.find((e) => e.id === entryId)
-    if (!entry) return
-    const next = entry.categoryIds.filter((cid) => cid !== categoryId)
-    if (next.length !== entry.categoryIds.length) {
-      entry.categoryIds = next
-      this.save()
-    }
+  createClipboardCategory(name: string, color: Parameters<ClipboardStore['createCategory']>[1]) {
+    return this.clipboard.createCategory(name, color)
   }
 
-  updateClipboardSettings(patch: Partial<ClipboardSettings>): ClipboardSettings {
-    this.persisted.clipboardSettings = {
-      ...this.persisted.clipboardSettings,
-      ...patch
-    }
-    // Re-enforce limits after a patch (e.g. user lowered historyLimit).
-    this.pruneClipboardHistory()
-    this.save()
-    return this.persisted.clipboardSettings
+  renameClipboardCategory(id: string, name: string) {
+    return this.clipboard.renameCategory(id, name)
   }
 
-  private archiveLiveShelf(): void {
-    const liveShelf = this.persisted.liveShelf
-    if (!liveShelf) {
-      return
-    }
-
-    // Empty shelves are transient workspace, not recent history.
-    if (liveShelf.items.length > 0) {
-      const existing = this.persisted.recentShelves.filter((entry) => entry.id !== liveShelf.id)
-      const recentsLimit = recentShelvesLimitForPlan(this.currentPlan())
-      this.persisted.recentShelves = [liveShelf, ...existing].slice(0, recentsLimit)
-    }
-
-    this.persisted.liveShelf = null
+  removeClipboardCategory(id: string) {
+    return this.clipboard.removeCategory(id)
   }
 
-  private load(): LoadResult {
-    if (!existsSync(this.statePath)) {
-      return {
-        state: this.defaultState(),
-        needsMigration: false,
-        corruption: null
-      }
-    }
-
-    try {
-      const raw = readFileSync(this.statePath, 'utf8')
-      const parsed = JSON.parse(raw)
-
-      if (parsed && typeof parsed === 'object' && 'version' in parsed) {
-        if (parsed.version === 1) {
-          const envelope = persistedStateEnvelopeV1Schema.parse(parsed)
-          return {
-            state: {
-              liveShelf: envelope.liveShelf,
-              recentShelves: envelope.recentShelves,
-              preferences: envelope.preferences,
-              sync: syncStateSchema.parse({}),
-              clipboardHistory: envelope.clipboardHistory,
-              clipboardCategories: envelope.clipboardCategories,
-              clipboardSettings: envelope.clipboardSettings
-            },
-            needsMigration: true,
-            corruption: null
-          }
-        }
-
-        if (parsed.version === 2) {
-          // v2 predates clipboard fields. Zod defaults fill them in.
-          const envelope = persistedStateEnvelopeV2Schema.parse(parsed)
-          return {
-            state: {
-              liveShelf: envelope.liveShelf,
-              recentShelves: envelope.recentShelves,
-              preferences: envelope.preferences,
-              sync: envelope.sync,
-              clipboardHistory: envelope.clipboardHistory,
-              clipboardCategories: envelope.clipboardCategories,
-              clipboardSettings: envelope.clipboardSettings
-            },
-            needsMigration: true,
-            corruption: null
-          }
-        }
-
-        const envelope = persistedStateEnvelopeV3Schema.parse(parsed)
-        return {
-          state: {
-            liveShelf: envelope.liveShelf,
-            recentShelves: envelope.recentShelves,
-            preferences: envelope.preferences,
-            sync: envelope.sync,
-            clipboardHistory: envelope.clipboardHistory,
-            clipboardCategories: envelope.clipboardCategories,
-            clipboardSettings: envelope.clipboardSettings
-          },
-          needsMigration: false,
-          corruption: null
-        }
-      }
-
-      return {
-        state: {
-          ...persistedStateSchema.omit({ sync: true }).parse(parsed),
-          sync: syncStateSchema.parse({})
-        },
-        needsMigration: true,
-        corruption: null
-      }
-    } catch (error) {
-      const cause = error instanceof Error ? error : new Error(String(error))
-      const backupPath = this.quarantineCorruptStateFile(cause)
-      return {
-        state: this.defaultState(),
-        needsMigration: false,
-        corruption: backupPath ? { backupPath, cause } : null
-      }
-    }
+  assignEntryToCategory(entryId: string, categoryId: string) {
+    return this.clipboard.assignEntryToCategory(entryId, categoryId)
   }
 
-  private quarantineCorruptStateFile(cause: Error): string | null {
-    // Move the unreadable file aside so the next save() can write a clean
-    // state.json without clobbering evidence, and so the user can recover
-    // the file from ~/Library/Application Support/Ledge/state.json.corrupt-*
-    // if the corruption was a transient parse error rather than data loss.
-    const backupPath = `${this.statePath}.corrupt-${Date.now()}`
-    try {
-      renameSync(this.statePath, backupPath)
-    } catch (renameError) {
-      console.error('Failed to quarantine corrupt Ledge state file.', renameError)
-      this.onPersistenceError?.(
-        renameError instanceof Error ? renameError : new Error(String(renameError)),
-      )
-      return null
-    }
-    console.error(`Ledge state file was unreadable (${cause.message}); moved to ${backupPath}`)
-    this.onCorruptionDetected?.({ backupPath, cause })
-    return backupPath
+  unassignEntryFromCategory(entryId: string, categoryId: string) {
+    return this.clipboard.unassignEntryFromCategory(entryId, categoryId)
   }
 
-  private save(): void {
-    this.pendingSerialized = JSON.stringify(
-      {
-        version: persistedStateVersion,
-        ...this.persisted
-      },
-      null,
-      2
-    )
-
-    if (this.writeScheduled) {
-      return
-    }
-
-    this.writeScheduled = true
-    this.writeQueue = this.writeQueue.then(async () => {
-      while (this.pendingSerialized !== null) {
-        const serialized = this.pendingSerialized
-        this.pendingSerialized = null
-
-        try {
-          // Write to a sibling temp file and rename atomically. A direct
-          // `fs.writeFile(statePath, ...)` can be interrupted by a crash
-          // or power loss mid-write, leaving the state file truncated or
-          // partially written; the next launch would then trip the
-          // corruption recovery path and force the user to restore from
-          // a `state.json.corrupt-*` backup. Atomic write avoids that.
-          const tempPath = `${this.statePath}.tmp-${process.pid}`
-          await fs.writeFile(tempPath, serialized, 'utf8')
-          await fs.rename(tempPath, this.statePath)
-        } catch (error) {
-          const err = error instanceof Error ? error : new Error(String(error))
-          console.error('Failed to persist Ledge state.', err)
-          this.onPersistenceError?.(err)
-        }
-      }
-
-      this.writeScheduled = false
-    }).catch(() => {
-      // Swallow rejections from the async writer so the chain stays resolved
-      // and subsequent save() calls continue to flush pendingSerialized.
-      // Errors are already reported via onPersistenceError above.
-    })
+  updateClipboardSettings(patch: Parameters<ClipboardStore['updateSettings']>[0]) {
+    return this.clipboard.updateSettings(patch)
   }
-
-  private defaultState(): PersistedState {
-    return {
-      liveShelf: null,
-      recentShelves: [],
-      preferences: preferencesRecordSchema.parse({}),
-      sync: syncStateSchema.parse({}),
-      clipboardHistory: [],
-      clipboardCategories: [],
-      clipboardSettings: {
-        enabled: false,
-        historyLimit: 200,
-        ignoreConcealedItems: true,
-        ignoreBundleIds: [],
-        quickPasteHotkey: 'CommandOrControl+Shift+V',
-        peekHotkey: '',
-        syntheticPasteEnabled: false,
-      }
-    }
-  }
-}
-
-function defaultShelfName(): string {
-  const now = new Date()
-  const time = new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric',
-    minute: '2-digit'
-  }).format(now)
-
-  return `Shelf ${time}`
-}
-
-function nextShelfColor(seed: number, plan: BillingPlan): ShelfRecord['color'] {
-  const colors = shelfColorsForPlan(plan)
-  return colors[seed % colors.length]
 }
