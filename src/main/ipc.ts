@@ -3,7 +3,6 @@ import { z } from 'zod'
 import { IPC_CHANNELS, type ToastPayload } from '@shared/ipc'
 import {
   createShelfInputSchema,
-  ingestPayloadSchema,
   preferencePatchSchema,
   shelfRecordSchema,
   syncStatePatchSchema,
@@ -11,6 +10,24 @@ import {
   type ShelfItemRecord,
 } from '@shared/schema'
 import { isFileBackedItem } from '@shared/fileUtils'
+import {
+  clipboardCategoryCreateInputSchema,
+  clipboardCategoryIdInputSchema,
+  clipboardCategoryRenameInputSchema,
+  clipboardEntryCategoryAssignInputSchema,
+  clipboardEntryIdInputSchema,
+  clipboardGetRecentInputSchema,
+  clipboardQuickPastePasteInputSchema,
+  clipboardSettingsUpdateSchema,
+  ingestPayloadListSchema,
+  MAX_DRAG_ITEM_IDS,
+  renameShelfInputSchema,
+  reorderItemsInputSchema,
+  shareShelfItemsInputSchema,
+  shelfItemIdParamSchema,
+  toastKindSchema,
+  toastMessageSchema,
+} from '@shared/ipcSchemas'
 import { fileBackedPathsFromEntry, quickPastePasteEntry } from './services/quickPaste'
 import { normalizePreferencePatch } from './services/preferencesSync'
 import { startNativeDrag, pathsExist } from './services/dragController'
@@ -24,51 +41,6 @@ import type { QuickPasteWindow } from './windows/quickPasteWindow'
 import type { PeekWindow } from './windows/peekWindow'
 import type { ClipboardMonitor } from './services/clipboardMonitor'
 import { decideRemoteShelfApply } from './remoteShelf'
-
-const itemIdParamSchema = z.string().uuid()
-const renameShelfParamSchema = z.object({ name: z.string().min(1).max(120) })
-const reorderItemsParamSchema = z.object({ itemIds: z.array(itemIdParamSchema).max(1024) })
-const shareShelfItemsParamSchema = z.array(itemIdParamSchema).max(1024).optional()
-
-/** Cap the per-call payload count for `addPayloads`. */
-const MAX_PAYLOADS_PER_REQUEST = 1024
-const payloadListSchema = z.array(ingestPayloadSchema).max(MAX_PAYLOADS_PER_REQUEST)
-
-const clipboardEntryIdSchema = z.object({ entryId: z.string().min(1) })
-const clipboardCategoryCreatePayloadSchema = z.object({
-  name: z.string().min(1).max(40),
-  color: z.enum(['ember', 'wave', 'forest', 'sand']),
-})
-const clipboardCategoryIdPayloadSchema = z.object({ id: z.string().min(1) })
-const clipboardCategoryRenamePayloadSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1).max(40),
-})
-const clipboardEntryCategoryAssignPayloadSchema = z.object({
-  entryId: z.string().min(1),
-  categoryId: z.string().min(1),
-})
-const clipboardSettingsPatchSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    historyLimit: z.number().int().positive().max(2000).optional(),
-    ignoreConcealedItems: z.boolean().optional(),
-    ignoreBundleIds: z.array(z.string()).optional(),
-    quickPasteHotkey: z.string().optional(),
-    peekHotkey: z.string().optional(),
-    syntheticPasteEnabled: z.boolean().optional(),
-  })
-  .strict()
-const clipboardQuickPastePastePayloadSchema = z.object({
-  entryId: z.string().min(1),
-  previousBundleId: z.string().default(''),
-})
-
-// Cap the message length and clamp the kind so a compromised or buggy
-// renderer can't spam the user with arbitrary toast content.
-const TOAST_MESSAGE_MAX = 500
-const toastMessageSchema = z.string().min(1).max(TOAST_MESSAGE_MAX)
-const toastKindSchema = z.enum(['info', 'success', 'error'])
 
 export interface IpcRegistrarDeps {
   stateStore: StateStore
@@ -139,15 +111,15 @@ export class IpcRegistrar {
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.restoreShelf, async (_event, id: unknown) => {
-      await this.deps.shelfController.restoreShelf(itemIdParamSchema.parse(id))
+      await this.deps.shelfController.restoreShelf(shelfItemIdParamSchema.parse(id))
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.addPayload, async (_event, payload: unknown) => {
-      await this.deps.shelfController.addPayloadsToLiveShelf(payloadListSchema.parse([payload]))
+      await this.deps.shelfController.addPayloadsToLiveShelf(ingestPayloadListSchema.parse([payload]))
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.addPayloads, async (_event, payloads: unknown) => {
-      await this.deps.shelfController.addPayloadsToLiveShelf(payloadListSchema.parse(payloads))
+      await this.deps.shelfController.addPayloadsToLiveShelf(ingestPayloadListSchema.parse(payloads))
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.closeShelf, async () => {
@@ -156,7 +128,7 @@ export class IpcRegistrar {
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.renameShelf, async (_event, input: unknown) => {
-      this.deps.stateStore.renameLiveShelf(renameShelfParamSchema.parse(input).name)
+      this.deps.stateStore.renameLiveShelf(renameShelfInputSchema.parse(input).name)
       this.deps.onInactivityTick()
       return this.deps.broadcastState()
     })
@@ -166,17 +138,17 @@ export class IpcRegistrar {
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.reorderItems, async (_event, input: unknown) => {
-      this.deps.stateStore.reorderItems(reorderItemsParamSchema.parse(input).itemIds)
+      this.deps.stateStore.reorderItems(reorderItemsInputSchema.parse(input).itemIds)
       this.deps.onInactivityTick()
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.removeItem, async (_event, itemId: unknown) => {
-      this.deps.stateStore.removeItem(itemIdParamSchema.parse(itemId))
+      this.deps.stateStore.removeItem(shelfItemIdParamSchema.parse(itemId))
       this.deps.onInactivityTick()
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.shareShelfItems, async (_event, itemIds: unknown) =>
-      this.deps.shelfActions.shareItems(shareShelfItemsParamSchema.parse(itemIds)),
+      this.deps.shelfActions.shareItems(shareShelfItemsInputSchema.parse(itemIds)),
     )
     ipcMain.handle(IPC_CHANNELS.getRecentShelves, async () =>
       this.deps.stateStore.getRecentShelves(),
@@ -186,7 +158,7 @@ export class IpcRegistrar {
   // ---- Items ----
 
   private registerItemIpc(): void {
-    const ids = (itemId: unknown) => itemIdParamSchema.parse(itemId)
+    const ids = (itemId: unknown) => shelfItemIdParamSchema.parse(itemId)
     ipcMain.handle(IPC_CHANNELS.previewItem, async (_event, itemId: unknown) =>
       this.deps.shelfActions.previewItem(ids(itemId)),
     )
@@ -207,7 +179,7 @@ export class IpcRegistrar {
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.showItemContextMenu, async (_event, itemId: unknown) => {
-      const validId = itemIdParamSchema.parse(itemId)
+      const validId = shelfItemIdParamSchema.parse(itemId)
       const item = this.liveItems().find((i) => i.id === validId)
       if (!item) return false
       this.popupItemMenu(item)
@@ -355,47 +327,45 @@ export class IpcRegistrar {
 
   private registerClipboardIpc(): void {
     ipcMain.handle(IPC_CHANNELS.clipboardGetRecent, async (_event, input: unknown) => {
-      const limit = (
-        z.object({ limit: z.number().int().positive().max(500) }).parse(input ?? { limit: 200 })
-      ).limit
+      const { limit } = clipboardGetRecentInputSchema.parse(input ?? { limit: 200 })
       return this.deps.stateStore.getClipboardEntries().slice(0, limit)
     })
     ipcMain.handle(IPC_CHANNELS.clipboardSettingsGet, async () =>
       this.deps.stateStore.getClipboardSettings(),
     )
     ipcMain.handle(IPC_CHANNELS.clipboardSettingsUpdate, async (_event, patch: unknown) => {
-      this.deps.stateStore.updateClipboardSettings(clipboardSettingsPatchSchema.parse(patch))
+      this.deps.stateStore.updateClipboardSettings(clipboardSettingsUpdateSchema.parse(patch))
       this.deps.broadcastState()
       return this.deps.stateStore.getClipboardSettings()
     })
     ipcMain.handle(IPC_CHANNELS.clipboardCategoryCreate, async (_event, payload: unknown) => {
-      const parsed = clipboardCategoryCreatePayloadSchema.parse(payload)
+      const parsed = clipboardCategoryCreateInputSchema.parse(payload)
       const created = this.deps.stateStore.createClipboardCategory(parsed.name, parsed.color)
       this.deps.broadcastState()
       return created
     })
     ipcMain.handle(IPC_CHANNELS.clipboardCategoryRename, async (_event, payload: unknown) => {
-      const parsed = clipboardCategoryRenamePayloadSchema.parse(payload)
+      const parsed = clipboardCategoryRenameInputSchema.parse(payload)
       this.deps.stateStore.renameClipboardCategory(parsed.id, parsed.name)
       this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.clipboardCategoryRemove, async (_event, payload: unknown) => {
-      const parsed = clipboardCategoryIdPayloadSchema.parse(payload)
+      const parsed = clipboardCategoryIdInputSchema.parse(payload)
       this.deps.stateStore.removeClipboardCategory(parsed.id)
       this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.clipboardEntryAssign, async (_event, payload: unknown) => {
-      const parsed = clipboardEntryCategoryAssignPayloadSchema.parse(payload)
+      const parsed = clipboardEntryCategoryAssignInputSchema.parse(payload)
       this.deps.stateStore.assignEntryToCategory(parsed.entryId, parsed.categoryId)
       this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.clipboardEntryUnassign, async (_event, payload: unknown) => {
-      const parsed = clipboardEntryCategoryAssignPayloadSchema.parse(payload)
+      const parsed = clipboardEntryCategoryAssignInputSchema.parse(payload)
       this.deps.stateStore.unassignEntryFromCategory(parsed.entryId, parsed.categoryId)
       this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.clipboardEntryRemove, async (_event, payload: unknown) => {
-      const parsed = clipboardEntryIdSchema.parse(payload)
+      const parsed = clipboardEntryIdInputSchema.parse(payload)
       this.deps.stateStore.removeClipboardEntry(parsed.entryId)
       this.deps.broadcastState()
     })
@@ -409,7 +379,7 @@ export class IpcRegistrar {
     })
 
     ipcMain.on(IPC_CHANNELS.clipboardStartItemDrag, (event, payload: unknown) => {
-      const parsed = clipboardEntryIdSchema.parse(payload)
+      const parsed = clipboardEntryIdInputSchema.parse(payload)
       const entry = this.deps.stateStore
         .getClipboardEntries()
         .find((candidate) => candidate.id === parsed.entryId)
@@ -445,7 +415,7 @@ export class IpcRegistrar {
       this.deps.quickPasteWindow.focusIndex(n.data)
     })
     ipcMain.handle(IPC_CHANNELS.clipboardQuickPastePaste, async (_event, payload: unknown) => {
-      const parsed = clipboardQuickPastePastePayloadSchema.parse(payload)
+      const parsed = clipboardQuickPastePasteInputSchema.parse(payload)
       const settings = this.deps.stateStore.getClipboardSettings()
       await quickPastePasteEntry(
         parsed.entryId,
@@ -488,7 +458,7 @@ export class IpcRegistrar {
       }
     })
     ipcMain.on(IPC_CHANNELS.startItemsDrag, (event, itemIds: unknown) => {
-      const parsed = z.array(z.string().uuid()).max(64).safeParse(itemIds)
+      const parsed = z.array(z.string().uuid()).max(MAX_DRAG_ITEM_IDS).safeParse(itemIds)
       if (!parsed.success) {
         event.returnValue = false
         return
