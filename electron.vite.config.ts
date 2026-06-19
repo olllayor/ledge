@@ -50,8 +50,15 @@ export default defineConfig(({ command }) => ({
       outDir: 'out/preload',
       sourcemap: command === 'serve',
       minify: command === 'build',
+      lib: {
+        entry: resolve(root, 'src/preload/index.ts'),
+        formats: ['cjs'],
+      },
       rollupOptions: {
         input: resolve(root, 'src/preload/index.ts'),
+        output: {
+          entryFileNames: '[name].cjs',
+        },
         external: ['electron'],
       },
     },
@@ -67,6 +74,13 @@ export default defineConfig(({ command }) => ({
     build: {
       outDir: resolve(root, 'out/renderer'),
       minify: command === 'build',
+      rollupOptions: {
+        input: {
+          index: resolve(root, 'src/renderer/index.html'),
+          quickPaste: resolve(root, 'src/renderer/quickPaste.html'),
+          peekWindow: resolve(root, 'src/renderer/peekWindow.html'),
+        },
+      },
     },
     plugins: [
       react(),

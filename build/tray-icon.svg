@@ -1,5 +1,15 @@
 <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-  <!-- Card resting on a ledge tray (template: black on transparent) -->
-  <rect x="5" y="3" width="6" height="6" rx="1" fill="black"/>
-  <path d="M2 9.5 L2 11 Q2 12 3 12 L13 12 Q14 12 14 11 L14 9.5 L12.5 9.5 L12.5 11 L3.5 11 L3.5 9.5 Z" fill="black"/>
+  <!-- Ledge: stacked notepad with spiral binding + note sticking out (template: black on transparent) -->
+  <g>
+    <!-- Notepad body (teal cover in brand) -->
+    <rect x="1.75" y="3.75" width="12.5" height="9" rx="1.5" ry="1.5" fill="black"/>
+    <!-- Note peeking out at the bottom (white card in brand) -->
+    <rect x="2.5" y="11.25" width="11" height="3.25" rx="0.9" ry="0.9" fill="black"/>
+    <!-- Spiral binding rings at the top (knock-out dots on the pad) -->
+    <circle cx="4" cy="3.75" r="0.55" fill="white"/>
+    <circle cx="6" cy="3.75" r="0.55" fill="white"/>
+    <circle cx="8" cy="3.75" r="0.55" fill="white"/>
+    <circle cx="10" cy="3.75" r="0.55" fill="white"/>
+    <circle cx="12" cy="3.75" r="0.55" fill="white"/>
+  </g>
 </svg>

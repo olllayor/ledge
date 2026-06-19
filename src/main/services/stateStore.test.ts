@@ -107,7 +107,7 @@ describe('StateStore', () => {
     await store.whenIdle()
     const persisted = JSON.parse(await readFile(statePath, 'utf8')) as { version: number; preferences: { globalShortcut: string } }
 
-    expect(persisted.version).toBe(2)
+    expect(persisted.version).toBe(3)
     expect(persisted.preferences.globalShortcut).toBe('CommandOrControl+Shift+Space')
   })
 
@@ -131,7 +131,7 @@ describe('StateStore', () => {
       preferences: { launchAtLogin: boolean }
     }
 
-    expect(persisted.version).toBe(2)
+    expect(persisted.version).toBe(3)
     expect(persisted.liveShelf).toBeNull()
     expect(persisted.preferences.launchAtLogin).toBe(true)
   })
@@ -374,4 +374,85 @@ describe('StateStore atomic write', () => {
     const tmps = files.filter((name) => name.startsWith('state.json.tmp-'))
     expect(tmps).toEqual([])
   })
+})
+
+describe('StateStore clipboard methods', () => {
+  async function makeStore() {
+    const dir = await mkdtemp(join(tmpdir(), 'dropshelf-store-'))
+    tempDirs.push(dir)
+    return new StateStore(dir)
+  }
+
+  function makeEntry(suffix: string) {
+    return {
+      capturedAt: new Date().toISOString(),
+      sourceBundleId: 'com.test.app',
+      sourceAppName: 'Test',
+      item: {
+        kind: 'text' as const,
+        id: `id-${suffix}`,
+        createdAt: new Date().toISOString(),
+        order: 0,
+        title: 'Hello',
+        subtitle: '',
+        preview: { summary: 'Hello', detail: '' },
+        text: `Body ${suffix}`,
+      },
+      categoryIds: [] as string[],
+    };
+  }
+
+  it('appends, removes, and clears clipboard entries', async () => {
+    const store = await makeStore();
+    const a = store.appendClipboardEntry(makeEntry('a'));
+    const b = store.appendClipboardEntry(makeEntry('b'));
+    expect(store.getClipboardEntries().map((entry) => entry.id)).toEqual([b.id, a.id]);
+    store.removeClipboardEntry(a.id);
+    expect(store.getClipboardEntries().map((entry) => entry.id)).toEqual([b.id]);
+    store.clearClipboardHistory();
+    expect(store.getClipboardEntries()).toEqual([]);
+  });
+
+  it('creates, renames, and removes clipboard categories; removal strips ids from entries', async () => {
+    const store = await makeStore();
+    const entry = store.appendClipboardEntry(makeEntry('one'));
+    const cat = store.createClipboardCategory('Templates', 'ember');
+    store.assignEntryToCategory(entry.id, cat.id);
+    expect(store.getClipboardEntries()[0].categoryIds).toEqual([cat.id]);
+    store.renameClipboardCategory(cat.id, 'Snippets');
+    expect(store.getClipboardCategories()[0].name).toBe('Snippets');
+    store.removeClipboardCategory(cat.id);
+    expect(store.getClipboardCategories()).toEqual([]);
+    expect(store.getClipboardEntries()[0].categoryIds).toEqual([]);
+  });
+
+  it('respects historyLimit when appending many entries', async () => {
+    const store = await makeStore();
+    store.updateClipboardSettings({ historyLimit: 3 });
+    for (let i = 0; i < 5; i += 1) {
+      store.appendClipboardEntry(makeEntry(`n${i}`));
+    }
+    expect(store.getClipboardEntries()).toHaveLength(3);
+  });
+
+  it('prunes entries older than 30 days', async () => {
+    const store = await makeStore();
+    const old = makeEntry('old');
+    const fresh = makeEntry('fresh');
+    store.appendClipboardEntry({ ...old, capturedAt: new Date(Date.now() - 31 * 86_400_000).toISOString() });
+    const freshEntry = store.appendClipboardEntry(fresh);
+    store.pruneClipboardHistory();
+    const ids = store.getClipboardEntries().map((entry) => entry.id);
+    expect(ids).toEqual([freshEntry.id]);
+  });
+
+  it('emits defaults for clipboard fields on a fresh store', async () => {
+    const store = await makeStore();
+    const settings = store.getClipboardSettings();
+    expect(settings.enabled).toBe(false);
+    expect(settings.historyLimit).toBe(200);
+    expect(settings.ignoreConcealedItems).toBe(true);
+    expect(store.getClipboardCategories()).toEqual([]);
+    expect(store.getClipboardEntries()).toEqual([]);
+  });
 })

@@ -22,6 +22,9 @@ function makeState(): AppState {
     preferences: {} as AppState['preferences'],
     sync: {} as AppState['sync'],
     permissionStatus: {} as AppState['permissionStatus'],
+    clipboardHistory: [],
+    clipboardCategories: [],
+    clipboardSettings: {} as AppState['clipboardSettings'],
   } as AppState;
 }
 

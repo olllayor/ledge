@@ -6,6 +6,7 @@ interface TrayCallbacks {
   onNewShelf(): void
   onNewShelfFromClipboard(): void
   onOpenPreferences(): void
+  onOpenClipboardHistory(): void
   onOpenWhatsNew(): void
   onOpenQuickStart(): void
   onOpenAbout(): void
@@ -60,6 +61,10 @@ export class TrayController {
       {
         label: 'Recent Shelves',
         submenu: recentShelves.length > 0 ? recentShelves.map((shelf) => createRestoreMenuItem(shelf, this.callbacks.onRestoreShelf)) : [{ label: 'No recent shelves', enabled: false }]
+      },
+      {
+        label: 'Clipboard History…',
+        click: () => this.callbacks.onOpenClipboardHistory()
       },
       {
         type: 'separator'

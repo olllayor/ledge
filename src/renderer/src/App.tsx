@@ -9,6 +9,9 @@ import type { AppState } from '@shared/schema';
 const PreferencesView = lazy(() =>
   import('./components/PreferencesView').then((module) => ({ default: module.PreferencesView })),
 );
+const ClipboardView = lazy(() =>
+  import('./components/ClipboardView').then((module) => ({ default: module.ClipboardView })),
+);
 
 export function App() {
   const selectShelfViewState = useMemo(
@@ -78,6 +81,28 @@ export function App() {
         >
           <ErrorBoundary>
             <PreferencesView state={fullState} />
+          </ErrorBoundary>
+        </Suspense>
+        <ToastHost />
+      </>
+    );
+  }
+
+  if (view === 'clipboard') {
+    return (
+      <>
+        <Suspense
+          fallback={
+            <main className="loading-shell">
+              <div className="loading-card">
+                <p className="eyebrow">Ledge</p>
+                <p>Loading clipboard…</p>
+              </div>
+            </main>
+          }
+        >
+          <ErrorBoundary>
+            <ClipboardView />
           </ErrorBoundary>
         </Suspense>
         <ToastHost />

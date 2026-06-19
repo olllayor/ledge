@@ -36,7 +36,9 @@ export type CloudShelfItem =
   | (Omit<Extract<ShelfItemRecord, { kind: 'folder' }>, 'file'> & { file: CloudFileRef })
   | (Omit<Extract<ShelfItemRecord, { kind: 'imageAsset' }>, 'file'> & { file: CloudFileRef })
   | Extract<ShelfItemRecord, { kind: 'text' }>
-  | (Extract<ShelfItemRecord, { kind: 'url' }> & { cloudStorageId?: string; cloudStorageBytes?: number });
+  | (Extract<ShelfItemRecord, { kind: 'url' }> & { cloudStorageId?: string; cloudStorageBytes?: number })
+  | Extract<ShelfItemRecord, { kind: 'color' }>
+  | Extract<ShelfItemRecord, { kind: 'code' }>;
 
 export interface CloudShelfRecord {
   id: string;

@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { URL } from 'node:url'
 
-export type RendererView = 'shelf' | 'preferences'
+export type RendererView = 'shelf' | 'preferences' | 'clipboard' | 'quickPaste' | 'peek'
 
 export async function loadRenderer(window: BrowserWindow, view: RendererView): Promise<void> {
   if (process.env.ELECTRON_RENDERER_URL) {

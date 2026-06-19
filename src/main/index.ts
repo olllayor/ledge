@@ -15,9 +15,10 @@ import {
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { basename, extname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { IPC_CHANNELS,  type ToastPayload } from '@shared/ipc';
+import { IPC_CHANNELS,  type ToastPayload, type ToastKind } from '@shared/ipc';
 import {
   appStateSchema,
   createShelfInputSchema,
@@ -25,6 +26,7 @@ import {
   permissionStatusSchema,
   preferencePatchSchema,
   shelfRecordSchema,
+  shelfItemSchema,
   syncStatePatchSchema,
   type AppState,
   type IngestPayload,
@@ -63,6 +65,11 @@ const remoteShelfWatermarks = new Map<string, number>();
 import { InactivityTimer } from './services/inactivityTimer';
 import { PreferencesWindow } from './windows/preferencesWindow';
 import { ShelfWindow } from './windows/shelfWindow';
+import { QuickPasteWindow } from './windows/quickPasteWindow';
+import { PeekWindow } from './windows/peekWindow';
+import { ClipboardWindow } from './windows/clipboardWindow';
+import { ClipboardMonitor } from './services/clipboardMonitor';
+import { quickPastePasteEntry, fileBackedPathsFromEntry } from './services/quickPaste';
 import { TrayController } from './tray';
 
 let stateStore: StateStore;
@@ -70,6 +77,10 @@ let nativeAgent: NativeAgentClient;
 let tray: TrayController;
 let shelfWindow: ShelfWindow;
 let preferencesWindow: PreferencesWindow;
+let quickPasteWindow: QuickPasteWindow;
+let peekWindow: PeekWindow;
+let clipboardWindow: ClipboardWindow;
+let clipboardMonitor: ClipboardMonitor;
 let inactivityTimer: InactivityTimer;
 let shortcutStatus: Pick<PermissionStatus, 'shortcutRegistered' | 'shortcutError'> = {
   shortcutRegistered: false,
@@ -180,6 +191,15 @@ app.whenReady().then(async () => {
   nativeAgent = new NativeAgentClient();
   shelfWindow = new ShelfWindow();
   preferencesWindow = new PreferencesWindow();
+  quickPasteWindow = new QuickPasteWindow();
+  peekWindow = new PeekWindow();
+  clipboardWindow = new ClipboardWindow();
+  clipboardMonitor = new ClipboardMonitor({
+    onChange: (snapshot) => {
+      void captureClipboardSnapshot(snapshot);
+    },
+    intervalMs: 500,
+  });
   inactivityTimer = new InactivityTimer(() => {
     if (
       stateStore.getPreferences().shelfInteraction.autoRetract &&
@@ -197,6 +217,9 @@ app.whenReady().then(async () => {
     },
     onOpenPreferences: () => {
       void preferencesWindow.show();
+    },
+    onOpenClipboardHistory: () => {
+      void clipboardWindow.show();
     },
     onOpenWhatsNew: () => {
       void shell.openExternal(WHATS_NEW_URL);
@@ -230,6 +253,13 @@ app.whenReady().then(async () => {
   nativeAgent.on('shakeDetected', (event: ShakeDetectedEvent) => {
     void handleShakeDetected(event);
   });
+  nativeAgent.on('clipboardChanged', (event) => {
+    if (event && typeof event === 'object' && 'changeCount' in event) {
+      clipboardMonitor.notifyFromNative(event as Parameters<typeof clipboardMonitor.notifyFromNative>[0]);
+    }
+  });
+  await nativeAgent.startClipboardObserver(500);
+  void clipboardMonitor.start();
 
   syncSystemPreferences();
   await nativeAgent.configureGesture(stateStore.getPreferences());
@@ -469,6 +499,148 @@ function registerIpc(): void {
     const menu = Menu.buildFromTemplate(template);
     menu.popup({ window: shelfWindow.getBrowserWindow() ?? undefined });
     return true;
+  });
+
+  // ---- Clipboard history handlers (local-first; never reaches Convex) ----
+
+  const clipboardEntryIdSchema = z.object({ entryId: z.string().min(1) });
+  const clipboardCategoryCreatePayloadSchema = z.object({
+    name: z.string().min(1).max(40),
+    color: z.enum(['ember', 'wave', 'forest', 'sand']),
+  });
+  const clipboardCategoryIdPayloadSchema = z.object({
+    id: z.string().min(1),
+  });
+  const clipboardCategoryRenamePayloadSchema = z.object({
+    id: z.string().min(1),
+    name: z.string().min(1).max(40),
+  });
+  const clipboardEntryCategoryAssignPayloadSchema = z.object({
+    entryId: z.string().min(1),
+    categoryId: z.string().min(1),
+  });
+  const clipboardSettingsPatchSchema = z
+    .object({
+      enabled: z.boolean().optional(),
+      historyLimit: z.number().int().positive().max(2000).optional(),
+      ignoreConcealedItems: z.boolean().optional(),
+      ignoreBundleIds: z.array(z.string()).optional(),
+      quickPasteHotkey: z.string().optional(),
+      peekHotkey: z.string().optional(),
+      syntheticPasteEnabled: z.boolean().optional(),
+    })
+    .strict();
+  const clipboardQuickPastePastePayloadSchema = z.object({
+    entryId: z.string().min(1),
+    previousBundleId: z.string().default(''),
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.clipboardGetRecent,
+    async (_event, input: unknown) => {
+      const limit = (z.object({ limit: z.number().int().positive().max(500) }).parse(input ?? { limit: 200 })).limit;
+      return stateStore.getClipboardEntries().slice(0, limit);
+    },
+  );
+  ipcMain.handle(IPC_CHANNELS.clipboardSettingsGet, async () => stateStore.getClipboardSettings());
+  ipcMain.handle(IPC_CHANNELS.clipboardSettingsUpdate, async (_event, patch: unknown) => {
+    stateStore.updateClipboardSettings(clipboardSettingsPatchSchema.parse(patch));
+    broadcastState();
+    return stateStore.getClipboardSettings();
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardCategoryCreate, async (_event, payload: unknown) => {
+    const parsed = clipboardCategoryCreatePayloadSchema.parse(payload);
+    const created = stateStore.createClipboardCategory(parsed.name, parsed.color);
+    broadcastState();
+    return created;
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardCategoryRename, async (_event, payload: unknown) => {
+    const parsed = clipboardCategoryRenamePayloadSchema.parse(payload);
+    stateStore.renameClipboardCategory(parsed.id, parsed.name);
+    broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardCategoryRemove, async (_event, payload: unknown) => {
+    const parsed = clipboardCategoryIdPayloadSchema.parse(payload);
+    stateStore.removeClipboardCategory(parsed.id);
+    broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardEntryAssign, async (_event, payload: unknown) => {
+    const parsed = clipboardEntryCategoryAssignPayloadSchema.parse(payload);
+    stateStore.assignEntryToCategory(parsed.entryId, parsed.categoryId);
+    broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardEntryUnassign, async (_event, payload: unknown) => {
+    const parsed = clipboardEntryCategoryAssignPayloadSchema.parse(payload);
+    stateStore.unassignEntryFromCategory(parsed.entryId, parsed.categoryId);
+    broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardEntryRemove, async (_event, payload: unknown) => {
+    const parsed = clipboardEntryIdSchema.parse(payload);
+    stateStore.removeClipboardEntry(parsed.entryId);
+    broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardEntryClearAll, async () => {
+    stateStore.clearClipboardHistory();
+    broadcastState();
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardPruneNow, async () => {
+    stateStore.pruneClipboardHistory();
+    broadcastState();
+  });
+
+  ipcMain.on(IPC_CHANNELS.clipboardStartItemDrag, (event, payload: unknown) => {
+    const parsed = clipboardEntryIdSchema.parse(payload);
+    const entry = stateStore
+      .getClipboardEntries()
+      .find((candidate) => candidate.id === parsed.entryId);
+    if (!entry) {
+      event.returnValue = false;
+      return;
+    }
+    const paths = fileBackedPathsFromEntry(entry);
+    if (paths.length === 0) {
+      event.returnValue = false;
+      return;
+    }
+    try {
+      startNativeDrag(event.sender, paths);
+      event.returnValue = true;
+    } catch {
+      event.returnValue = false;
+    }
+  });
+
+  ipcMain.on(IPC_CHANNELS.clipboardQuickPasteShow, () => {
+    // Use the cached snapshot to avoid the IPC race where the palette
+    // window itself becomes frontmost before we read the previous app.
+    const previousBundleId = clipboardMonitor.getLastFrontmostApp()?.bundleId ?? '';
+    void quickPasteWindow.show(previousBundleId);
+  });
+  ipcMain.on(IPC_CHANNELS.clipboardQuickPasteHide, () => {
+    quickPasteWindow.hide();
+  });
+  ipcMain.on(IPC_CHANNELS.clipboardQuickPasteFocusIndex, (_event, index: unknown) => {
+    const n = z.number().int().min(0).max(8).safeParse(index);
+    if (!n.success) return;
+    quickPasteWindow.focusIndex(n.data);
+  });
+  ipcMain.handle(IPC_CHANNELS.clipboardQuickPastePaste, async (_event, payload: unknown) => {
+    const parsed = clipboardQuickPastePastePayloadSchema.parse(payload);
+    const settings = stateStore.getClipboardSettings();
+    await quickPastePasteEntry(
+      parsed.entryId,
+      parsed.previousBundleId,
+      (id) => stateStore.getClipboardEntries().find((e) => e.id === id),
+      settings,
+      'com.ollayor.ledge',
+    );
+  });
+
+  ipcMain.on(IPC_CHANNELS.clipboardPeekShow, () => {
+    peekWindow.show();
+  });
+  ipcMain.on(IPC_CHANNELS.clipboardPeekHide, () => {
+    peekWindow.hide();
   });
 
   // Cap the message length and clamp the kind so a compromised or buggy
@@ -808,6 +980,35 @@ function syncSystemPreferences(): void {
           shortcutRegistered: false,
           shortcutError: 'Shortcut could not be registered. It may already be in use.',
         };
+
+    // ---- Clipboard quick-paste hotkey ----
+    const settings = stateStore.getClipboardSettings();
+    const quickPasteShortcut = settings.quickPasteHotkey.trim();
+    if (quickPasteShortcut && quickPasteShortcut !== normalizedShortcut) {
+      try {
+        globalShortcut.register(quickPasteShortcut, () => {
+          // Capture the frontmost app synchronously from the cached
+          // change-snapshot before the palette window itself becomes
+          // frontmost (avoiding the IPC race window).
+          const previousBundleId = clipboardMonitor.getLastFrontmostApp()?.bundleId ?? '';
+          quickPasteWindow.show(previousBundleId);
+        });
+      } catch (error) {
+        console.error('[ledge] quick-paste hotkey registration failed:', error);
+      }
+    }
+
+    // ---- Clipboard peek hotkey (opt-in; empty by default) ----
+    const peekShortcut = settings.peekHotkey.trim();
+    if (peekShortcut && peekShortcut !== normalizedShortcut && peekShortcut !== quickPasteShortcut) {
+      try {
+        globalShortcut.register(peekShortcut, () => {
+          peekWindow.show();
+        });
+      } catch (error) {
+        console.error('[ledge] peek hotkey registration failed:', error);
+      }
+    }
   } catch (error) {
     shortcutStatus = {
       shortcutRegistered: false,
@@ -832,6 +1033,7 @@ function broadcastState(): AppState {
   tray.update(state);
   shelfWindow.sendState(state);
   preferencesWindow.sendState(state);
+  clipboardWindow.sendState(state);
   return state;
 }
 
@@ -965,6 +1167,182 @@ async function saveItem(itemId: string): Promise<boolean> {
   return true;
 }
 
+// ---- Clipboard history helpers ----
+
+const CONCEALED_TYPE = 'org.nspasteboard.ConcealedType';
+const MAX_IMPORTED_IMAGE_BYTES = 25 * 1024 * 1024; // mirrors payloads.ts
+
+function isClipboardEnabled(): boolean {
+  return stateStore.getClipboardSettings().enabled;
+}
+
+function clipboardShouldSkip(bundleId: string, formats: string[]): boolean {
+  const settings = stateStore.getClipboardSettings();
+  if (settings.ignoreConcealedItems && formats.includes(CONCEALED_TYPE)) {
+    return true;
+  }
+  if (bundleId && settings.ignoreBundleIds.includes(bundleId)) {
+    return true;
+  }
+  return false;
+}
+
+function makeClipboardThumbnail(image: Electron.NativeImage): string | undefined {
+  if (image.isEmpty()) return undefined;
+  const resized = image.resize({ width: 64, quality: 'good' });
+  if (resized.isEmpty()) return undefined;
+  return resized.toDataURL();
+}
+
+function hexFromText(text: string): string | null {
+  const trimmed = text.trim();
+  // 6 or 8 hex digits, with or without leading '#'.
+  const match = /^#?([0-9a-fA-F]{6}([0-9a-fA-F]{2})?)$/.exec(trimmed);
+  if (!match) return null;
+  return `#${match[1].toLowerCase()}`;
+}
+
+function looksLikeCode(text: string): boolean {
+  // Light heuristic — proper language detection is out of scope.
+  if (text.length < 16) return false;
+  if (/\n\s{2,}/.test(text)) return true;
+  if (/\bfunction\b|\bconst\b|\blet\b|\bimport\b|\bdef\b|\bclass\b/.test(text)) return true;
+  if (/[{}\[\];].*\n/.test(text)) return true;
+  return false;
+}
+
+async function captureClipboardSnapshot(snapshot: {
+  sourceBundleId: string;
+  sourceAppName: string;
+  formats: string[];
+}): Promise<void> {
+  if (!isClipboardEnabled()) return;
+  if (clipboardShouldSkip(snapshot.sourceBundleId, snapshot.formats)) return;
+
+  const shelfItems = await readClipboardToShelfItems(snapshot.formats);
+  if (shelfItems.length === 0) return;
+
+  for (const item of shelfItems) {
+    if (item.kind === 'imageAsset' && getFileBackedPath(item)) {
+      try {
+        const stat = await fs.stat(getFileBackedPath(item) as string);
+        if (stat.size > MAX_IMPORTED_IMAGE_BYTES) {
+          showToast(`Skipped oversized clipboard image (${Math.round(stat.size / 1024 / 1024)}MB).`, 'info');
+          continue;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    let thumbnailDataUri: string | undefined;
+    if (item.kind === 'imageAsset') {
+      const imagePath = getFileBackedPath(item);
+      if (imagePath && existsSync(imagePath)) {
+        const img = nativeImage.createFromPath(imagePath);
+        thumbnailDataUri = makeClipboardThumbnail(img);
+      }
+    }
+
+    stateStore.appendClipboardEntry({
+      capturedAt: new Date().toISOString(),
+      sourceBundleId: snapshot.sourceBundleId,
+      sourceAppName: snapshot.sourceAppName,
+      item,
+      thumbnailDataUri,
+    });
+  }
+  broadcastState();
+}
+
+async function readClipboardToShelfItems(formats: string[]): Promise<ShelfItemRecord[]> {
+  // Priority order: image > file path > URL > code > color > text.
+  // First match wins; we don't merge multiple kinds from one pasteboard.
+  if (formats.some((format) => format.startsWith('image/') || format === 'public.tiff' || format === 'com.adobe.pdf')) {
+    const image = clipboard.readImage();
+    if (!image.isEmpty()) {
+      try {
+        const items = await payloadToItems(
+          {
+            kind: 'image',
+            mimeType: 'image/png',
+            base64: image.toPNG().toString('base64'),
+            filenameHint: 'clipboard-image',
+          },
+          clipboardPayloadContext(),
+        );
+        return items;
+      } catch (err) {
+        if (err instanceof ImportedImageTooLargeError) {
+          showToast(err.message, 'info');
+          return [];
+        }
+        throw err;
+      }
+    }
+  }
+
+  if (formats.includes('public.file-url') || formats.includes('NSFilenamesPboardType') || formats.includes('text/uri-list')) {
+    try {
+      const buffer = clipboard.readBuffer('public.file-url');
+      const text = buffer.toString('utf8');
+      if (text) {
+        const items = await payloadToItems({ kind: 'fileDrop', paths: text.split('\n').filter(Boolean) }, clipboardPayloadContext());
+        if (items.length > 0) return items;
+      }
+    } catch {
+      // Fall through to URL/text handling.
+    }
+  }
+
+  const text = clipboard.readText().trim();
+  if (text) {
+    const hex = hexFromText(text);
+    if (hex) {
+      const item: ShelfItemRecord = shelfItemSchema.parse({
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+        order: 0,
+        title: hex,
+        subtitle: 'Color',
+        preview: { summary: hex, detail: '' },
+        kind: 'color',
+        hex,
+      });
+      return [item];
+    }
+
+    if (looksLikeCode(text)) {
+      const item: ShelfItemRecord = shelfItemSchema.parse({
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+        order: 0,
+        title: text.split('\n')[0]?.slice(0, 60) ?? 'Code snippet',
+        subtitle: 'Code',
+        preview: { summary: text.slice(0, 120), detail: text.length.toString() },
+        kind: 'code',
+        text,
+      });
+      return [item];
+    }
+
+    const payload = detectPayloadFromText(text);
+    const items = await payloadToItems(payload, clipboardPayloadContext());
+    return items;
+  }
+
+  return [];
+}
+
+function clipboardPayloadContext() {
+  return {
+    assetsDir: stateStore.assetsDir,
+    createBookmark: async (path: string) => nativeAgent.createBookmark(path),
+    resolveBookmark: async (bookmarkBase64: string, originalPath: string) =>
+      nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
+  };
+}
+
 async function shareItems(itemIds?: string[]): Promise<boolean> {
   const liveShelf = stateStore.getLiveShelf();
   if (!liveShelf) {
@@ -1004,6 +1382,14 @@ function currentPermissionStatus(): PermissionStatus {
     ...nativeAgent.getStatus(),
     ...shortcutStatus,
   });
+}
+
+function showToast(message: string, kind: ToastKind = 'info'): void {
+  const payload: ToastPayload = { message, kind };
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    window.webContents.send(IPC_CHANNELS.showToast, payload);
+  }
 }
 
 function resolveAllowedAssetPath(path: string): string | null {

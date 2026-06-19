@@ -9,9 +9,13 @@ import {
   syncStateSchema,
   type AppState,
   type BillingPlan,
+  type ClipboardCategory,
+  type ClipboardEntry,
+  type ClipboardSettings,
   type PermissionStatus,
   type PreferencePatch,
   type PreferencesRecord,
+  type ShelfColor,
   type ShelfItemRecord,
   type ShelfOrigin,
   type ShelfRecord,
@@ -28,13 +32,28 @@ const persistedStateEnvelopeV1Schema = appStateSchema.omit({ permissionStatus: t
 const persistedStateEnvelopeV2Schema = persistedStateSchema.extend({
   version: z.literal(2)
 })
-const persistedStateVersion = 2
+const persistedStateEnvelopeV3Schema = persistedStateSchema.extend({
+  version: z.literal(3)
+})
+const persistedStateVersion = 3
 
 interface PersistedState {
   liveShelf: ShelfRecord | null
   recentShelves: ShelfRecord[]
   preferences: PreferencesRecord
   sync: SyncState
+  clipboardHistory: ClipboardEntry[]
+  clipboardCategories: ClipboardCategory[]
+  clipboardSettings: ClipboardSettings
+}
+
+export interface ClipboardEntryInput {
+  capturedAt: string
+  sourceBundleId: string
+  sourceAppName: string
+  item: ShelfItemRecord
+  thumbnailDataUri?: string
+  categoryIds?: string[]
 }
 
 interface LoadResult {
@@ -315,6 +334,125 @@ export class StateStore {
     return liveShelf
   }
 
+  // ---- Clipboard history (local-first; never reaches Convex) ----
+
+  getClipboardEntries(): ClipboardEntry[] {
+    return [...this.persisted.clipboardHistory]
+  }
+
+  getClipboardCategories(): ClipboardCategory[] {
+    return [...this.persisted.clipboardCategories]
+  }
+
+  getClipboardSettings(): ClipboardSettings {
+    return this.persisted.clipboardSettings
+  }
+
+  appendClipboardEntry(input: ClipboardEntryInput): ClipboardEntry {
+    const entry: ClipboardEntry = {
+      id: randomUUID(),
+      capturedAt: input.capturedAt,
+      sourceBundleId: input.sourceBundleId,
+      sourceAppName: input.sourceAppName,
+      item: input.item,
+      thumbnailDataUri: input.thumbnailDataUri,
+      categoryIds: input.categoryIds ?? []
+    }
+    this.persisted.clipboardHistory.unshift(entry)
+    this.pruneClipboardHistory()
+    this.save()
+    return entry
+  }
+
+  removeClipboardEntry(id: string): void {
+    this.persisted.clipboardHistory = this.persisted.clipboardHistory.filter(
+      (entry) => entry.id !== id
+    )
+    this.save()
+  }
+
+  clearClipboardHistory(): void {
+    this.persisted.clipboardHistory = []
+    // Categories are intentionally kept; they're orthogonal workspace.
+    this.save()
+  }
+
+  pruneClipboardHistory(): void {
+    const settings = this.persisted.clipboardSettings
+    const limit = Math.max(1, settings.historyLimit)
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
+
+    this.persisted.clipboardHistory = this.persisted.clipboardHistory
+      .filter((entry) => {
+        const t = Date.parse(entry.capturedAt)
+        return Number.isFinite(t) && t >= thirtyDaysAgo
+      })
+      .slice(0, limit)
+  }
+
+  createClipboardCategory(name: string, color: ShelfColor): ClipboardCategory {
+    const category: ClipboardCategory = {
+      id: randomUUID(),
+      name: name.trim(),
+      color,
+      createdAt: new Date().toISOString()
+    }
+    this.persisted.clipboardCategories.push(category)
+    this.save()
+    return category
+  }
+
+  renameClipboardCategory(id: string, name: string): void {
+    const category = this.persisted.clipboardCategories.find((c) => c.id === id)
+    if (!category) return
+    const trimmed = name.trim()
+    if (!trimmed) return
+    category.name = trimmed
+    this.save()
+  }
+
+  removeClipboardCategory(id: string): void {
+    this.persisted.clipboardCategories = this.persisted.clipboardCategories.filter(
+      (c) => c.id !== id
+    )
+    // Strip the id from every entry that referenced it.
+    for (const entry of this.persisted.clipboardHistory) {
+      entry.categoryIds = entry.categoryIds.filter((cid) => cid !== id)
+    }
+    this.save()
+  }
+
+  assignEntryToCategory(entryId: string, categoryId: string): void {
+    const entry = this.persisted.clipboardHistory.find((e) => e.id === entryId)
+    if (!entry) return
+    if (!this.persisted.clipboardCategories.some((c) => c.id === categoryId)) return
+    if (!entry.categoryIds.includes(categoryId)) {
+      entry.categoryIds = [...entry.categoryIds, categoryId]
+      this.save()
+    }
+  }
+
+  unassignEntryFromCategory(entryId: string, categoryId: string): void {
+    const entry = this.persisted.clipboardHistory.find((e) => e.id === entryId)
+    if (!entry) return
+    const next = entry.categoryIds.filter((cid) => cid !== categoryId)
+    if (next.length !== entry.categoryIds.length) {
+      entry.categoryIds = next
+      this.save()
+    }
+  }
+
+  updateClipboardSettings(patch: Partial<ClipboardSettings>): ClipboardSettings {
+    this.persisted.clipboardSettings = {
+      ...this.persisted.clipboardSettings,
+      ...patch
+    }
+    // Re-enforce limits after a patch (e.g. user lowered historyLimit).
+    this.pruneClipboardHistory()
+    this.save()
+    return this.persisted.clipboardSettings
+  }
+
   private archiveLiveShelf(): void {
     const liveShelf = this.persisted.liveShelf
     if (!liveShelf) {
@@ -352,20 +490,44 @@ export class StateStore {
               liveShelf: envelope.liveShelf,
               recentShelves: envelope.recentShelves,
               preferences: envelope.preferences,
-              sync: syncStateSchema.parse({})
+              sync: syncStateSchema.parse({}),
+              clipboardHistory: envelope.clipboardHistory,
+              clipboardCategories: envelope.clipboardCategories,
+              clipboardSettings: envelope.clipboardSettings
             },
             needsMigration: true,
             corruption: null
           }
         }
 
-        const envelope = persistedStateEnvelopeV2Schema.parse(parsed)
+        if (parsed.version === 2) {
+          // v2 predates clipboard fields. Zod defaults fill them in.
+          const envelope = persistedStateEnvelopeV2Schema.parse(parsed)
+          return {
+            state: {
+              liveShelf: envelope.liveShelf,
+              recentShelves: envelope.recentShelves,
+              preferences: envelope.preferences,
+              sync: envelope.sync,
+              clipboardHistory: envelope.clipboardHistory,
+              clipboardCategories: envelope.clipboardCategories,
+              clipboardSettings: envelope.clipboardSettings
+            },
+            needsMigration: true,
+            corruption: null
+          }
+        }
+
+        const envelope = persistedStateEnvelopeV3Schema.parse(parsed)
         return {
           state: {
             liveShelf: envelope.liveShelf,
             recentShelves: envelope.recentShelves,
             preferences: envelope.preferences,
-            sync: envelope.sync
+            sync: envelope.sync,
+            clipboardHistory: envelope.clipboardHistory,
+            clipboardCategories: envelope.clipboardCategories,
+            clipboardSettings: envelope.clipboardSettings
           },
           needsMigration: false,
           corruption: null
@@ -461,7 +623,18 @@ export class StateStore {
       liveShelf: null,
       recentShelves: [],
       preferences: preferencesRecordSchema.parse({}),
-      sync: syncStateSchema.parse({})
+      sync: syncStateSchema.parse({}),
+      clipboardHistory: [],
+      clipboardCategories: [],
+      clipboardSettings: {
+        enabled: false,
+        historyLimit: 200,
+        ignoreConcealedItems: true,
+        ignoreBundleIds: [],
+        quickPasteHotkey: 'CommandOrControl+Shift+V',
+        peekHotkey: '',
+        syntheticPasteEnabled: false,
+      }
     }
   }
 }

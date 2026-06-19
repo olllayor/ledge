@@ -42,6 +42,13 @@ export interface ShakeDetectedEvent {
   sourceBundleId: string
 }
 
+export interface ClipboardChangedEvent {
+  changeCount: number
+  sourceBundleId: string
+  sourceAppName: string
+  formats: string[]
+}
+
 type PendingRequest = {
   resolve: (value: unknown) => void
   reject: (reason?: unknown) => void
@@ -260,6 +267,29 @@ export class NativeAgentClient extends EventEmitter {
     this.updateStatus({})
   }
 
+  async startClipboardObserver(intervalMs = 500): Promise<void> {
+    if (!this.child) {
+      return
+    }
+    try {
+      await this.call('clipboard.startObserving', { intervalMs })
+    } catch {
+      // The clipboard observer is best-effort: the TS-side
+      // ClipboardMonitor will fall back to its own polling loop.
+    }
+  }
+
+  async stopClipboardObserver(): Promise<void> {
+    if (!this.child) {
+      return
+    }
+    try {
+      await this.call('clipboard.stopObserving')
+    } catch {
+      // ignore
+    }
+  }
+
   async createBookmark(path: string): Promise<string> {
     if (!this.child) {
       return ''
@@ -342,6 +372,10 @@ export class NativeAgentClient extends EventEmitter {
 
     if (message.method === 'gesture.dragEnded') {
       this.emit('dragEnded', message.params ?? {})
+    }
+
+    if (message.method === 'clipboard.changed') {
+      this.emit('clipboardChanged', message.params ?? {})
     }
   }
 

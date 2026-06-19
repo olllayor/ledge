@@ -21,6 +21,9 @@ export const shelfItemBase = {
   preview,
 };
 
+// Keep in sync with src/shared/schema.ts shelfItemSchema — adding a kind
+// here requires adding it there too, otherwise clipboard drag-out will
+// fail Convex sync silently.
 export const shelfItemSchema = v.union(
   v.object({
     ...shelfItemBase,
@@ -50,6 +53,18 @@ export const shelfItemSchema = v.union(
     kind: v.literal("url"),
     url: v.string(),
     savedFilePath: v.optional(v.string()),
+  }),
+  v.object({
+    ...shelfItemBase,
+    kind: v.literal("color"),
+    hex: v.string(),
+    name: v.optional(v.string()),
+  }),
+  v.object({
+    ...shelfItemBase,
+    kind: v.literal("code"),
+    text: v.string(),
+    language: v.optional(v.string()),
   }),
 );
 

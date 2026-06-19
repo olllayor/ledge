@@ -22,6 +22,9 @@ export const imageAssetItemSchema = shelfItemBaseSchema.extend({
   mimeType: z.string().default('image/png'),
 });
 
+// Keep the ShelfItemRecord union in sync with convex/sharedSchemas.ts —
+// adding a kind here requires adding it there too, otherwise drag-out from
+// the clipboard into a real shelf will fail Convex sync silently.
 export const textItemSchema = shelfItemBaseSchema.extend({
   kind: z.literal('text'),
   text: z.string(),
@@ -34,12 +37,26 @@ export const urlItemSchema = shelfItemBaseSchema.extend({
   savedFilePath: z.string().optional(),
 });
 
+export const colorItemSchema = shelfItemBaseSchema.extend({
+  kind: z.literal('color'),
+  hex: z.string().regex(/^#[0-9a-fA-F]{6,8}$/),
+  name: z.string().optional(),
+});
+
+export const codeItemSchema = shelfItemBaseSchema.extend({
+  kind: z.literal('code'),
+  text: z.string(),
+  language: z.string().optional(),
+});
+
 export const shelfItemSchema = z.discriminatedUnion('kind', [
   fileItemSchema,
   folderItemSchema,
   imageAssetItemSchema,
   textItemSchema,
   urlItemSchema,
+  colorItemSchema,
+  codeItemSchema,
 ]);
 
 export const shelfRecordSchema = z.object({
@@ -119,12 +136,56 @@ export const defaultSyncState = {
   lastError: '',
 };
 
+// ---- Clipboard history (local-first; never reaches Convex) ----------------
+
+export const clipboardEntrySchema = z.object({
+  id: z.string(),
+  capturedAt: z.string(),
+  sourceBundleId: z.string().default(''),
+  sourceAppName: z.string().default(''),
+  item: shelfItemSchema,
+  // 64x64 PNG data URI generated at capture for image items; lets
+  // ClipboardView render thumbnails without re-decoding the full payload.
+  thumbnailDataUri: z.string().optional(),
+  categoryIds: z.array(z.string()).default([]),
+});
+
+export const clipboardCategorySchema = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(40),
+  color: shelfColorSchema,
+  createdAt: z.string(),
+});
+
+export const clipboardSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  historyLimit: z.number().int().positive().default(200),
+  ignoreConcealedItems: z.boolean().default(true),
+  ignoreBundleIds: z.array(z.string()).default([]),
+  quickPasteHotkey: z.string().default('CommandOrControl+Shift+V'),
+  peekHotkey: z.string().default(''),
+  syntheticPasteEnabled: z.boolean().default(false),
+});
+
+export const defaultClipboardSettings = {
+  enabled: false,
+  historyLimit: 200,
+  ignoreConcealedItems: true,
+  ignoreBundleIds: [] as string[],
+  quickPasteHotkey: 'CommandOrControl+Shift+V',
+  peekHotkey: '',
+  syntheticPasteEnabled: false,
+};
+
 export const appStateSchema = z.object({
   liveShelf: shelfRecordSchema.nullable(),
   recentShelves: z.array(shelfRecordSchema).max(10).default([]),
   preferences: preferencesRecordSchema,
   permissionStatus: permissionStatusSchema,
   sync: syncStateSchema.default(defaultSyncState),
+  clipboardHistory: z.array(clipboardEntrySchema).default([]),
+  clipboardCategories: z.array(clipboardCategorySchema).default([]),
+  clipboardSettings: clipboardSettingsSchema.default(defaultClipboardSettings),
 });
 
 export const fileDropPayloadSchema = z.object({
@@ -198,3 +259,6 @@ export type ShelfRecord = z.infer<typeof shelfRecordSchema>;
 export type ShakeSensitivity = z.infer<typeof shakeSensitivitySchema>;
 export type SyncState = z.infer<typeof syncStateSchema>;
 export type SyncStatePatch = z.infer<typeof syncStatePatchSchema>;
+export type ClipboardEntry = z.infer<typeof clipboardEntrySchema>;
+export type ClipboardCategory = z.infer<typeof clipboardCategorySchema>;
+export type ClipboardSettings = z.infer<typeof clipboardSettingsSchema>;
