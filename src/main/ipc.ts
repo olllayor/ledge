@@ -140,7 +140,6 @@ export class IpcRegistrar {
     })
     ipcMain.handle(IPC_CHANNELS.restoreShelf, async (_event, id: unknown) => {
       await this.deps.shelfController.restoreShelf(itemIdParamSchema.parse(id))
-      this.deps.onInactivityTick()
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.addPayload, async (_event, payload: unknown) => {

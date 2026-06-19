@@ -1,6 +1,6 @@
 import { app, globalShortcut } from 'electron'
 import { normalizeExcludedBundleIds } from '@shared/preferences'
-import { permissionStatusSchema, type PreferencePatch, type PermissionStatus } from '@shared/schema'
+import { permissionStatusSchema, type PreferencePatch, type PermissionStatus, type PreferencesRecord } from '@shared/schema'
 import { normalizeGlobalShortcut, validateGlobalShortcut } from './systemUtils'
 import type { StateStore } from './stateStore'
 import type { NativeAgentClient } from '../native/nativeAgent'
@@ -106,7 +106,7 @@ export class PreferencesSyncService {
     }
   }
 
-  private registerClipboardShortcuts(preferences: import('@shared/schema').PreferencesRecord): void {
+  private registerClipboardShortcuts(preferences: PreferencesRecord): void {
     const settings = this.stateStore.getClipboardSettings()
     const mainShortcut = normalizeGlobalShortcut(preferences.globalShortcut)
 
