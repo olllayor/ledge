@@ -52,6 +52,7 @@ export const IPC_CHANNELS = {
   clipboardQuickPasteShow: 'ledge:clipboard-quick-paste:show',
   clipboardQuickPasteHide: 'ledge:clipboard-quick-paste:hide',
   clipboardQuickPastePaste: 'ledge:clipboard-quick-paste:paste',
+  clipboardCopy: 'ledge:clipboard-copy',
   clipboardQuickPasteFocusIndex: 'ledge:clipboard-quick-paste:focus-index',
   clipboardGetRecent: 'ledge:clipboard-get-recent',
   clipboardPeekShow: 'ledge:clipboard-peek:show',
@@ -89,6 +90,11 @@ export const clipboardEntryInputSchema = z.object({
   categoryIds: z.array(z.string()).default([]),
 });
 export type ClipboardEntryInputPayload = z.infer<typeof clipboardEntryInputSchema>;
+
+export const clipboardCopyInputSchema = z.object({
+  entryId: z.string().min(1),
+})
+export type ClipboardCopyInputPayload = z.infer<typeof clipboardCopyInputSchema>
 
 export const clipboardQuickPastePasteInputSchema = z.object({
   entryId: z.string(),
@@ -198,6 +204,9 @@ export interface LedgeAPI {
   clipboardQuickPasteShow(): void;
   clipboardQuickPasteHide(): void;
   clipboardQuickPastePaste(payload: { entryId: string; previousBundleId?: string }): Promise<void>;
+  /** Copy a single clipboard history entry to the system pasteboard
+   *  without triggering the synthetic-paste keystroke. */
+  clipboardCopy(payload: { entryId: string }): Promise<boolean>;
   clipboardQuickPasteFocusIndex(index: number): void;
   // Subscribe to hints the main process pushes via the quick-paste
   // channel. Hints reset focus to 0, refresh entries, or move focus

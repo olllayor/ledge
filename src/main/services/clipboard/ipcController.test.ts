@@ -95,6 +95,62 @@ afterEach(() => {
 })
 
 describe('ClipboardIpcController', () => {
+  it('registers a clipboardCopy handler', () => {
+    const c = new ClipboardIpcController(deps)
+    c.registerAll()
+    expect(bus.handlers.has(IPC_CHANNELS.clipboardCopy)).toBe(true)
+  })
+
+  it('returns false when the entry is missing for clipboardCopy', async () => {
+    const c = new ClipboardIpcController(deps)
+    c.registerAll()
+    const result = await bus.call(IPC_CHANNELS.clipboardCopy, { entryId: 'missing' })
+    expect(result).toBe(false)
+  })
+
+  it('returns true after writing a known entry via clipboardCopy', async () => {
+    const entry: { id: string; capturedAt: string; sourceBundleId: string; sourceAppName: string; item: unknown; categoryIds: string[] } = {
+      id: 'e1',
+      capturedAt: '2026-06-20T00:00:00Z',
+      sourceBundleId: '',
+      sourceAppName: '',
+      item: {
+        id: 'i1',
+        kind: 'text',
+        createdAt: '2026-06-20T00:00:00Z',
+        order: 0,
+        title: 'snippet',
+        subtitle: '',
+        preview: { summary: 'hello', detail: '' },
+        text: 'hello'
+      },
+      categoryIds: []
+    }
+    const writer = {
+      texts: [] as string[],
+      writeText(text: string) { this.texts.push(text) },
+      writeBuffer() {},
+      writeImage() {},
+      clear() {}
+    }
+    deps.stateStore = {
+      ...deps.stateStore,
+      getClipboardEntries: vi.fn(() => [entry as never])
+    } as unknown as StateStore
+    deps.clipboardWriter = writer as unknown as typeof deps.clipboardWriter
+    const c = new ClipboardIpcController(deps)
+    c.registerAll()
+    const result = await bus.call(IPC_CHANNELS.clipboardCopy, { entryId: 'e1' })
+    expect(result).toBe(true)
+    expect(writer.texts).toEqual(['hello'])
+  })
+
+  it('rejects an invalid clipboardCopy payload', async () => {
+    const c = new ClipboardIpcController(deps)
+    c.registerAll()
+    await expect(bus.call(IPC_CHANNELS.clipboardCopy, { entryId: '' })).rejects.toThrow()
+  })
+
   it('registers one handler per channel family', () => {
     const c = new ClipboardIpcController(deps)
     c.registerAll()

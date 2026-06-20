@@ -25,10 +25,10 @@ function makeEntry(): ClipboardEntry {
 }
 
 describe('useClipboardActions', () => {
-  it('returns stable callbacks that forward to window.ledge', () => {
-    const clipboardQuickPastePaste = vi.fn(async () => undefined)
+  it('returns stable callbacks that forward to window.ledge', async () => {
+    const clipboardCopy = vi.fn(async () => true)
     ;(window as unknown as { ledge: Record<string, unknown> }).ledge = {
-      clipboardQuickPastePaste,
+      clipboardCopy,
       clipboardEntryRemove: vi.fn(async () => undefined),
       clipboardEntryAssign: vi.fn(async () => undefined),
       clipboardEntryUnassign: vi.fn(async () => undefined),
@@ -45,11 +45,9 @@ describe('useClipboardActions', () => {
     rerender()
     expect(result.current).toBe(first) // stable across renders
 
-    void result.current.copyEntry(makeEntry())
-    expect(clipboardQuickPastePaste).toHaveBeenCalledWith({
-      entryId: 'entry-1',
-      previousBundleId: ''
-    })
+    const ok = await result.current.copyEntry(makeEntry())
+    expect(ok).toBe(true)
+    expect(clipboardCopy).toHaveBeenCalledWith({ entryId: 'entry-1' })
   })
 
   it('returns false from copyEntry when the bridge is absent', async () => {

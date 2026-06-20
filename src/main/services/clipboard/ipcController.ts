@@ -5,6 +5,7 @@ import {
   clipboardCategoryCreateInputSchema,
   clipboardCategoryIdInputSchema,
   clipboardCategoryRenameInputSchema,
+  clipboardCopyInputSchema,
   clipboardEntryCategoryAssignInputSchema,
   clipboardEntryIdInputSchema,
   clipboardGetRecentInputSchema,
@@ -12,12 +13,13 @@ import {
   clipboardSettingsUpdateSchema
 } from '@shared/ipcSchemas'
 import { startNativeDrag } from '../dragController'
-import { fileBackedPathsFromEntry, quickPastePasteEntry } from '../quickPaste'
+import { copyEntryToPasteboard, fileBackedPathsFromEntry, quickPastePasteEntry } from '../quickPaste'
 import type { StateStore } from '../stateStore'
 import type { ClipboardMonitor } from '../clipboardMonitor'
 import type { QuickPasteWindow } from '../../windows/quickPasteWindow'
 import type { PeekWindow } from '../../windows/peekWindow'
 import type { WebContents } from 'electron'
+import type { ClipboardWriter } from './writer'
 
 /**
  * Single owner of every clipboard-related IPC channel. The
@@ -34,6 +36,9 @@ export interface ClipboardIpcDeps {
   broadcastState(): void
   /** Optional override so tests can register a fake main module. */
   ipcMain?: { handle: typeof ipcMain.handle; on: typeof ipcMain.on }
+  /** Optional writer override so tests can capture writes without
+   *  touching the real Electron clipboard. */
+  clipboardWriter?: ClipboardWriter
   /** Bundle id used to short-circuit "paste back into Ledge" checks. */
   ledeBundleId?: string
 }
@@ -47,12 +52,26 @@ export class ClipboardIpcController {
 
   registerAll(): void {
     this.registerHistoryChannels()
+    this.registerCopyChannel()
     this.registerSettingsChannels()
     this.registerCategoryChannels()
     this.registerEntryMutationChannels()
     this.registerDragChannel()
     this.registerQuickPasteChannels()
     this.registerPeekChannels()
+  }
+
+  // ---- Copy (in-app) ---------------------------------------------------
+
+  private registerCopyChannel(): void {
+    this.bus.handle(IPC_CHANNELS.clipboardCopy, async (_event, payload: unknown) => {
+      const parsed = clipboardCopyInputSchema.parse(payload)
+      return copyEntryToPasteboard(
+        parsed.entryId,
+        (id) => this.deps.stateStore.getClipboardEntries().find((e) => e.id === id),
+        this.deps.clipboardWriter,
+      )
+    })
   }
 
   // ---- Settings --------------------------------------------------------

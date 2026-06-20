@@ -5,6 +5,7 @@ import {
   clipboardCategoryCreateInputSchema,
   clipboardCategoryRenameInputSchema,
   clipboardCategoryRemoveInputSchema,
+  clipboardCopyInputSchema,
   clipboardEntryAssignInputSchema,
   clipboardEntryRemoveInputSchema,
   clipboardEntryUnassignInputSchema,
@@ -217,6 +218,10 @@ const api: LedgeAPI = {
   },
   clipboardQuickPasteHide() {
     ipcRenderer.send(IPC_CHANNELS.clipboardQuickPasteHide);
+  },
+  async clipboardCopy(payload) {
+    const parsed = clipboardCopyInputSchema.parse(payload);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.clipboardCopy, parsed)) as boolean;
   },
   async clipboardQuickPastePaste(payload) {
     const parsed = clipboardQuickPastePasteInputSchema.parse(payload);

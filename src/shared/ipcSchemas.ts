@@ -42,6 +42,9 @@ export const clipboardEntryIdInputSchema = z.object({
   entryId: z.string().min(1),
 });
 
+/** Argument for `ledge:clipboard-copy` (renderer-side 'Copy' button). */
+export const clipboardCopyInputSchema = clipboardEntryIdInputSchema;
+
 export const clipboardCategoryCreateInputSchema = z.object({
   name: z.string().min(1).max(40),
   color: z.enum(['ember', 'wave', 'forest', 'sand']),

@@ -31,8 +31,7 @@ export function useClipboardActions(): ClipboardActions {
   const copyEntry = useCallback(async (entry: ClipboardEntry) => {
     if (!window.ledge) return false
     try {
-      await window.ledge.clipboardQuickPastePaste({ entryId: entry.id, previousBundleId: '' })
-      return true
+      return await window.ledge.clipboardCopy({ entryId: entry.id })
     } catch {
       return false
     }
