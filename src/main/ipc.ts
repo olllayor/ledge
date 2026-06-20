@@ -11,14 +11,6 @@ import {
 } from '@shared/schema'
 
 import {
-  clipboardCategoryCreateInputSchema,
-  clipboardCategoryIdInputSchema,
-  clipboardCategoryRenameInputSchema,
-  clipboardEntryCategoryAssignInputSchema,
-  clipboardEntryIdInputSchema,
-  clipboardGetRecentInputSchema,
-  clipboardQuickPastePasteInputSchema,
-  clipboardSettingsUpdateSchema,
   ingestPayloadListSchema,
   MAX_DRAG_ITEM_IDS,
   renameShelfInputSchema,
@@ -26,11 +18,11 @@ import {
   shareShelfItemsInputSchema,
   shelfItemIdParamSchema,
   toastKindSchema,
-  toastMessageSchema,
+  toastMessageSchema
 } from '@shared/ipcSchemas'
-import { fileBackedPathsFromEntry, quickPastePasteEntry } from './services/quickPaste'
 import { normalizePreferencePatch } from './services/preferencesSync'
-import { startNativeDrag, pathsExist } from './services/dragController'
+import { pathsExist, startNativeDrag } from './services/dragController'
+import { ClipboardIpcController } from './services/clipboard/ipcController'
 import type { ShelfActions } from './services/shelfActions'
 import type { ShelfController } from './services/shelfController'
 import type { PreferencesSyncService } from './services/preferencesSync'
@@ -56,6 +48,7 @@ export interface IpcRegistrarDeps {
   shelfOps: ShelfItemOps
   contextMenus: ShelfContextMenus
   preferencesSync: PreferencesSyncService
+  clipboardIpc: ClipboardIpcController
   broadcastState(): AppState
   onInactivityTick(): void
   remoteShelfWatermarks: Map<string, number>
@@ -77,7 +70,7 @@ export class IpcRegistrar {
     this.registerItemIpc()
     this.registerPreferencesIpc()
     this.registerSyncIpc()
-    this.registerClipboardIpc()
+    this.deps.clipboardIpc.registerAll()
     this.registerDragIpc()
   }
 
@@ -232,132 +225,7 @@ export class IpcRegistrar {
     return this.deps.stateStore.getRecentShelves().find((shelf) => shelf.id === id) ?? null
   }
 
-  // ---- Clipboard ----
 
-  /**
-   * Run a mutator against the state store and broadcast the new
-   * state. Returns whatever the mutator returns (often the new
-   * resource the caller wants to echo back, sometimes nothing).
-   * Centralizes the "mutate + broadcast" boilerplate that every
-   * clipboard IPC handler used to repeat by hand.
-   */
-  private async mutateAndBroadcast<T>(mutate: () => T): Promise<T> {
-    const result = mutate()
-    this.deps.broadcastState()
-    return result
-  }
-
-  private registerClipboardIpc(): void {
-    ipcMain.handle(IPC_CHANNELS.clipboardGetRecent, async (_event, input: unknown) => {
-      const { limit } = clipboardGetRecentInputSchema.parse(input ?? { limit: 200 })
-      return this.deps.stateStore.getClipboardEntries().slice(0, limit)
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardSettingsGet, async () =>
-      this.deps.stateStore.getClipboardSettings(),
-    )
-    ipcMain.handle(IPC_CHANNELS.clipboardSettingsUpdate, async (_event, patch: unknown) => {
-      this.deps.stateStore.updateClipboardSettings(clipboardSettingsUpdateSchema.parse(patch))
-      this.deps.broadcastState()
-      return this.deps.stateStore.getClipboardSettings()
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardCategoryCreate, async (_event, payload: unknown) => {
-      const parsed = clipboardCategoryCreateInputSchema.parse(payload)
-      return this.mutateAndBroadcast(() =>
-        this.deps.stateStore.createClipboardCategory(parsed.name, parsed.color),
-      )
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardCategoryRename, async (_event, payload: unknown) => {
-      const parsed = clipboardCategoryRenameInputSchema.parse(payload)
-      return this.mutateAndBroadcast(() =>
-        this.deps.stateStore.renameClipboardCategory(parsed.id, parsed.name),
-      )
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardCategoryRemove, async (_event, payload: unknown) => {
-      const parsed = clipboardCategoryIdInputSchema.parse(payload)
-      return this.mutateAndBroadcast(() =>
-        this.deps.stateStore.removeClipboardCategory(parsed.id),
-      )
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardEntryAssign, async (_event, payload: unknown) => {
-      const parsed = clipboardEntryCategoryAssignInputSchema.parse(payload)
-      return this.mutateAndBroadcast(() =>
-        this.deps.stateStore.assignEntryToCategory(parsed.entryId, parsed.categoryId),
-      )
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardEntryUnassign, async (_event, payload: unknown) => {
-      const parsed = clipboardEntryCategoryAssignInputSchema.parse(payload)
-      return this.mutateAndBroadcast(() =>
-        this.deps.stateStore.unassignEntryFromCategory(parsed.entryId, parsed.categoryId),
-      )
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardEntryRemove, async (_event, payload: unknown) => {
-      const parsed = clipboardEntryIdInputSchema.parse(payload)
-      return this.mutateAndBroadcast(() =>
-        this.deps.stateStore.removeClipboardEntry(parsed.entryId),
-      )
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardEntryClearAll, async () =>
-      this.mutateAndBroadcast(() => this.deps.stateStore.clearClipboardHistory()),
-    )
-    ipcMain.handle(IPC_CHANNELS.clipboardPruneNow, async () =>
-      this.mutateAndBroadcast(() => this.deps.stateStore.pruneClipboardHistory()),
-    )
-
-    ipcMain.on(IPC_CHANNELS.clipboardStartItemDrag, (event, payload: unknown) => {
-      const parsed = clipboardEntryIdInputSchema.parse(payload)
-      const entry = this.deps.stateStore
-        .getClipboardEntries()
-        .find((candidate) => candidate.id === parsed.entryId)
-      if (!entry) {
-        event.returnValue = false
-        return
-      }
-      const paths = fileBackedPathsFromEntry(entry)
-      if (paths.length === 0) {
-        event.returnValue = false
-        return
-      }
-      try {
-        startNativeDrag(event.sender, paths)
-        event.returnValue = true
-      } catch {
-        event.returnValue = false
-      }
-    })
-
-    ipcMain.on(IPC_CHANNELS.clipboardQuickPasteShow, () => {
-      // Use the cached snapshot to avoid the IPC race where the palette
-      // window itself becomes frontmost before we read the previous app.
-      const previousBundleId = this.deps.clipboardMonitor.getLastFrontmostApp()?.bundleId ?? ''
-      void this.deps.quickPasteWindow.show(previousBundleId)
-    })
-    ipcMain.on(IPC_CHANNELS.clipboardQuickPasteHide, () => {
-      this.deps.quickPasteWindow.hide()
-    })
-    ipcMain.on(IPC_CHANNELS.clipboardQuickPasteFocusIndex, (_event, index: unknown) => {
-      const n = z.number().int().min(0).max(8).safeParse(index)
-      if (!n.success) return
-      this.deps.quickPasteWindow.focusIndex(n.data)
-    })
-    ipcMain.handle(IPC_CHANNELS.clipboardQuickPastePaste, async (_event, payload: unknown) => {
-      const parsed = clipboardQuickPastePasteInputSchema.parse(payload)
-      const settings = this.deps.stateStore.getClipboardSettings()
-      await quickPastePasteEntry(
-        parsed.entryId,
-        parsed.previousBundleId,
-        (id) => this.deps.stateStore.getClipboardEntries().find((e) => e.id === id),
-        settings,
-        'com.ollayor.ledge',
-      )
-    })
-
-    ipcMain.on(IPC_CHANNELS.clipboardPeekShow, () => {
-      void this.deps.peekWindow.show()
-    })
-    ipcMain.on(IPC_CHANNELS.clipboardPeekHide, () => {
-      this.deps.peekWindow.hide()
-    })
-  }
 
   // ---- Drag ----
 

@@ -23,6 +23,7 @@ import { PreferencesSyncService } from './services/preferencesSync'
 import { resolveAllowedAssetPath } from './services/assetPathResolver'
 import { broadcastToast, createThrottledToast } from './services/toastBroadcaster'
 import { IpcRegistrar } from './ipc'
+import { ClipboardIpcController } from './services/clipboard/ipcController'
 
 const PROJECT_URL = 'https://github.com/olllayor/ledge'
 const WHATS_NEW_URL = `${PROJECT_URL}/releases`
@@ -293,6 +294,13 @@ app.whenReady().then(async () => {
     shelfOps,
     contextMenus,
     preferencesSync,
+    clipboardIpc: new ClipboardIpcController({
+      stateStore,
+      clipboardMonitor,
+      quickPasteWindow,
+      peekWindow,
+      broadcastState: () => broadcastState()
+    }),
     broadcastState: () => broadcastState(),
     onInactivityTick: () => tickInactivity(),
     remoteShelfWatermarks,
