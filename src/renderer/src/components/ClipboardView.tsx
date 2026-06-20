@@ -1,20 +1,10 @@
 import { useCallback, useState } from 'react';
-import type { ClipboardEntry, ShelfColor } from '@shared/schema';
+import type { ClipboardEntry } from '@shared/schema';
 import { useClipboardEntries, type TypeFilter } from '../hooks/useClipboardEntries';
+import { useClipboardActions } from '../hooks/useClipboardActions';
 import { ClipboardCard } from './ClipboardCard';
 import { ClipboardCategories } from './ClipboardCategories';
 import { ClipboardFilters } from './ClipboardFilters';
-
-function copyEntryToClipboard(entry: ClipboardEntry): Promise<boolean> {
-  // The quick-paste IPC path handles writing the entry to the system
-  // clipboard correctly for every kind (text/url/code/color/file/
-  // folder/imageAsset). Reuse it for in-app copy.
-  if (!window.ledge) return Promise.resolve(false);
-  return window.ledge
-    .clipboardQuickPastePaste({ entryId: entry.id, previousBundleId: '' })
-    .then(() => true)
-    .catch(() => false);
-}
 
 export function ClipboardView() {
   const [type, setType] = useState<TypeFilter>('all');
@@ -28,52 +18,18 @@ export function ClipboardView() {
     category,
     search,
   });
+  const actions = useClipboardActions();
 
   const handleCopy = useCallback((entry: ClipboardEntry) => {
-    void copyEntryToClipboard(entry).then((ok) => {
+    void actions.copyEntry(entry).then((ok) => {
       if (ok) window.ledge?.showToast('Copied to clipboard', 'success');
     });
-  }, []);
-
-  const handleRemove = useCallback((entry: ClipboardEntry) => {
-    void window.ledge?.clipboardEntryRemove({ entryId: entry.id });
-  }, []);
-
-  const handleAssign = useCallback((entry: ClipboardEntry, categoryId: string) => {
-    void window.ledge?.clipboardEntryAssign({ entryId: entry.id, categoryId });
-  }, []);
-
-  const handleUnassign = useCallback((entry: ClipboardEntry, categoryId: string) => {
-    void window.ledge?.clipboardEntryUnassign({ entryId: entry.id, categoryId });
-  }, []);
-
-  const handleDragStart = useCallback((entry: ClipboardEntry) => {
-    const ok = window.ledge?.clipboardStartItemDrag({ entryId: entry.id });
-    if (!ok) {
-      window.ledge?.showToast('This item cannot be dragged out', 'info');
-    }
-  }, []);
-
-  const handleCreateCategory = useCallback((name: string, color: ShelfColor) => {
-    void window.ledge?.clipboardCategoryCreate({ name, color });
-  }, []);
-
-  const handleRenameCategory = useCallback((id: string, name: string) => {
-    void window.ledge?.clipboardCategoryRename({ id, name });
-  }, []);
-
-  const handleRemoveCategory = useCallback((id: string) => {
-    void window.ledge?.clipboardCategoryRemove({ id });
-  }, []);
+  }, [actions]);
 
   const handleClearAll = useCallback(() => {
     if (entries.length === 0) return;
-    void window.ledge?.clipboardEntryClearAll();
-  }, [entries.length]);
-
-  const handlePruneNow = useCallback(() => {
-    void window.ledge?.clipboardPruneNow();
-  }, []);
+    void actions.clearAllEntries();
+  }, [actions, entries.length]);
 
   const handleClose = useCallback(() => {
     window.close();
@@ -84,7 +40,7 @@ export function ClipboardView() {
       <header className="clipboard-topbar">
         <h1>Clipboard</h1>
         <div className="clipboard-topbar-actions">
-          <button type="button" className="chrome-button" onClick={handlePruneNow} title="Prune old entries">
+          <button type="button" className="chrome-button" onClick={actions.pruneNow} title="Prune old entries">
             ⟳
           </button>
           <button
@@ -115,9 +71,9 @@ export function ClipboardView() {
           categories={categories}
           selected={category}
           onSelect={setCategory}
-          onCreate={handleCreateCategory}
-          onRename={handleRenameCategory}
-          onRemove={handleRemoveCategory}
+          onCreate={actions.createCategory}
+          onRename={actions.renameCategory}
+          onRemove={actions.removeCategory}
         />
         <section className="clipboard-grid" aria-label="Clipboard entries">
           {filtered.length === 0 ? (
@@ -136,10 +92,13 @@ export function ClipboardView() {
                 entry={entry}
                 categories={categories}
                 onCopy={handleCopy}
-                onRemove={handleRemove}
-                onAssign={handleAssign}
-                onUnassign={handleUnassign}
-                onDragStart={handleDragStart}
+                onRemove={actions.removeEntry}
+                onAssign={actions.assignEntry}
+                onUnassign={actions.unassignEntry}
+                onDragStart={(entry) => {
+                  const ok = actions.startItemDrag(entry);
+                  if (!ok) window.ledge?.showToast('This item cannot be dragged out', 'info');
+                }}
               />
             ))
           )}

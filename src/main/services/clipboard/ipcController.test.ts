@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS } from '@shared/ipc'
 import { ClipboardIpcController, type ClipboardIpcDeps } from './ipcController'
+import { ipcMain } from 'electron'
 import type { StateStore } from '../stateStore'
 import type { ClipboardMonitor } from '../clipboardMonitor'
 import type { QuickPasteWindow } from '../../windows/quickPasteWindow'
@@ -85,7 +86,7 @@ beforeEach(() => {
     quickPasteWindow: makeQuickPasteWindowStub(),
     peekWindow: makePeekWindowStub(),
     broadcastState: vi.fn(),
-    ipcMain: bus
+    ipcMain: bus as unknown as typeof ipcMain
   }
 })
 
