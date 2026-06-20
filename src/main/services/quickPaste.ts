@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import { clipboard, nativeImage } from 'electron';
-import type { ClipboardEntry, ShelfItemRecord } from '@shared/schema';
+import type { ClipboardEntry } from '@shared/schema';
 import { getFileBackedPath, isFileBackedItem } from '@shared/fileUtils';
+import { writeShelfItemToClipboard } from './clipboard/writer';
 
 /**
  * Writes the entry's payload to the system clipboard and (opt-in) sends a
@@ -16,13 +16,14 @@ export async function quickPastePasteEntry(
   getEntry: (id: string) => ClipboardEntry | undefined,
   settings: { syntheticPasteEnabled: boolean; ignoreBundleIds: string[] },
   ledeBundleId: string,
+  writer?: import('./clipboard/writer').ClipboardWriter,
 ): Promise<void> {
   const entry = getEntry(entryId);
   if (!entry) return;
   if (previousBundleId === ledeBundleId) return; // Don't paste back into Ledge.
   if (previousBundleId && settings.ignoreBundleIds.includes(previousBundleId)) return;
 
-  writeEntryToClipboard(entry.item);
+  writeShelfItemToClipboard(entry.item, writer);
 
   if (settings.syntheticPasteEnabled) {
     try {
@@ -34,51 +35,20 @@ export async function quickPastePasteEntry(
   }
 }
 
-function writeEntryToClipboard(item: ShelfItemRecord): void {
-  switch (item.kind) {
-    case 'text':
-      clipboard.writeText(item.text);
-      return;
-    case 'url':
-      clipboard.writeText(item.url);
-      return;
-    case 'code':
-      clipboard.writeText(item.text);
-      return;
-    case 'color':
-      clipboard.writeText(item.hex);
-      return;
-    case 'imageAsset':
-      writeImageAssetToClipboard(item);
-      return;
-    case 'file':
-    case 'folder':
-      writeFileBackedToClipboard(item);
-      return;
-  }
-}
-
-function writeImageAssetToClipboard(item: ShelfItemRecord): void {
-  if (!('file' in item)) return;
-  const imagePath = getFileBackedPath(item);
-  if (!imagePath) return;
-  try {
-    const image = nativeImage.createFromPath(imagePath);
-    if (!image.isEmpty()) {
-      clipboard.writeImage(image);
-    }
-  } catch {
-    // Best-effort.
-  }
-}
-
-function writeFileBackedToClipboard(item: ShelfItemRecord): void {
-  if (!isFileBackedItem(item)) return;
-  const path = getFileBackedPath(item);
-  if (!path) return;
-  clipboard.clear();
-  clipboard.writeText(path);
-  clipboard.writeBuffer('public.file-url', Buffer.from(`file://${path}`, 'utf8'));
+/**
+ * Copy a single clipboard entry to the system pasteboard without
+ * triggering the synthetic paste keystroke. Used by the "Copy" action
+ * on a clipboard history card.
+ */
+export function copyEntryToPasteboard(
+  entryId: string,
+  getEntry: (id: string) => ClipboardEntry | undefined,
+  writer?: import('./clipboard/writer').ClipboardWriter,
+): boolean {
+  const entry = getEntry(entryId);
+  if (!entry) return false;
+  writeShelfItemToClipboard(entry.item, writer);
+  return true;
 }
 
 export function fileBackedPathsFromEntry(entry: ClipboardEntry): string[] {

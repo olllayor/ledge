@@ -1,13 +1,23 @@
-import { clipboard, nativeImage } from 'electron'
-import { existsSync, promises as fs } from 'node:fs'
-import { randomUUID } from 'node:crypto'
-import { shelfItemSchema, type ShelfItemRecord } from '@shared/schema'
+import { clipboard } from 'electron'
+import { promises as fs } from 'node:fs'
+import type { ShelfItemRecord } from '@shared/schema'
 import { getFileBackedPath } from '@shared/fileUtils'
 import { detectPayloadFromText, ImportedImageTooLargeError, payloadToItems, type PayloadContext } from './payloads'
 import { broadcastToast } from './toastBroadcaster'
 import type { StateStore } from './stateStore'
 import type { NativeAgentClient } from '../native/nativeAgent'
 import type { ClipboardChangeSnapshot } from './clipboardMonitor'
+import {
+  classifyPasteboard,
+  classifyText,
+  hexFromText as hexFromTextForBuild,
+  imagePayloadFromPng,
+  makeCodeItem,
+  makeColorItem,
+  pathsFromFileUrlBuffer,
+} from './clipboard/payloads'
+import { createElectronPasteboardReader, type PasteboardReader } from './clipboard/pasteboardReader'
+import { makeImageThumbnail } from './clipboard/writer'
 
 const CONCEALED_TYPE = 'org.nspasteboard.ConcealedType'
 const MAX_IMPORTED_IMAGE_BYTES = 25 * 1024 * 1024
@@ -16,6 +26,8 @@ export interface ClipboardHistoryServiceDeps {
   stateStore: StateStore
   nativeAgent: NativeAgentClient
   onStateChange(): void
+  /** Optional override so tests can inject a fake pasteboard. */
+  pasteboardReader?: PasteboardReader
 }
 
 /**
@@ -23,9 +35,16 @@ export interface ClipboardHistoryServiceDeps {
  * is also the single owner of "read the pasteboard" logic. The renderer
  * only ever sees the resulting shelf items via the state store; it
  * never reads from the OS pasteboard directly.
+ *
+ * Reads from the pasteboard go through an injected `PasteboardReader`
+ * so the priority chain can be unit-tested without Electron.
  */
 export class ClipboardHistoryService {
-  constructor(private readonly deps: ClipboardHistoryServiceDeps) {}
+  private readonly reader: PasteboardReader
+
+  constructor(private readonly deps: ClipboardHistoryServiceDeps) {
+    this.reader = deps.pasteboardReader ?? createElectronPasteboardReader(clipboard)
+  }
 
   /**
    * Capture a clipboard snapshot from the `ClipboardMonitor`. The
@@ -56,15 +75,14 @@ export class ClipboardHistoryService {
         }
       }
 
-      const thumbnailDataUri =
-        item.kind === 'imageAsset' ? this.makeThumbnail(item) : undefined
+      const thumbnailDataUri = makeImageThumbnail(item)
 
       this.deps.stateStore.appendClipboardEntry({
         capturedAt: new Date().toISOString(),
         sourceBundleId: snapshot.sourceBundleId,
         sourceAppName: snapshot.sourceAppName,
         item,
-        thumbnailDataUri,
+        thumbnailDataUri
       })
     }
     this.deps.onStateChange()
@@ -80,17 +98,6 @@ export class ClipboardHistoryService {
     return false
   }
 
-  private makeThumbnail(item: ShelfItemRecord): string | undefined {
-    if (item.kind !== 'imageAsset') return undefined
-    const imagePath = getFileBackedPath(item)
-    if (!imagePath || !existsSync(imagePath)) return undefined
-    const image = nativeImage.createFromPath(imagePath)
-    if (image.isEmpty()) return undefined
-    const resized = image.resize({ width: 64, quality: 'good' })
-    if (resized.isEmpty()) return undefined
-    return resized.toDataURL()
-  }
-
   /**
    * Convert a pasteboard format list to a list of shelf items.
    *
@@ -99,24 +106,13 @@ export class ClipboardHistoryService {
    */
   private async readPasteboardToShelfItems(formats: string[]): Promise<ShelfItemRecord[]> {
     const context = this.payloadContext()
+    const shape = classifyPasteboard(formats)
 
-    if (
-      formats.some(
-        (format) => format.startsWith('image/') || format === 'public.tiff' || format === 'com.adobe.pdf',
-      )
-    ) {
-      const image = clipboard.readImage()
-      if (!image.isEmpty()) {
+    if (shape.kind === 'image') {
+      const image = this.reader.readImage()
+      if (image && !image.isEmpty()) {
         try {
-          return await payloadToItems(
-            {
-              kind: 'image',
-              mimeType: 'image/png',
-              base64: image.toPNG().toString('base64'),
-              filenameHint: 'clipboard-image',
-            },
-            context,
-          )
+          return await payloadToItems(imagePayloadFromPng(image.toPNG()), context)
         } catch (err) {
           if (err instanceof ImportedImageTooLargeError) {
             broadcastToast(err.message, 'info')
@@ -125,68 +121,42 @@ export class ClipboardHistoryService {
           throw err
         }
       }
+      // Fall through to text path if the pasteboard had an image UTI but
+      // reading the image itself failed (e.g. permission denied).
     }
 
-    if (
-      formats.includes('public.file-url') ||
-      formats.includes('NSFilenamesPboardType') ||
-      formats.includes('text/uri-list')
-    ) {
-      try {
-        const buffer = clipboard.readBuffer('public.file-url')
-        const text = buffer.toString('utf8')
-        if (text) {
-          const items = await payloadToItems(
-            { kind: 'fileDrop', paths: text.split('\n').filter(Boolean) },
-            context,
-          )
+    if (shape.kind === 'file-url') {
+      const text = this.reader.readBuffer('public.file-url')
+      if (text) {
+        const paths = pathsFromFileUrlBuffer(text)
+        if (paths.length > 0) {
+          const items = await payloadToItems({ kind: 'fileDrop', paths }, context)
           if (items.length > 0) return items
         }
-      } catch {
-        // Fall through to URL/text handling.
       }
     }
 
-    const text = clipboard.readText().trim()
+    const text = this.reader.readText().trim()
     if (!text) return []
-
-    const hex = hexFromText(text)
-    if (hex) {
-      return [this.makeColorItem(hex)]
-    }
-
-    if (looksLikeCode(text)) {
-      return [this.makeCodeItem(text)]
-    }
-
-    const payload = detectPayloadFromText(text)
-    return await payloadToItems(payload, context)
+    return this.buildTextItem(text)
   }
 
-  private makeColorItem(hex: string): ShelfItemRecord {
-    return shelfItemSchema.parse({
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
-      order: 0,
-      title: hex,
-      subtitle: 'Color',
-      preview: { summary: hex, detail: '' },
-      kind: 'color',
-      hex,
-    })
-  }
-
-  private makeCodeItem(text: string): ShelfItemRecord {
-    return shelfItemSchema.parse({
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
-      order: 0,
-      title: text.split('\n')[0]?.slice(0, 60) ?? 'Code snippet',
-      subtitle: 'Code',
-      preview: { summary: text.slice(0, 120), detail: text.length.toString() },
-      kind: 'code',
-      text,
-    })
+  private async buildTextItem(text: string): Promise<ShelfItemRecord[]> {
+    const context = this.payloadContext()
+    const kind = classifyText(text)
+    if (kind === 'color') {
+      // Re-derive the hex (already validated by `classifyText`) so the
+      // item always stores a canonical lowercase form.
+      const hex = hexFromTextForBuild(text)
+      if (!hex) return []
+      return [makeColorItem(hex)]
+    }
+    if (kind === 'code') {
+      return [makeCodeItem(text)]
+    }
+    // Anything else (`url` or `text`) goes through the shared ingest
+    // pipeline so URL/title extraction stays in one place.
+    return await payloadToItems(detectPayloadFromText(text), context)
   }
 
   private payloadContext(): PayloadContext {
@@ -194,24 +164,11 @@ export class ClipboardHistoryService {
       assetsDir: this.deps.stateStore.assetsDir,
       createBookmark: (path: string) => this.deps.nativeAgent.createBookmark(path),
       resolveBookmark: (bookmarkBase64: string, originalPath: string) =>
-        this.deps.nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
+        this.deps.nativeAgent.resolveBookmark(bookmarkBase64, originalPath)
     }
   }
 }
 
-export function hexFromText(text: string): string | null {
-  const trimmed = text.trim()
-  // 6 or 8 hex digits, with or without leading '#'.
-  const match = /^#?([0-9a-fA-F]{6}([0-9a-fA-F]{2})?)$/.exec(trimmed)
-  if (!match) return null
-  return `#${match[1].toLowerCase()}`
-}
-
-export function looksLikeCode(text: string): boolean {
-  // Light heuristic — proper language detection is out of scope.
-  if (text.length < 16) return false
-  if (/\n\s{2,}/.test(text)) return true
-  if (/\bfunction\b|\bconst\b|\blet\b|\bimport\b|\bdef\b|\bclass\b/.test(text)) return true
-  if (/[{}\[\];].*\n/.test(text)) return true
-  return false
-}
+// Re-export the heuristics so existing tests can import from
+// `clipboardHistory` (the only path that ever imported them).
+export { hexFromText, looksLikeCode } from './clipboard/payloads'
