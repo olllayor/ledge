@@ -7,10 +7,12 @@ export function ShortcutRecorder({
   value,
   onChange,
   disabled = false,
+  defaultValue,
 }: {
   value: string;
   onChange(shortcut: string): void;
   disabled?: boolean;
+  defaultValue?: string;
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,6 +61,7 @@ export function ShortcutRecorder({
   }, [isRecording, onChange]);
 
   const keys = value ? value.split('+') : [];
+  const isModified = defaultValue !== undefined && value !== defaultValue;
 
   return (
     <div ref={containerRef} className="shortcut-recorder">
@@ -92,6 +95,17 @@ export function ShortcutRecorder({
           >
             {keys.length > 0 ? 'Change' : 'Record'}
           </button>
+          {isModified ? (
+            <button
+              className="settings-cta-small"
+              type="button"
+              onClick={() => onChange(defaultValue as string)}
+              disabled={disabled}
+              aria-label="Reset to default"
+            >
+              Reset
+            </button>
+          ) : null}
         </div>
       )}
     </div>

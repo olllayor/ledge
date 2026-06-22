@@ -109,34 +109,69 @@ export class PreferencesSyncService {
   private registerClipboardShortcuts(preferences: PreferencesRecord): void {
     const settings = this.stateStore.getClipboardSettings()
     const mainShortcut = normalizeGlobalShortcut(preferences.globalShortcut)
+    const registeredShortcuts = new Set<string>()
 
-    // Quick-paste hotkey
-    const quickPasteShortcut = settings.quickPasteHotkey.trim()
-    if (quickPasteShortcut && quickPasteShortcut !== mainShortcut) {
-      try {
-        globalShortcut.register(quickPasteShortcut, () => {
-          const previousBundleId = this.clipboardMonitor.getLastFrontmostApp()?.bundleId ?? ''
-          void this.quickPasteWindow.show(previousBundleId)
-        })
-      } catch (error) {
-        console.error('[ledge] quick-paste hotkey registration failed:', error)
-      }
+    this.tryRegisterSecondaryShortcut({
+      raw: settings.quickPasteHotkey,
+      mainShortcut,
+      alreadyRegistered: registeredShortcuts,
+      label: 'quick-paste',
+      onTrigger: () => {
+        const previousBundleId = this.clipboardMonitor.getLastFrontmostApp()?.bundleId ?? ''
+        void this.quickPasteWindow.show(previousBundleId)
+      },
+    })
+
+    this.tryRegisterSecondaryShortcut({
+      raw: settings.peekHotkey,
+      mainShortcut,
+      alreadyRegistered: registeredShortcuts,
+      label: 'peek',
+      onTrigger: () => {
+        void this.peekWindow.show()
+      },
+    })
+  }
+
+  private tryRegisterSecondaryShortcut(params: {
+    raw: string
+    mainShortcut: string
+    alreadyRegistered: Set<string>
+    label: string
+    onTrigger: () => void
+  }): void {
+    const { raw, mainShortcut, alreadyRegistered, label, onTrigger } = params
+    const normalized = normalizeGlobalShortcut(raw)
+    if (!normalized) {
+      return
     }
 
-    // Peek hotkey (opt-in; empty by default)
-    const peekShortcut = settings.peekHotkey.trim()
-    if (
-      peekShortcut &&
-      peekShortcut !== mainShortcut &&
-      peekShortcut !== quickPasteShortcut
-    ) {
-      try {
-        globalShortcut.register(peekShortcut, () => {
-          void this.peekWindow.show()
-        })
-      } catch (error) {
-        console.error('[ledge] peek hotkey registration failed:', error)
+    if (normalized === mainShortcut || alreadyRegistered.has(normalized)) {
+      return
+    }
+
+    const validationError = validateGlobalShortcut(normalized)
+    if (validationError) {
+      this.status = {
+        ...this.status,
+        shortcutRegistered: false,
+        shortcutError: validationError,
       }
+      console.error(`[ledge] ${label} hotkey registration failed:`, validationError)
+      return
+    }
+
+    try {
+      globalShortcut.register(normalized, onTrigger)
+      alreadyRegistered.add(normalized)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Shortcut could not be registered.'
+      this.status = {
+        ...this.status,
+        shortcutRegistered: false,
+        shortcutError: message,
+      }
+      console.error(`[ledge] ${label} hotkey registration failed:`, error)
     }
   }
 }

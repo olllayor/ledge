@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { memo, useCallback, useEffect,  useRef, useState, type RefObject } from 'react';
 import type { AppState, IngestPayload, ShelfItemRecord } from '@shared/schema';
 import { getExportableItems, getHeroCountLabel, getHeroMode, type HeroMode, type SessionMode } from './shelfFlow';
 import {
@@ -173,6 +173,7 @@ function ShelfView({ state }: ShelfViewProps) {
     dragDepthRef.current = 0;
     setSessionMode('idle');
   }, [itemCount, liveShelf]);
+
 
   useEffect(() => {
     const handleFocus = () => {
@@ -355,6 +356,14 @@ function ShelfView({ state }: ShelfViewProps) {
     setSessionMode('idle');
   }, []);
 
+  const handleExportStart = useCallback(() => {
+    setSessionMode('exporting');
+  }, []);
+
+  const handleExportEnd = useCallback(() => {
+    setSessionMode((current) => (current === 'exporting' ? 'idle' : current));
+  }, []);
+
   return (
     <main
       className={`shelf-shell${isAcceptingDrop ? ' is-accepting-drop' : ''}${isExporting ? ' is-exporting' : ''}${isItemListOpen ? ' has-item-sheet' : ''}`}
@@ -419,7 +428,7 @@ function ShelfView({ state }: ShelfViewProps) {
               </div>
             ) : primaryItem ? (
               <div className="hero-wrapper">
-                <HeroItem
+                <HeroItemMemo
                   items={items}
                   item={primaryItem}
                   heroMode={heroMode}
@@ -428,12 +437,8 @@ function ShelfView({ state }: ShelfViewProps) {
                   dragLocked={isMenuOpen || isItemListOpen}
                   autoCloseShelf={autoCloseShelf}
                   doubleClickAction={doubleClickAction}
-                  onExportStart={() => {
-                    setSessionMode('exporting');
-                  }}
-                  onExportEnd={() => {
-                    setSessionMode((current) => (current === 'exporting' ? 'idle' : current));
-                  }}
+                  onExportStart={handleExportStart}
+                  onExportEnd={handleExportEnd}
                   onExportItems={handleExportAndClear}
                   onOpenItemSheet={openItemSheet}
                 />
@@ -574,6 +579,14 @@ const ShelfViewMemo = memo(ShelfView, (prevProps, nextProps) => {
 
 export { ShelfViewMemo as ShelfView };
 
+const HeroGlyphMemo = memo(HeroGlyph);
+HeroGlyph.displayName = 'HeroGlyph';
+HeroGlyphMemo.displayName = 'HeroGlyphMemo';
+
+const HeroItemMemo = memo(HeroItem);
+HeroItem.displayName = 'HeroItem';
+HeroItemMemo.displayName = 'HeroItemMemo';
+
 interface ItemSheetProps {
   items: ShelfItemRecord[];
   sheetRef: RefObject<HTMLDivElement | null>;
@@ -621,7 +634,7 @@ function ItemSheet({ items, sheetRef, doubleClickAction, onClose }: ItemSheetPro
               {getHeroPreviewSource(item) ? (
                 <img src={getHeroPreviewSource(item) || undefined} alt={item.title} width={88} height={88} />
               ) : (
-                <HeroGlyph kind={item.kind} />
+                <HeroGlyphMemo kind={item.kind} />
               )}
             </div>
             <p className="item-grid-title">{item.title}</p>
@@ -738,7 +751,7 @@ function HeroItem({
                   {src ? (
                     <img src={src} alt="" className="hero-stack-image" draggable={false} width={104} height={132} />
                   ) : (
-                    <HeroGlyph kind={collageItem.kind} />
+                    <HeroGlyphMemo kind={collageItem.kind} />
                   )}
                 </div>
               );
@@ -753,7 +766,7 @@ function HeroItem({
               {previewSrc ? (
                 <img src={previewSrc} alt="" className="hero-image" draggable={false} width={88} height={88} />
               ) : (
-                <HeroGlyph kind={item.kind} />
+                <HeroGlyphMemo kind={item.kind} />
               )}
             </div>
           </div>
@@ -762,7 +775,7 @@ function HeroItem({
             {previewSrc ? (
               <img src={previewSrc} alt="" className="hero-image" draggable={false} width={88} height={88} />
             ) : (
-              <HeroGlyph kind={item.kind} />
+              <HeroGlyphMemo kind={item.kind} />
             )}
           </div>
         )}

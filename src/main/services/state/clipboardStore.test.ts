@@ -152,3 +152,73 @@ describe('ClipboardStore', () => {
     await persister.whenIdle()
   })
 })
+
+describe('ClipboardStore.prune (regression: BUG-001)', () => {
+  it('persists to disk when the prune actually trims the history', async () => {
+    const { clipboard, persister, state } = await buildStore()
+
+    // Seed 5 entries within the last hour (well within the 30-day cutoff)
+    const now = Date.now()
+    for (let i = 0; i < 5; i++) {
+      state.clipboardHistory.unshift({
+        id: `e${i}`,
+        capturedAt: new Date(now - i * 60_000).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem(`i${i}`),
+        categoryIds: []
+      })
+    }
+    // Set the limit so prune will trim the array
+    state.clipboardSettings.historyLimit = 2
+
+    expect(state.clipboardHistory).toHaveLength(5)
+
+    clipboard.prune()
+    expect(state.clipboardHistory).toHaveLength(2)
+
+    // Wait for the persister's queued write to land.
+    await persister.whenIdle()
+
+    // Reload from disk and confirm the trim was persisted.
+    const layout = buildStateFileLayout((persister as unknown as { statePath: string }).statePath.replace(/state\.json$/, ''))
+    const reloaded = new StatePersister({ statePath: layout.statePath })
+    const { state: onDisk } = reloaded.load({
+      liveShelf: null,
+      recentShelves: [],
+      preferences: defaultPreferences(),
+      sync: defaultSyncStateRecord(),
+      clipboardHistory: [],
+      clipboardCategories: [],
+      clipboardSettings: defaultClipboardSettingsRecord()
+    })
+    expect(onDisk.clipboardHistory).toHaveLength(2)
+  })
+
+  it('does not write to disk when the prune is a no-op', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'clipboard-store-noop-'))
+    tempDirs.push(dir)
+    const layout = buildStateFileLayout(dir)
+    const persister = new StatePersister({ statePath: layout.statePath })
+    const state: PersistedState = {
+      liveShelf: null,
+      recentShelves: [],
+      preferences: defaultPreferences(),
+      sync: defaultSyncStateRecord(),
+      clipboardHistory: [],
+      clipboardCategories: [],
+      clipboardSettings: defaultClipboardSettingsRecord()
+    }
+    const clipboard = new ClipboardStore(persister, () => state)
+
+    // Empty history, large limit — nothing to prune, and we never call
+    // appendEntry (which would itself enqueue a write), so the persister
+    // queue stays untouched by the prune call.
+    state.clipboardSettings.historyLimit = 100
+    clipboard.prune()
+    // pendingSerialized is the latest queued payload. A no-op prune must
+    // not enqueue a new write, so it stays null.
+    expect((persister as unknown as { pendingSerialized: string | null }).pendingSerialized).toBeNull()
+    await persister.whenIdle()
+  })
+})

@@ -72,12 +72,25 @@ export function OnboardingView({ state, onComplete }: OnboardingViewProps) {
       }
 
       if (event.key === 'Enter' || event.key === ' ') {
+        if (currentStepLocked) {
+          // Mirror the disabled-button affordance: don't swallow the
+          // keystroke (the user might be typing in another field) and
+          // don't fire a no-op advance.
+          return;
+        }
         event.preventDefault();
         advance();
+        return;
       }
       if (event.key === 'ArrowLeft') {
+        if (step === 0) {
+          // No previous step to go back to — leave the keystroke
+          // alone so it can be handled by whatever has focus.
+          return;
+        }
         event.preventDefault();
         goBack();
+        return;
       }
       if (event.key === 'Escape') {
         event.preventDefault();

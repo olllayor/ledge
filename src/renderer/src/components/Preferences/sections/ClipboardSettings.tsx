@@ -99,6 +99,7 @@ export function ClipboardSettings({ state, showToast }: { state: AppState; showT
           trailing={
             <ShortcutRecorder
               value={settings.quickPasteHotkey}
+              defaultValue="CommandOrControl+Shift+V"
               onChange={(value) => void updateSettings({ quickPasteHotkey: value })}
               disabled={!settings.enabled}
             />
@@ -124,6 +125,7 @@ export function ClipboardSettings({ state, showToast }: { state: AppState; showT
           trailing={
             <ShortcutRecorder
               value={settings.peekHotkey}
+              defaultValue=""
               onChange={(value) => void updateSettings({ peekHotkey: value })}
               disabled={!settings.enabled}
             />

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { ClipboardEntry } from '@shared/schema'
 
 /**
@@ -5,6 +6,12 @@ import type { ClipboardEntry } from '@shared/schema'
  * Extracted from `ClipboardCard.tsx` so the card itself stays focused
  * on wiring (drag handlers, copy/remove buttons, category chips)
  * while these helpers stay pure and easy to read.
+ *
+ * All three components below are `memo`ized so they can bail out of
+ * re-rendering when the parent card re-renders for unrelated reasons
+ * (e.g. sibling cards re-rendering, or the parent re-rendering
+ * because the entries array reference changes but this entry's
+ * contents did not).
  */
 
 function fileExtensionOf(item: ClipboardEntry['item']): string {
@@ -30,7 +37,7 @@ export function formatRelativeTime(iso: string): string {
   return `${Math.floor(diff / 86_400_000)}d`
 }
 
-export function CardPreview({ entry }: { entry: ClipboardEntry }) {
+const CardPreviewImpl = ({ entry }: { entry: ClipboardEntry }) => {
   const item = entry.item
   if (item.kind === 'imageAsset') {
     if (entry.thumbnailDataUri) {
@@ -48,7 +55,7 @@ export function CardPreview({ entry }: { entry: ClipboardEntry }) {
   return <span>Aa</span>
 }
 
-export function CardLabel({ entry }: { entry: ClipboardEntry }) {
+const CardLabelImpl = ({ entry }: { entry: ClipboardEntry }) => {
   const item = entry.item
   if (item.kind === 'text') {
     const preview = item.text.replace(/\s+/g, ' ').slice(0, 80)
@@ -80,7 +87,7 @@ export function CardLabel({ entry }: { entry: ClipboardEntry }) {
   return <span className="clipboard-card-label">{item.title}</span>
 }
 
-export function CardSubtitle({ entry }: { entry: ClipboardEntry }) {
+const CardSubtitleImpl = ({ entry }: { entry: ClipboardEntry }) => {
   const parts: string[] = []
   if (entry.sourceAppName) parts.push(entry.sourceAppName)
   parts.push(formatRelativeTime(entry.capturedAt))
@@ -94,3 +101,7 @@ export function CardSubtitle({ entry }: { entry: ClipboardEntry }) {
     </span>
   )
 }
+
+export const CardPreview = memo(CardPreviewImpl)
+export const CardLabel = memo(CardLabelImpl)
+export const CardSubtitle = memo(CardSubtitleImpl)

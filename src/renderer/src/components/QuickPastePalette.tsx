@@ -214,10 +214,28 @@ export function QuickPastePalette() {
         </ul>
       )}
       <footer className="quick-paste-footer">
-        <span>↑↓ navigate</span>
-        <span>1–9 paste</span>
-        <span>⏎ paste</span>
-        <span>esc hide</span>
+        <div className="quick-paste-footer-hints" aria-label="Keyboard shortcuts">
+          <span><kbd className="quick-paste-kbd">↑</kbd><kbd className="quick-paste-kbd">↓</kbd> navigate</span>
+          <span><kbd className="quick-paste-kbd">1</kbd>–<kbd className="quick-paste-kbd">9</kbd> paste</span>
+          <span><kbd className="quick-paste-kbd">⏎</kbd> paste</span>
+        </div>
+        <div className="quick-paste-footer-actions">
+          <button
+            type="button"
+            className="quick-paste-action"
+            onClick={() => void window.ledge?.clipboardEntryClearAll()}
+            disabled={visibleEntries.length === 0}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            className="quick-paste-action quick-paste-action-primary"
+            onClick={() => window.ledge?.clipboardQuickPasteHide()}
+          >
+            Close
+          </button>
+        </div>
       </footer>
     </main>
   );

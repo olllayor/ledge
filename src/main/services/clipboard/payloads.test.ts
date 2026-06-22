@@ -189,6 +189,26 @@ describe('pathsFromFileUrlBuffer', () => {
     expect(pathsFromFileUrlBuffer('')).toEqual([])
     expect(pathsFromFileUrlBuffer('\n\n')).toEqual([])
   })
+
+  it('URL-decodes percent-encoded characters in the path (BUG-004)', () => {
+    // A pasteboard payload from a file with spaces in the name comes
+    // through as `file:///Users/me/My%20Files/foo.txt`. Without the
+    // decode, downstream fs.stat fails with ENOENT.
+    expect(pathsFromFileUrlBuffer('file:///Users/me/My%20Files/foo.txt')).toEqual([
+      '/Users/me/My Files/foo.txt',
+    ])
+  })
+
+  it('URL-decodes multi-line buffers with mixed escapes', () => {
+    const input = [
+      'file:///Users/me/My%20Files/a.txt',
+      'file:///Users/me/Caf%C3%A9/b.txt',
+    ].join('\n')
+    expect(pathsFromFileUrlBuffer(input)).toEqual([
+      '/Users/me/My Files/a.txt',
+      '/Users/me/Café/b.txt',
+    ])
+  })
 })
 
 describe('imagePayloadFromPng', () => {

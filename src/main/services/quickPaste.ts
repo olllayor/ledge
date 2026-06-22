@@ -15,12 +15,12 @@ export async function quickPastePasteEntry(
   previousBundleId: string,
   getEntry: (id: string) => ClipboardEntry | undefined,
   settings: { syntheticPasteEnabled: boolean; ignoreBundleIds: string[] },
-  ledeBundleId: string,
+  ledgeBundleId: string,
   writer?: import('./clipboard/writer').ClipboardWriter,
 ): Promise<void> {
   const entry = getEntry(entryId);
   if (!entry) return;
-  if (previousBundleId === ledeBundleId) return; // Don't paste back into Ledge.
+  if (previousBundleId === ledgeBundleId) return; // Don't paste back into Ledge.
   if (previousBundleId && settings.ignoreBundleIds.includes(previousBundleId)) return;
 
   writeShelfItemToClipboard(entry.item, writer);

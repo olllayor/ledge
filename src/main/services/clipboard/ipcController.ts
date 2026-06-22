@@ -40,7 +40,7 @@ export interface ClipboardIpcDeps {
    *  touching the real Electron clipboard. */
   clipboardWriter?: ClipboardWriter
   /** Bundle id used to short-circuit "paste back into Ledge" checks. */
-  ledeBundleId?: string
+  ledgeBundleId?: string
 }
 
 export class ClipboardIpcController {
@@ -196,7 +196,7 @@ export class ClipboardIpcController {
         parsed.previousBundleId,
         (id) => this.deps.stateStore.getClipboardEntries().find((e) => e.id === id),
         settings,
-        this.deps.ledeBundleId ?? 'com.ollayor.ledge',
+        this.deps.ledgeBundleId ?? 'com.ollayor.ledge',
       )
     })
   }

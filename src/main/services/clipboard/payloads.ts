@@ -129,7 +129,19 @@ export function pathsFromFileUrlBuffer(text: string): string[] {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => line.replace(/^file:\/\//, ''))
+    .map((line) => {
+      // Strip the `file://` scheme if present, then URL-decode the
+      // remainder. Without the decode, a path with spaces (e.g.
+      // `file:///Users/me/My%20Files/foo.txt`) round-trips as
+      // `/Users/me/My%20Files/foo.txt`, which fails every downstream
+      // fs.stat / createBookmark call.
+      const stripped = line.replace(/^file:\/\//, '')
+      try {
+        return decodeURIComponent(stripped)
+      } catch {
+        return stripped
+      }
+    })
 }
 
 // ---- Image -> payload ---------------------------------------------------

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ClipboardEntry } from '@shared/schema';
 import { useClipboardEntries, type TypeFilter } from '../hooks/useClipboardEntries';
 import { useClipboardActions } from '../hooks/useClipboardActions';
@@ -12,12 +12,17 @@ export function ClipboardView() {
   const [category, setCategory] = useState<string | 'all'>('all');
   const [search, setSearch] = useState('');
 
-  const { entries, categories, filtered, availableApps } = useClipboardEntries({
-    type,
-    app,
-    category,
-    search,
-  });
+  // Memoise the filter object so `useClipboardEntries` can keep its
+  // derived `filtered` array stable across renders that don't change
+  // any filter field. Without this, every state update in the parent
+  // (e.g. typing in the search box) would invalidate the inner
+  // `useMemo` and re-run the entry filter even when none of the
+  // fields actually changed.
+  const filter = useMemo(
+    () => ({ type, app, category, search }),
+    [type, app, category, search],
+  );
+  const { entries, categories, filtered, availableApps } = useClipboardEntries(filter);
   const actions = useClipboardActions();
 
   const handleCopy = useCallback((entry: ClipboardEntry) => {

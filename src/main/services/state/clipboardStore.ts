@@ -76,6 +76,7 @@ export class ClipboardStore {
     const state = this.getState()
     const limit = Math.max(1, state.clipboardSettings.historyLimit)
     const cutoff = Date.now() - THIRTY_DAYS_MS
+    const previousLength = state.clipboardHistory.length
 
     state.clipboardHistory = state.clipboardHistory
       .filter((entry) => {
@@ -83,6 +84,16 @@ export class ClipboardStore {
         return Number.isFinite(t) && t >= cutoff
       })
       .slice(0, limit)
+
+    // Persist when the prune actually changed the set. Other call sites
+    // (appendEntry, updateSettings) save immediately after invoking
+    // `prune`, so this is a redundant but cheap no-op for them — the
+    // persister coalesces a burst of save() calls into a single write.
+    // The IPC `clipboardPruneNow` handler relies on this branch to
+    // actually flush a user-initiated prune to disk.
+    if (state.clipboardHistory.length !== previousLength) {
+      this.persister.save(state)
+    }
   }
 
   createCategory(name: string, color: ShelfColor): ClipboardCategory {

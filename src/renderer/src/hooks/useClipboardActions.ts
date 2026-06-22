@@ -7,9 +7,12 @@ import type { ClipboardEntry, ShelfColor } from '@shared/schema'
  * these named functions instead of touching the bridge directly, so
  * the wire format is encapsulated in one place.
  *
- * All callbacks are stable across renders (closed-over nothing) so
- * they can be safely passed as `useEffect` dependencies or memoized
- * prop bundles without re-triggering downstream effects.
+ * All callbacks are stable across renders (closed over nothing) so
+ * the bundle below is `useMemo`d once and reused — the dependency
+ * array only contains the stable callbacks, so the memo only
+ * recomputes if a callback reference ever changes (never, in
+ * practice). Components consuming this hook can therefore put any
+ * of these callbacks in their own effect deps without re-firing.
  */
 export interface ClipboardActions {
   copyEntry(entry: ClipboardEntry): Promise<boolean>
@@ -25,9 +28,6 @@ export interface ClipboardActions {
 }
 
 export function useClipboardActions(): ClipboardActions {
-  // All callbacks are stable (closed over nothing) so the bundle below
-  // can be `useMemo`d once and reused across renders. This keeps
-  // downstream effects from re-firing on every state change.
   const copyEntry = useCallback(async (entry: ClipboardEntry) => {
     if (!window.ledge) return false
     try {
@@ -73,6 +73,9 @@ export function useClipboardActions(): ClipboardActions {
     await window.ledge?.clipboardPruneNow()
   }, [])
 
+  // All deps are stable, so this memo runs exactly once per
+  // component lifetime. Keeping the wrapper memoized preserves
+  // `result.current` identity across renders — see the test.
   return useMemo(
     () => ({
       copyEntry,
@@ -84,7 +87,7 @@ export function useClipboardActions(): ClipboardActions {
       renameCategory,
       removeCategory,
       clearAllEntries,
-      pruneNow
+      pruneNow,
     }),
     [
       copyEntry,
@@ -96,7 +99,7 @@ export function useClipboardActions(): ClipboardActions {
       renameCategory,
       removeCategory,
       clearAllEntries,
-      pruneNow
+      pruneNow,
     ],
   )
 }
