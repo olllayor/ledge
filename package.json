@@ -112,5 +112,12 @@
     "clsx": "^2.1.1",
     "convex": "^1.38.0",
     "tailwind-merge": "^3.6.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "electron-winstaller",
+      "esbuild"
+    ]
   }
 }
