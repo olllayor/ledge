@@ -103,28 +103,39 @@ jobs:
         run: pnpm test
 
       - name: Configure code signing (optional)
+        # `secrets` is not usable in an `if:` expression, so gate here.
         # electron-builder treats a *defined-but-empty* CSC_LINK as a real
         # cert path and fails trying to resolve it — worse than leaving it
         # unset, which correctly falls back to ad-hoc signing. So these are
         # only exported into the job environment when the secrets actually
-        # have a value, never as job-level env (which would always define
-        # them, empty or not).
-        if: secrets.CSC_LINK != '' && secrets.CSC_KEY_PASSWORD != ''
+        # have a value. Without an Apple account this step is a no-op and the
+        # build falls back to ad-hoc (unsigned) packaging.
         run: |
-          echo "CSC_LINK=${{ secrets.CSC_LINK }}" >> "$GITHUB_ENV"
-          echo "CSC_KEY_PASSWORD=${{ secrets.CSC_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          if [ -n "${{ secrets.CSC_LINK }}" ] && [ -n "${{ secrets.CSC_KEY_PASSWORD }}" ]; then
+            echo "CSC_LINK=${{ secrets.CSC_LINK }}" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=${{ secrets.CSC_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "Code signing credentials found — configuring."
+          else
+            echo "No code signing credentials configured — building ad-hoc (unsigned)."
+          fi
 
       - name: Build & Package
         run: pnpm dist:release
 
       - name: Notarize DMG
-        if: secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != ''
+        # `secrets` is not usable in an `if:` expression, so gate here.
+        # Without an Apple account (no notarization creds) this is a no-op:
+        # the DMG is published unsigned and the job still succeeds.
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          if [ -z "${APPLE_ID}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD}" ] || [ -z "${APPLE_TEAM_ID}" ]; then
+            echo "No Apple notarization credentials configured — skipping notarization."
+            exit 0
+          fi
           dmg="$(ls dist/*.dmg | head -1)"
           echo "Submitting ${dmg} for notarization…"
           xcrun notarytool submit "${dmg}" \
