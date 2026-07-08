@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '..')
@@ -30,13 +30,14 @@ const env = {
   ELECTRON_MIRROR:
     process.env.ELECTRON_MIRROR ??
     'https://github.com/electron/electron/releases/download/',
-  // Use local electron installation if available, otherwise fall back to download
-  ELECTRON_CUSTOM_DIR:
-    process.env.ELECTRON_CUSTOM_DIR ??
-    (process.platform === 'darwin' && process.arch === 'arm64' &&
-     existsSync('node_modules/electron/dist/Electron.app')
-      ? 'node_modules/electron'
-      : `v${electronVersion}`),
+  // app-builder splices this directly into the download URL path (in place
+  // of the release tag), not a "reuse this local directory" toggle — it
+  // must always be the version. A previous version of this script pointed
+  // it at `node_modules/electron` whenever a local Electron.app dist was
+  // present, meaning to skip the download; that produced a malformed URL
+  // (.../releases/download/node_modules/electron/electron-v...zip) on any
+  // cache miss, which is every fresh CI runner.
+  ELECTRON_CUSTOM_DIR: process.env.ELECTRON_CUSTOM_DIR ?? `v${electronVersion}`,
   ELECTRON_CUSTOM_FILENAME:
     process.env.ELECTRON_CUSTOM_FILENAME ??
     `electron-v${electronVersion}-darwin-${requestedArch}.zip`
