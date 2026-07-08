@@ -121,6 +121,10 @@ The production build is written to `dist/landing/`.
 - `release-video`: release demo video composition and Remotion entrypoint
 - `scripts`: local build helpers for branding and the native agent
 
+## Roadmap / Backlog
+
+Planned work, ideas, and bugs are tracked as [GitHub Issues](../../issues) — that's the single source of truth for what's next. Browse or filter by `bug`, `feature`, `task`, `enhancement`, or `good first issue` to see what's on the list or where help is welcome.
+
 ## License
 
 MIT

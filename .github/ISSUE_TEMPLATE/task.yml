@@ -1,0 +1,12 @@
+name: "📌 Task"
+description: A tracked task, chore, or backlog item for Ledge.
+title: "[Task]: "
+labels: ["task"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Task description
+      description: What needs to be done? Add context or a checklist if helpful.
+    validations:
+      required: true
