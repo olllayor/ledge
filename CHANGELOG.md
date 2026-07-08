@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-08
+
+### Fixed
+- **gitignore**: stop ignoring .github/ and docs/ (`8ac764c`)
+- **release**: don't set CSC_LINK/CSC_KEY_PASSWORD when secrets are empty (`4d34f3c`)
+
 ## [0.3.0] - 2026-07-08
 
 ### Fixed
