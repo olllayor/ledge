@@ -33,25 +33,42 @@ mkdirSync(stagingDir, { recursive: true })
 cpSync(appPath, join(stagingDir, `${productName}.app`), { recursive: true })
 symlinkSync('/Applications', join(stagingDir, 'Applications'))
 
-execFileSync(
-  'hdiutil',
-  [
-    'create',
-    '-volname',
-    `${productName} ${version}`,
-    '-srcfolder',
-    stagingDir,
-    '-ov',
-    '-format',
-    // ULFO is the default because it keeps modern macOS installs fast while still shrinking
-    // the GitHub asset. UDBZ is smaller but slower to decompress; UDZO is the fallback.
-    dmgFormat,
-    dmgPath
-  ],
-  {
-    cwd: repoRoot,
-    stdio: 'inherit'
+// `hdiutil create` intermittently fails with "Resource busy" (error 49168) on
+// macOS CI runners — a race between hdiutil's attach/convert step and Spotlight
+// (mds) or other background processes touching the staging dir. Retry with
+// backoff so a transient failure doesn't kill the whole release. `-nospotlight`
+// also keeps Spotlight from indexing the freshly created volume.
+const hdiutilArgs = [
+  'create',
+  '-volname',
+  `${productName} ${version}`,
+  '-srcfolder',
+  stagingDir,
+  '-ov',
+  '-nospotlight',
+  '-format',
+  // ULFO is the default because it keeps modern macOS installs fast while still shrinking
+  // the GitHub asset. UDBZ is smaller but slower to decompress; UDZO is the fallback.
+  dmgFormat,
+  dmgPath
+]
+
+const MAX_ATTEMPTS = 5
+for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  try {
+    execFileSync('hdiutil', hdiutilArgs, {
+      cwd: repoRoot,
+      stdio: 'inherit'
+    })
+    break
+  } catch (error) {
+    if (attempt === MAX_ATTEMPTS) throw error
+    const backoff = attempt * 5
+    console.warn(
+      `hdiutil create failed (attempt ${attempt}/${MAX_ATTEMPTS}); retrying in ${backoff}s…`
+    )
+    await new Promise((resolve) => setTimeout(resolve, backoff * 1000))
   }
-)
+}
 
 rmSync(stagingDir, { recursive: true, force: true })
