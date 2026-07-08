@@ -30,6 +30,9 @@
     "size:report": "node scripts/size-report.mjs",
     "dist": "pnpm clean:dist && pnpm build && node scripts/build-electron-lean.mjs && pnpm size:report",
     "dist:release": "pnpm clean:dist && pnpm build && node scripts/build-electron-lean.mjs --dir && node scripts/build-dmg.mjs && pnpm size:report",
+    "release": "node scripts/release.mjs",
+    "release:dry": "node scripts/release.mjs patch --dry-run",
+    "release:notes": "node scripts/release-notes.mjs",
     "convex:dev": "convex dev",
     "convex:codegen": "convex codegen"
   },

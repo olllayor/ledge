@@ -1,20 +1,25 @@
 name: Release
 
+# Tag-driven releases: push a `vX.Y.Z` tag (normally via `pnpm release`)
+# and this workflow builds, packages, and publishes the GitHub Release.
+# `workflow_dispatch` is the manual escape hatch — it releases the version
+# currently in package.json, creating the tag if it doesn't exist yet.
+#
+# See docs/RELEASING.md for the full flow.
+
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name for the release (e.g. v0.1.2). If omitted, uses the package.json version.'
+        description: 'Tag to release (e.g. v0.2.0). Defaults to v<package.json version>.'
         required: false
         default: ''
 
-# Coalesce concurrent runs of this workflow so a fast-forward merge and a
-# tag push within seconds don't both try to publish a release.
+# Coalesce concurrent runs so two tag pushes within seconds don't both try
+# to publish a release.
 concurrency:
   group: ledge-release
   cancel-in-progress: false
@@ -30,6 +35,14 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GH_TOKEN: ${{ github.token }}
+      # Code signing (optional): set these repo secrets to ship a signed app.
+      # Leave them unset and electron-builder produces an unsigned build.
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      # Notarization (optional): all three must be set to notarize the DMG.
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
       - name: Checkout
@@ -51,19 +64,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Get version
-        id: package-version
-        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
-
       - name: Resolve release tag
         id: release-tag
         run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tag="${GITHUB_REF_NAME}"
           elif [ -n "${{ github.event.inputs.tag_name }}" ]; then
             tag="${{ github.event.inputs.tag_name }}"
           else
-            tag="v${{ steps.package-version.outputs.version }}"
+            tag="v${version}"
+          fi
+
+          # The tag must match package.json — a mismatch means the tag was
+          # pushed without the release commit (or onto the wrong ref) and
+          # would publish an artifact whose embedded version lies.
+          if [ "${tag}" != "v${version}" ]; then
+            echo "::error::Tag ${tag} does not match package.json version ${version}." \
+                 "Run 'pnpm release' so the version bump and tag stay in lockstep."
+            exit 1
           fi
 
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
@@ -72,44 +92,62 @@ jobs:
             tag_exists=false
           fi
 
-          should_release=true
-          if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${tag_exists}" = "true" ]; then
-            should_release=false
-          fi
-
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "tag_exists=${tag_exists}" >> "$GITHUB_OUTPUT"
-          echo "should_release=${should_release}" >> "$GITHUB_OUTPUT"
 
-      - name: Create release tag
-        if: steps.release-tag.outputs.should_release == 'true' && steps.release-tag.outputs.tag_exists == 'false'
+      - name: Create release tag (manual dispatch only)
+        if: github.ref_type != 'tag' && steps.release-tag.outputs.tag_exists == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag "${{ steps.release-tag.outputs.tag }}" "${GITHUB_SHA}"
           git push origin "refs/tags/${{ steps.release-tag.outputs.tag }}"
 
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
       - name: Build & Package
-        if: steps.release-tag.outputs.should_release == 'true'
         run: pnpm dist:release
 
-      - name: List artifacts
-        if: steps.release-tag.outputs.should_release == 'true'
-        run: ls -R dist/
+      - name: Notarize DMG
+        if: env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        run: |
+          set -euo pipefail
+          dmg="$(ls dist/*.dmg | head -1)"
+          echo "Submitting ${dmg} for notarization…"
+          xcrun notarytool submit "${dmg}" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --wait
+          xcrun stapler staple "${dmg}"
 
-      - name: Upload DMG
-        if: steps.release-tag.outputs.should_release == 'true'
+      - name: List artifacts
+        run: ls -R dist/ | head -50
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          set -euo pipefail
+          node scripts/release-notes.mjs "${{ steps.release-tag.outputs.version }}" > release-notes.md
+          echo "--- Release notes ---"
+          cat release-notes.md
+
+      - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: Ledge-dmg
           path: dist/*.dmg
 
-      - name: Create Release
-        if: steps.release-tag.outputs.should_release == 'true'
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release-tag.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          generate_release_notes: true
+          name: Ledge ${{ steps.release-tag.outputs.tag }}
+          body_path: release-notes.md
           files: |
             dist/*.dmg
