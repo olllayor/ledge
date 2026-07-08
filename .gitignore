@@ -25,6 +25,9 @@ build/icon.png
 .opencode/
 .antigravitycli/
 .playwright-mcp/
+.cursor/
+.mimocode/
+.claude/
 opencode.json
 .git.save
 
@@ -47,21 +50,3 @@ skills-lock.json
 # local bug-hunt loop and is intentionally untracked so each developer's
 # run history doesn't pollute the shared repo.
 loop-state.md
-
-.cursor/
-docs/
-.github/
-.mimocode/
-.codex/
-.claude/
-.opencode/
-.antigravitycli/
-.playwright-mcp/
-opencode.json
-.git.save
-.agents/
-.opencode/
-.antigravitycli/
-.playwright-mcp/
-opencode.json
-.git.save
