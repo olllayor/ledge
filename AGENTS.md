@@ -9,11 +9,13 @@ Before writing any Convex code, read `convex/_generated/ai/guidelines.md`. It ov
 ## Commands
 
 ```bash
-pnpm dev            # dev (builds brand + native first, then electron-vite)
-pnpm build          # production build
-pnpm lint           # tsc --noEmit for both tsconfig.json and tsconfig.node.json
-pnpm test           # vitest run + native Swift self-test
-pnpm dist           # clean → build → lean bundle → size report
+pnpm dev                 # dev (builds brand + native first, then electron-vite)
+pnpm build               # production build
+pnpm lint                # tsc --noEmit for both tsconfig.json and tsconfig.node.json
+pnpm test                # vitest run + native Swift self-test
+pnpm dist                # clean → build → lean bundle → size report
+pnpm changelog:diff      # dry-run: print rendered CHANGELOG.md for <ref>..HEAD
+pnpm changelog:update    # write: merge the diff into CHANGELOG.md locally
 ```
 
 Verification order: `pnpm lint` → `pnpm test` → `pnpm build`.
@@ -28,7 +30,8 @@ Verification order: `pnpm lint` → `pnpm test` → `pnpm build`.
 | Shared | `src/shared/` | Zod schemas, IPC contracts |
 | Native | `native/DropShelfNativeAgent/` | Swift binary, stdout JSON protocol |
 | Backend | `convex/` | Optional cloud sync, auth, billing |
-| Scripts | `scripts/` | Branding, native build, DMG, size report |
+| Scripts | `scripts/` | Branding, native build, DMG, size report, changelog |
+| Automation | `.github/workflows/` | CI, release, nightly changelog digest |
 
 ## Path Aliases
 
@@ -46,6 +49,7 @@ These are configured in both `tsconfig.json` and `electron.vite.config.ts`. Do n
 - **`app.dock.hide()`** — menu-bar-only app, never call `app.dock.show()`
 - **Bookmark file refs** — always check `isFileBackedItem()` before `.file` access
 - **Always check `isMissing`** before file operations on shelf items
+- **Commit messages** — use Conventional Commits (`feat:`, `fix:`, `refactor:`, `chore:`, etc.) so the nightly changelog digest can categorize them automatically
 
 ## Native Agent
 
@@ -77,3 +81,28 @@ Run `pnpm convex:dev` for local Convex dev. Tests in `convex/*.test.ts` use `con
 ## CI
 
 GitHub Actions runs on `macos-14`: `pnpm lint` → `pnpm test` → `pnpm build`. Uses pnpm 10.11.1, Node 22.
+
+## Changelog Automation
+
+`.github/workflows/changelog-nightly.yml` runs at 03:00 UTC each night and on
+`workflow_dispatch`. It diffs `main` against the most recent
+`nightly-baseline-YYYY-MM-DD` tag (or `HEAD~1` on first run), runs
+`scripts/build-changelog.mjs`, and opens a PR titled
+`docs(changelog): nightly digest …` against `main`. Merging the PR rolls
+entries under `## [Unreleased]` and the next run uses the new `main` HEAD as
+its baseline.
+
+Use `pnpm changelog:diff [<ref>]` to preview what the bot would generate for
+`<ref>..HEAD` (default `HEAD~1`), and `pnpm changelog:update [<ref>]` to apply
+it locally — useful when batching several days of work before a release.
+
+The script classifies commits via Conventional Commits prefixes:
+
+| Prefix    | Section              |
+|-----------|----------------------|
+| `feat:`   | Added                |
+| `fix:`    | Fixed                |
+| `perf:`   | Performance          |
+| `refactor:`, `chore:`, `build:` | Changed   |
+| `docs:`   | Documentation        |
+| `test:`, `style:`, `ci:` | Internal        |

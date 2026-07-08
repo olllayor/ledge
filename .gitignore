@@ -42,3 +42,8 @@ skills-lock.json
 *.swp
 *.swo
 *~
+
+# Per-developer loop / triage state. `loop-state.md` is updated by the
+# local bug-hunt loop and is intentionally untracked so each developer's
+# run history doesn't pollute the shared repo.
+loop-state.md
