@@ -46,7 +46,13 @@ export class ClipboardMonitor extends EventEmitter {
   private readonly readAvailableFormats: () => string[];
   private readonly readFrontmostApp: () => { bundleId: string; name: string };
 
-  private lastChangeCount = -1;
+  /** Dedupe key for the native path only. NSPasteboard change counts and
+   *  the poller's synthetic ticks live in different number spaces, so they
+   *  must never share a field: a synthetic tick colliding with a future
+   *  real change count would silently drop a genuine copy. */
+  private lastNativeChangeCount = -1;
+  private pollTick = 0;
+  private pollPrimed = false;
   private lastFormatsHash = '';
   private lastSnapshot: ClipboardChangeSnapshot | null = null;
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
@@ -92,8 +98,8 @@ export class ClipboardMonitor extends EventEmitter {
    * should already filter).
    */
   notifyFromNative(snapshot: ClipboardChangeSnapshot): void {
-    if (snapshot.changeCount === this.lastChangeCount) return;
-    this.lastChangeCount = snapshot.changeCount;
+    if (snapshot.changeCount === this.lastNativeChangeCount) return;
+    this.lastNativeChangeCount = snapshot.changeCount;
     this.lastFormatsHash = snapshot.formats.join('|');
     this.lastSnapshot = snapshot;
     this.emit('change', snapshot);
@@ -113,17 +119,25 @@ export class ClipboardMonitor extends EventEmitter {
   private pollOnce(): void {
     const formats = this.readAvailableFormats();
     const hash = formats.join('|');
-    if (hash === this.lastFormatsHash && this.lastChangeCount >= 0) {
+    // First observation with no baseline (native or polled) only primes the
+    // hash: whatever sat on the pasteboard before the app launched is not a
+    // new copy, and re-capturing it on every launch would duplicate it.
+    const hasBaseline = this.pollPrimed || this.lastNativeChangeCount >= 0;
+    this.pollPrimed = true;
+    if (!hasBaseline) {
+      this.lastFormatsHash = hash;
+      return;
+    }
+    if (hash === this.lastFormatsHash) {
       return;
     }
     const frontmost = this.readFrontmostApp();
     const snapshot: ClipboardChangeSnapshot = {
-      changeCount: this.lastChangeCount + 1,
+      changeCount: ++this.pollTick,
       sourceBundleId: frontmost.bundleId,
       sourceAppName: frontmost.name,
       formats,
     };
-    this.lastChangeCount = snapshot.changeCount;
     this.lastFormatsHash = hash;
     this.lastSnapshot = snapshot;
     this.emit('change', snapshot);

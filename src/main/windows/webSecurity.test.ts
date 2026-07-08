@@ -58,16 +58,59 @@ describe('lockDownWebContents', () => {
     expect(evt.preventDefault).toHaveBeenCalled();
   });
 
-  it('allows local file:// and http://localhost initial loads', () => {
+  it('allows app renderer file:// and http://localhost initial loads', () => {
+    const originalUrl = process.env.ELECTRON_RENDERER_URL;
+    process.env.ELECTRON_RENDERER_URL = 'http://localhost:5173';
+    try {
+      const { window, handlers: h } = makeFakeWindow();
+      lockDownWebContents(window, { rendererRoot: '/app/out/renderer' });
+      const navigateCall = h.on.mock.calls.find((c) => c[0] === 'will-navigate');
+      const navigateHandler = navigateCall![1] as (event: { preventDefault: () => void }, url: string) => void;
+      const evt = { preventDefault: vi.fn() };
+      navigateHandler(evt, 'file:///app/out/renderer/index.html');
+      navigateHandler(evt, 'file:///app/out/renderer/quickPaste.html');
+      navigateHandler(evt, 'http://localhost:5173/?view=shelf');
+      navigateHandler(evt, 'http://127.0.0.1:5173/?view=shelf');
+      expect(evt.preventDefault).not.toHaveBeenCalled();
+    } finally {
+      if (originalUrl === undefined) {
+        delete process.env.ELECTRON_RENDERER_URL;
+      } else {
+        process.env.ELECTRON_RENDERER_URL = originalUrl;
+      }
+    }
+  });
+
+  it('blocks file:// navigation outside the app renderer directory', () => {
     const { window, handlers: h } = makeFakeWindow();
-    lockDownWebContents(window);
+    lockDownWebContents(window, { rendererRoot: '/app/out/renderer' });
     const navigateCall = h.on.mock.calls.find((c) => c[0] === 'will-navigate');
     const navigateHandler = navigateCall![1] as (event: { preventDefault: () => void }, url: string) => void;
     const evt = { preventDefault: vi.fn() };
-    navigateHandler(evt, 'file:///path/to/renderer/index.html');
-    navigateHandler(evt, 'http://localhost:5173/?view=shelf');
-    navigateHandler(evt, 'http://127.0.0.1:5173/?view=shelf');
-    expect(evt.preventDefault).not.toHaveBeenCalled();
+    navigateHandler(evt, 'file:///Users/victim/Downloads/evil.html');
+    // Path-traversal out of the renderer root must not slip through.
+    navigateHandler(evt, 'file:///app/out/renderer/../../evil.html');
+    // Sibling directory sharing the root as a string prefix.
+    navigateHandler(evt, 'file:///app/out/renderer-evil/index.html');
+    expect(evt.preventDefault).toHaveBeenCalledTimes(3);
+  });
+
+  it('blocks http://localhost navigation in production mode', () => {
+    const originalUrl = process.env.ELECTRON_RENDERER_URL;
+    delete process.env.ELECTRON_RENDERER_URL;
+    try {
+      const { window, handlers: h } = makeFakeWindow();
+      lockDownWebContents(window);
+      const navigateCall = h.on.mock.calls.find((c) => c[0] === 'will-navigate');
+      const navigateHandler = navigateCall![1] as (event: { preventDefault: () => void }, url: string) => void;
+      const evt = { preventDefault: vi.fn() };
+      navigateHandler(evt, 'http://localhost:3000/?view=shelf');
+      expect(evt.preventDefault).toHaveBeenCalled();
+    } finally {
+      if (originalUrl !== undefined) {
+        process.env.ELECTRON_RENDERER_URL = originalUrl;
+      }
+    }
   });
 
   it('blocks http://localhost.evil.example/ as a prefix-confusion attempt', () => {

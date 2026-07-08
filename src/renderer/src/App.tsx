@@ -15,9 +15,11 @@ const ClipboardView = lazy(() =>
 
 export function App() {
   const { state, error, fullState } = useLedgeState(selectShelfView);
-  const [showOnboarding, setShowOnboarding] = useState(
-    () => fullState && !fullState.preferences.hasCompletedOnboarding,
-  );
+  // Derived at render time: state arrives asynchronously, so a useState
+  // initializer would always capture the initial null fullState.
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const showOnboarding =
+    !onboardingDismissed && fullState !== null && !fullState.preferences.hasCompletedOnboarding;
   const view = new URLSearchParams(window.location.search).get('view') ?? 'shelf';
 
   if (error) {
@@ -45,7 +47,7 @@ export function App() {
   if (showOnboarding && view === 'shelf') {
     return (
       <>
-        <OnboardingView state={fullState} onComplete={() => setShowOnboarding(false)} />
+        <OnboardingView state={fullState} onComplete={() => setOnboardingDismissed(true)} />
         <ToastHost />
       </>
     );

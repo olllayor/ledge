@@ -5,6 +5,20 @@ export const shelfColorSchema = z.enum(['ember', 'wave', 'forest', 'sand']);
 export const shelfOriginSchema = z.enum(['shake', 'tray', 'shortcut', 'manual', 'restore']);
 export const shakeSensitivitySchema = z.enum(['gentle', 'balanced', 'firm']);
 
+export const shakeDetectedEventSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  displayId: z.number(),
+  sourceBundleId: z.string(),
+})
+
+export const clipboardChangedEventSchema = z.object({
+  changeCount: z.number().int(),
+  sourceBundleId: z.string(),
+  sourceAppName: z.string(),
+  formats: z.array(z.string()),
+})
+
 export const fileItemSchema = shelfItemBaseSchema.extend({
   kind: z.literal('file'),
   file: fileRefSchema,
@@ -159,7 +173,7 @@ export const clipboardCategorySchema = z.object({
 
 export const clipboardSettingsSchema = z.object({
   enabled: z.boolean().default(true),
-  historyLimit: z.number().int().positive().default(200),
+  historyLimit: z.number().int().positive().max(2000).default(200),
   ignoreConcealedItems: z.boolean().default(true),
   ignoreBundleIds: z.array(z.string()).default([]),
   quickPasteHotkey: z.string().default('CommandOrControl+Shift+V'),

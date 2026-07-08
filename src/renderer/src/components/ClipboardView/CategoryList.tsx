@@ -13,11 +13,6 @@ function colorCssVar(color: ShelfColor): string {
   return `var(--shelf-color-${color}, var(--ink-soft))`
 }
 
-/**
- * The list of categories + the "All" entry, including the inline
- * rename state (double-click a category to edit). The new-category
- * form lives in its own sibling component.
- */
 function CategoryListImpl({
   categories,
   selected,
@@ -46,7 +41,7 @@ function CategoryListImpl({
           className={`clipboard-category${selected === 'all' ? ' is-active' : ''}`}
           onClick={() => onSelect('all')}
         >
-          <span className="clipboard-category-swatch" style={{ background: 'var(--ink-soft)' }} />
+          <span className="clipboard-category-swatch" style={{ background: 'var(--ink-faint)' }} />
           All
         </button>
       </li>
@@ -80,7 +75,7 @@ function CategoryListImpl({
                 event.preventDefault()
                 onRemove(category.id)
               }}
-              title="Double-click to rename · right-click to delete"
+              title="Double-click to rename · Right-click to delete"
             >
               <span
                 className="clipboard-category-swatch"

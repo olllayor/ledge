@@ -15,7 +15,8 @@ export class PreferencesWindow {
   }
 
   sendState(state: AppState): void {
-    this.window?.webContents.send(IPC_CHANNELS.stateUpdated, state);
+    if (!this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed()) return;
+    this.window.webContents.send(IPC_CHANNELS.stateUpdated, state);
   }
 
   getBrowserWindow(): BrowserWindow | null {

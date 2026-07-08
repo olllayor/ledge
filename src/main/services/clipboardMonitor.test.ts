@@ -46,18 +46,20 @@ describe('ClipboardMonitor', () => {
       readFrontmostApp: () => ({ bundleId: 'com.test.app', name: 'Test' }),
     });
     // Each call to pollOnce is private; expose it via the EventEmitter.
+    // The first poll only primes the baseline (pre-launch clipboard
+    // contents are not a new copy); identical formats never re-emit.
     (monitor as unknown as { pollOnce: () => void }).pollOnce();
     (monitor as unknown as { pollOnce: () => void }).pollOnce();
     expect(formatsCallCount).toBe(2);
-    // Identical formats should not produce a duplicate change.
-    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledTimes(0);
   });
 
-  it('emits a change when formats differ', () => {
+  it('emits a change when formats differ after the priming poll', () => {
     const onChange = vi.fn();
     const calls: string[][] = [
       ['public.utf8-plain-text'],
       ['public.png'],
+      ['public.tiff'],
     ];
     let idx = 0;
     const monitor = new ClipboardMonitor({
@@ -67,7 +69,27 @@ describe('ClipboardMonitor', () => {
       readAvailableFormats: () => calls[idx++] ?? [],
       readFrontmostApp: () => ({ bundleId: 'com.test.app', name: 'Test' }),
     });
+    (monitor as unknown as { pollOnce: () => void }).pollOnce(); // primes
     (monitor as unknown as { pollOnce: () => void }).pollOnce();
+    (monitor as unknown as { pollOnce: () => void }).pollOnce();
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not swallow a poll change when a native baseline already exists', () => {
+    const onChange = vi.fn();
+    const calls: string[][] = [['public.png']];
+    let idx = 0;
+    const monitor = new ClipboardMonitor({
+      onChange,
+      scheduleInterval: () => 0 as unknown as ReturnType<typeof setInterval>,
+      clearIntervalFn: () => undefined,
+      readAvailableFormats: () => calls[idx++] ?? [],
+      readFrontmostApp: () => ({ bundleId: 'com.test.app', name: 'Test' }),
+    });
+    // Native path established the baseline, then the helper died and the
+    // clipboard changed before the poller took over: the first poll must
+    // emit, not prime.
+    monitor.notifyFromNative(makeSnapshot({ changeCount: 5 }));
     (monitor as unknown as { pollOnce: () => void }).pollOnce();
     expect(onChange).toHaveBeenCalledTimes(2);
   });

@@ -1,4 +1,5 @@
 import { BrowserWindow, screen } from 'electron';
+import type { AppState } from '@shared/schema';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { loadRenderer } from './loadRenderer';
 import { resolvePreloadPath } from './preloadPath';
@@ -71,6 +72,11 @@ export class QuickPasteWindow {
 
   hide(): void {
     this.window?.hide();
+  }
+
+  sendState(state: AppState): void {
+    if (!this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed()) return;
+    this.window.webContents.send(IPC_CHANNELS.stateUpdated, state);
   }
 
   focusIndex(index: number): void {

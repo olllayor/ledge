@@ -128,6 +128,35 @@ describe('computeShakeReady', () => {
     })
   })
 
+  it('drops shakeDetected events with malformed params', async () => {
+    const child = new MockChildProcess()
+    recordWrites(child)
+    const agent = new NativeAgentClient({
+      spawnProcess: () => child,
+      resolveBinaryPath: () => process.execPath
+    })
+    const shakeDetected = vi.fn()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    agent.on('shakeDetected', shakeDetected)
+
+    await agent.start()
+    child.stdout.emit(
+      'data',
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'gesture.shakeDetected',
+        params: { x: 'not-a-number', y: null }
+      })}\n`
+    )
+
+    expect(shakeDetected).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('malformed shakeDetected params'),
+      expect.anything()
+    )
+    warnSpy.mockRestore()
+  })
+
   it('rejects pending calls and restarts the helper with the latest preferences', async () => {
     vi.useFakeTimers()
     const firstChild = new MockChildProcess()

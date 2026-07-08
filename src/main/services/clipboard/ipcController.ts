@@ -18,6 +18,7 @@ import type { StateStore } from '../stateStore'
 import type { ClipboardMonitor } from '../clipboardMonitor'
 import type { QuickPasteWindow } from '../../windows/quickPasteWindow'
 import type { PeekWindow } from '../../windows/peekWindow'
+import type { NotchDropoutWindow } from '../../windows/notchDropoutWindow'
 import type { WebContents } from 'electron'
 import type { ClipboardWriter } from './writer'
 
@@ -33,6 +34,7 @@ export interface ClipboardIpcDeps {
   clipboardMonitor: ClipboardMonitor
   quickPasteWindow: QuickPasteWindow
   peekWindow: PeekWindow
+  notchDropoutWindow?: NotchDropoutWindow
   broadcastState(): void
   /** Optional override so tests can register a fake main module. */
   ipcMain?: { handle: typeof ipcMain.handle; on: typeof ipcMain.on }
@@ -59,6 +61,7 @@ export class ClipboardIpcController {
     this.registerDragChannel()
     this.registerQuickPasteChannels()
     this.registerPeekChannels()
+    this.registerNotchDropoutChannels()
   }
 
   // ---- Copy (in-app) ---------------------------------------------------
@@ -149,7 +152,14 @@ export class ClipboardIpcController {
 
   private registerDragChannel(): void {
     this.bus.on(IPC_CHANNELS.clipboardStartItemDrag, (event, payload: unknown) => {
-      const parsed = clipboardEntryIdInputSchema.parse(payload)
+      // safeParse: this is a sendSync channel, so a thrown ZodError would
+      // leave event.returnValue unset and wedge the calling renderer.
+      const result = clipboardEntryIdInputSchema.safeParse(payload)
+      if (!result.success) {
+        event.returnValue = false
+        return
+      }
+      const parsed = result.data
       const entry = this.deps.stateStore
         .getClipboardEntries()
         .find((candidate) => candidate.id === parsed.entryId)
@@ -209,6 +219,30 @@ export class ClipboardIpcController {
     })
     this.bus.on(IPC_CHANNELS.clipboardPeekHide, () => {
       this.deps.peekWindow.hide()
+    })
+  }
+
+  // ---- Notch dropout ---------------------------------------------------
+
+  private registerNotchDropoutChannels(): void {
+    if (!this.deps.notchDropoutWindow) return
+    const win = this.deps.notchDropoutWindow
+
+    this.bus.on(IPC_CHANNELS.notchDropoutShow, () => {
+      void win.show()
+    })
+    this.bus.on(IPC_CHANNELS.notchDropoutHide, () => {
+      win.hide()
+    })
+    this.bus.on(IPC_CHANNELS.notchDropoutDragState, (_event, payload: unknown) => {
+      const parsed = z.object({ suppressed: z.boolean() }).safeParse(payload)
+      if (!parsed.success) return
+      win.suppressHide = parsed.data.suppressed
+      if (!parsed.data.suppressed) {
+        // Drag finished; the hover monitor's leave edge fired (suppressed)
+        // mid-drag and won't fire again, so re-check here.
+        win.hideUnlessCursorInside()
+      }
     })
   }
 }

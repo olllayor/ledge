@@ -118,14 +118,17 @@ export function QuickPastePalette() {
     };
   }, []);
 
-  const triggerPaste = useCallback((entry: ClipboardEntry) => {
-    if (!window.ledge) return;
-    void window.ledge.clipboardQuickPastePaste({
-      entryId: entry.id,
-      previousBundleId: '',
-    });
-    window.ledge.clipboardQuickPasteHide();
-  }, []);
+  const triggerPaste = useCallback(
+    (entry: ClipboardEntry) => {
+      if (!window.ledge) return;
+      void window.ledge.clipboardQuickPastePaste({
+        entryId: entry.id,
+        previousBundleId: previousAppName,
+      });
+      window.ledge.clipboardQuickPasteHide();
+    },
+    [previousAppName],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

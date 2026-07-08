@@ -1,28 +1,42 @@
 import { memo, useCallback } from 'react';
-import type { ClipboardCategory, ClipboardEntry } from '@shared/schema';
+import type { ClipboardEntry } from '@shared/schema';
 import { CardLabel, CardPreview, CardSubtitle } from './ClipboardView/CardPreview';
 
 interface ClipboardCardProps {
   entry: ClipboardEntry;
-  categories: ClipboardCategory[];
+  isSelected: boolean;
+  onSelect: (id: string | null) => void;
   onCopy: (entry: ClipboardEntry) => void;
   onRemove: (entry: ClipboardEntry) => void;
-  onAssign: (entry: ClipboardEntry, categoryId: string) => void;
-  onUnassign: (entry: ClipboardEntry, categoryId: string) => void;
   onDragStart: (entry: ClipboardEntry) => void;
 }
 
 function CardImpl({
   entry,
-  categories,
+  isSelected,
+  onSelect,
   onCopy,
   onRemove,
-  onAssign,
-  onUnassign,
   onDragStart,
 }: ClipboardCardProps) {
-  const handleCopy = useCallback(() => onCopy(entry), [entry, onCopy]);
-  const handleRemove = useCallback(() => onRemove(entry), [entry, onRemove]);
+  const handleClick = useCallback(() => {
+    onSelect(isSelected ? null : entry.id);
+  }, [entry.id, isSelected, onSelect]);
+
+  const handleDoubleClick = useCallback(() => {
+    onCopy(entry);
+  }, [entry, onCopy]);
+
+  const handleCopy = useCallback((event: React.MouseEvent) => {
+    event.stopPropagation();
+    onCopy(entry);
+  }, [entry, onCopy]);
+
+  const handleRemove = useCallback((event: React.MouseEvent) => {
+    event.stopPropagation();
+    onRemove(entry);
+  }, [entry, onRemove]);
+
   const handleDragStart = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -32,60 +46,29 @@ function CardImpl({
   );
 
   return (
-    <article className="clipboard-card" draggable onDragStart={handleDragStart}>
-      <div className="clipboard-card-preview">
-        <CardPreview entry={entry} />
+    <article
+      className={`clipboard-row${isSelected ? ' is-selected' : ''}`}
+      draggable
+      onDragStart={handleDragStart}
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
+    >
+      <div className="clipboard-row-content">
+        <div className="clipboard-row-icon">
+          <CardPreview entry={entry} />
+        </div>
+        <div className="clipboard-row-text">
+          <CardLabel entry={entry} />
+          <CardSubtitle entry={entry} />
+        </div>
       </div>
-      <div className="clipboard-card-body">
-        <CardLabel entry={entry} />
-        <CardSubtitle entry={entry} />
-        {categories.length > 0 ? (
-          <div className="clipboard-card-tags">
-            {entry.categoryIds.map((id) => {
-              const cat = categories.find((c) => c.id === id);
-              if (!cat) return null;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className="clipboard-card-tag"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onUnassign(entry, id);
-                  }}
-                  title={`Remove from ${cat.name}`}
-                >
-                  {cat.name}
-                </button>
-              );
-            })}
-            <select
-              className="clipboard-card-tag-add"
-              value=""
-              onChange={(event) => {
-                if (event.target.value) {
-                  onAssign(entry, event.target.value);
-                  event.target.value = '';
-                }
-              }}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <option value="">+ category</option>
-              {categories
-                .filter((c) => !entry.categoryIds.includes(c.id))
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-            </select>
-          </div>
-        ) : null}
+      <div className="clipboard-row-source">
+        {entry.sourceAppName || '—'}
       </div>
-      <div className="clipboard-card-actions">
+      <div className="clipboard-row-actions">
         <button
           type="button"
-          className="clipboard-card-action"
+          className="clipboard-row-action"
           onClick={handleCopy}
           title="Copy to clipboard"
           aria-label="Copy to clipboard"
@@ -94,7 +77,7 @@ function CardImpl({
         </button>
         <button
           type="button"
-          className="clipboard-card-action"
+          className="clipboard-row-action"
           onClick={handleRemove}
           title="Remove from history"
           aria-label="Remove from history"

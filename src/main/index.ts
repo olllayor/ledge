@@ -1,4 +1,4 @@
-import { app, Menu, net, protocol as protocolModule, shell } from 'electron'
+import { app, Menu, net, protocol as protocolModule, screen, shell } from 'electron'
 import { execFileSync } from 'node:child_process'
 import { extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -24,6 +24,9 @@ import { resolveAllowedAssetPath } from './services/assetPathResolver'
 import { broadcastToast, createThrottledToast } from './services/toastBroadcaster'
 import { IpcRegistrar } from './ipc'
 import { ClipboardIpcController } from './services/clipboard/ipcController'
+import { FEATURE_FLAGS } from './services/featureFlags'
+import { NotchDropoutWindow } from './windows/notchDropoutWindow'
+import { NotchHoverMonitor } from './services/notchHoverMonitor'
 
 const PROJECT_URL = 'https://github.com/olllayor/ledge'
 const WHATS_NEW_URL = `${PROJECT_URL}/releases`
@@ -52,6 +55,8 @@ let preferencesWindow: PreferencesWindow
 let quickPasteWindow: QuickPasteWindow
 let peekWindow: PeekWindow
 let clipboardWindow: ClipboardWindow
+let notchDropoutWindow: NotchDropoutWindow | null = null
+let notchHoverMonitor: NotchHoverMonitor | null = null
 let clipboardMonitor: ClipboardMonitor
 let clipboardHistory: ClipboardHistoryService
 let inactivityTimer: InactivityTimer
@@ -120,6 +125,9 @@ function broadcastState(): AppState {
   shelfWindow.sendState(state)
   preferencesWindow.sendState(state)
   clipboardWindow.sendState(state)
+  quickPasteWindow.sendState(state)
+  peekWindow.sendState(state)
+  notchDropoutWindow?.sendState(state)
   return state
 }
 
@@ -185,6 +193,32 @@ app.whenReady().then(async () => {
   quickPasteWindow = new QuickPasteWindow()
   peekWindow = new PeekWindow()
   clipboardWindow = new ClipboardWindow()
+
+  if (FEATURE_FLAGS.useNotchDropout) {
+    notchDropoutWindow = new NotchDropoutWindow()
+    notchHoverMonitor = new NotchHoverMonitor({
+      onEnterHotZone: () => {
+        void notchDropoutWindow?.show()
+      },
+      onLeaveHotZone: () => {
+        notchDropoutWindow?.hide()
+      },
+      isPanelVisible: () => Boolean(notchDropoutWindow?.isVisible()),
+      isCursorInsidePanel: () => {
+        const win = notchDropoutWindow?.getBrowserWindow()
+        if (!win || win.isDestroyed()) return false
+        const bounds = win.getBounds()
+        const point = screen.getCursorScreenPoint()
+        return (
+          point.x >= bounds.x &&
+          point.x <= bounds.x + bounds.width &&
+          point.y >= bounds.y &&
+          point.y <= bounds.y + bounds.height
+        )
+      },
+    })
+    notchHoverMonitor.start()
+  }
   clipboardMonitor = new ClipboardMonitor({
     onChange: (snapshot) => {
       void clipboardHistory.capture(snapshot)
@@ -238,6 +272,7 @@ app.whenReady().then(async () => {
     peekWindow,
     clipboardMonitor,
     () => shelfController.createShelf('shortcut', currentCursorPoint(), false),
+    FEATURE_FLAGS.useNotchDropout ? (notchDropoutWindow ?? undefined) : undefined,
   )
 
   tray = new TrayController({
@@ -299,6 +334,7 @@ app.whenReady().then(async () => {
       clipboardMonitor,
       quickPasteWindow,
       peekWindow,
+      notchDropoutWindow: FEATURE_FLAGS.useNotchDropout ? (notchDropoutWindow ?? undefined) : undefined,
       broadcastState: () => broadcastState()
     }),
     broadcastState: () => broadcastState(),
@@ -308,8 +344,21 @@ app.whenReady().then(async () => {
   })
   ipcRegistrar.registerAll()
 
+  // The Swift helper is the primary clipboard observer. The TS format-hash
+  // poller runs only while the helper is down: running both double-captures
+  // every copy (their formats vocabularies never hash-match) and the
+  // poller's synthetic change counts can collide with real NSPasteboard
+  // counts, silently dropping genuine copies.
+  const syncClipboardFallbackPoller = () => {
+    if (nativeAgent.getStatus().nativeHelperAvailable) {
+      clipboardMonitor.stop()
+    } else {
+      clipboardMonitor.start()
+    }
+  }
   nativeAgent.on('statusChanged', () => {
     broadcastState()
+    syncClipboardFallbackPoller()
   })
   await nativeAgent.start()
   nativeAgent.on('shakeDetected', (event: ShakeDetectedEvent) => {
@@ -323,7 +372,7 @@ app.whenReady().then(async () => {
     }
   })
   await nativeAgent.startClipboardObserver(500)
-  void clipboardMonitor.start()
+  syncClipboardFallbackPoller()
 
   preferencesSync.sync()
   await nativeAgent.configureGesture(stateStore.getPreferences())
@@ -351,6 +400,11 @@ app.on('before-quit', (event) => {
   // corruption handler and lose the most recent change. The first
   // time `before-quit` fires, we cancel the default quit, flush,
   // and re-quit. Subsequent firings (the re-quit) pass through.
+  // Shut the helper down first: this clears the auto-restart timer so a
+  // dying child can't respawn mid-quit, and reaps the process so it never
+  // outlives the app.
+  clipboardMonitor?.stop()
+  nativeAgent?.stop()
   if (isFlushingStateForQuit) {
     return
   }

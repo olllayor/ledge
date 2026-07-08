@@ -6,7 +6,9 @@ import type { StateStore } from './stateStore'
 import type { NativeAgentClient } from '../native/nativeAgent'
 import type { QuickPasteWindow } from '../windows/quickPasteWindow'
 import type { PeekWindow } from '../windows/peekWindow'
+import type { NotchDropoutWindow } from '../windows/notchDropoutWindow'
 import type { ClipboardMonitor } from './clipboardMonitor'
+import { FEATURE_FLAGS } from './featureFlags'
 
 /**
  * Owns the system-side mirror of user preferences: login items, global
@@ -27,6 +29,7 @@ export class PreferencesSyncService {
     private readonly peekWindow: PeekWindow,
     private readonly clipboardMonitor: ClipboardMonitor,
     private readonly onCreateShelfFromShortcut: () => Promise<void>,
+    private readonly notchDropoutWindow?: NotchDropoutWindow,
   ) {}
 
   getStatus(): Pick<PermissionStatus, 'shortcutRegistered' | 'shortcutError'> {
@@ -68,6 +71,13 @@ export class PreferencesSyncService {
       })
     }
 
+    this.registerMainShortcut(normalizedShortcut)
+    // Clipboard hotkeys are independent of the main shortcut: clearing or
+    // breaking the main shortcut must not silently drop quick-paste/peek.
+    this.registerClipboardShortcuts(preferences)
+  }
+
+  private registerMainShortcut(normalizedShortcut: string): void {
     if (!normalizedShortcut) {
       return
     }
@@ -95,8 +105,6 @@ export class PreferencesSyncService {
             shortcutRegistered: false,
             shortcutError: 'Shortcut could not be registered. It may already be in use.',
           }
-
-      this.registerClipboardShortcuts(preferences)
     } catch (error) {
       this.status = {
         shortcutRegistered: false,
@@ -128,7 +136,11 @@ export class PreferencesSyncService {
       alreadyRegistered: registeredShortcuts,
       label: 'peek',
       onTrigger: () => {
-        void this.peekWindow.show()
+        if (FEATURE_FLAGS.useNotchDropout && this.notchDropoutWindow) {
+          void this.notchDropoutWindow.toggle()
+        } else {
+          void this.peekWindow.show()
+        }
       },
     })
   }

@@ -11,13 +11,8 @@ export function ClipboardView() {
   const [app, setApp] = useState<string | 'all'>('all');
   const [category, setCategory] = useState<string | 'all'>('all');
   const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Memoise the filter object so `useClipboardEntries` can keep its
-  // derived `filtered` array stable across renders that don't change
-  // any filter field. Without this, every state update in the parent
-  // (e.g. typing in the search box) would invalidate the inner
-  // `useMemo` and re-run the entry filter even when none of the
-  // fields actually changed.
   const filter = useMemo(
     () => ({ type, app, category, search }),
     [type, app, category, search],
@@ -53,7 +48,7 @@ export function ClipboardView() {
             className="chrome-button"
             onClick={handleClearAll}
             disabled={entries.length === 0}
-            title="Clear all entries (categories kept)"
+            title="Clear all entries"
           >
             Clear
           </button>
@@ -62,15 +57,17 @@ export function ClipboardView() {
           </button>
         </div>
       </header>
-      <ClipboardFilters
-        type={type}
-        onTypeChange={setType}
-        app={app}
-        onAppChange={setApp}
-        search={search}
-        onSearchChange={setSearch}
-        availableApps={availableApps}
-      />
+      <div className="clipboard-toolbar">
+        <ClipboardFilters
+          type={type}
+          onTypeChange={setType}
+          app={app}
+          onAppChange={setApp}
+          search={search}
+          onSearchChange={setSearch}
+          availableApps={availableApps}
+        />
+      </div>
       <div className="clipboard-body">
         <ClipboardCategories
           categories={categories}
@@ -80,32 +77,42 @@ export function ClipboardView() {
           onRename={actions.renameCategory}
           onRemove={actions.removeCategory}
         />
-        <section className="clipboard-grid" aria-label="Clipboard entries">
+        <section className="clipboard-list" aria-label="Clipboard entries">
           {filtered.length === 0 ? (
             <div className="clipboard-empty">
-              <span className="clipboard-empty-eyebrow">Empty</span>
+              <span className="clipboard-empty-eyebrow">
+                {entries.length === 0 ? 'No entries yet' : 'No matches'}
+              </span>
               <span className="clipboard-empty-cta">
                 {entries.length === 0
-                  ? 'No clipboard items yet — copy something to get started.'
-                  : 'No entries match the current filters.'}
+                  ? 'Copy something to start building your history.'
+                  : 'Try adjusting your filters or search.'}
               </span>
             </div>
           ) : (
-            filtered.map((entry) => (
-              <ClipboardCard
-                key={entry.id}
-                entry={entry}
-                categories={categories}
-                onCopy={handleCopy}
-                onRemove={actions.removeEntry}
-                onAssign={actions.assignEntry}
-                onUnassign={actions.unassignEntry}
-                onDragStart={(entry) => {
-                  const ok = actions.startItemDrag(entry);
-                  if (!ok) window.ledge?.showToast('This item cannot be dragged out', 'info');
-                }}
-              />
-            ))
+            <>
+              <div className="clipboard-list-header">
+                <span>Content</span>
+                <span>Source</span>
+                <span />
+              </div>
+              <div className="clipboard-list-body">
+                {filtered.map((entry) => (
+                  <ClipboardCard
+                    key={entry.id}
+                    entry={entry}
+                    isSelected={selectedId === entry.id}
+                    onSelect={setSelectedId}
+                    onCopy={handleCopy}
+                    onRemove={actions.removeEntry}
+                    onDragStart={(entry) => {
+                      const ok = actions.startItemDrag(entry);
+                      if (!ok) window.ledge?.showToast('This item cannot be dragged out', 'info');
+                    }}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </section>
       </div>

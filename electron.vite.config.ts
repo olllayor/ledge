@@ -79,6 +79,7 @@ export default defineConfig(({ command }) => ({
           index: resolve(root, 'src/renderer/index.html'),
           quickPaste: resolve(root, 'src/renderer/quickPaste.html'),
           peekWindow: resolve(root, 'src/renderer/peekWindow.html'),
+          notchDropout: resolve(root, 'src/renderer/notchDropout.html'),
         },
       },
     },

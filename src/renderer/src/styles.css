@@ -2800,7 +2800,7 @@ textarea.pref-input {
 }
 
 /* ============================================================
- * Clipboard feature — main pane
+ * Clipboard feature — main pane (native macOS redesign)
  * ============================================================ */
 .clipboard-shell {
   display: flex;
@@ -2808,88 +2808,176 @@ textarea.pref-input {
   height: 100vh;
   background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font-sans);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
 }
 
+/* ── Title bar / toolbar ── */
 .clipboard-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 10px 16px 10px 20px;
   border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+  min-height: 38px;
 }
 
 .clipboard-topbar h1 {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   margin: 0;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  -webkit-app-region: drag;
 }
 
 .clipboard-topbar-actions {
   display: flex;
-  gap: 6px;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.clipboard-topbar-actions .chrome-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+.clipboard-topbar-actions .chrome-button:hover {
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+/* ── Toolbar: filters + search ── */
+.clipboard-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px 8px 20px;
+  border-bottom: 1px solid var(--line);
 }
 
 .clipboard-filters {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
+  gap: 0;
+}
+
+/* macOS segmented control */
+.clipboard-segmented {
+  display: inline-flex;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 1px;
+  gap: 0;
 }
 
 .clipboard-filter-chip {
-  padding: 4px 10px;
-  border-radius: 999px;
+  padding: 3px 10px;
+  border-radius: 5px;
   font-size: 11px;
-  background: var(--surface);
+  font-weight: 500;
+  background: transparent;
   color: var(--ink-soft);
-  border: 1px solid var(--line);
+  border: none;
   cursor: pointer;
-  transition: background-color 80ms ease, color 80ms ease;
+  transition: background-color 100ms ease, color 100ms ease;
+  line-height: 1.3;
+}
+
+.clipboard-filter-chip:hover:not(.is-active) {
+  color: var(--ink);
 }
 
 .clipboard-filter-chip.is-active {
-  background: var(--ink);
-  color: var(--canvas);
-  border-color: var(--ink);
+  background: var(--surface-strong);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* App filter dropdown */
+.clipboard-app-filter {
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-soft);
+  padding: 4px 8px;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23999' fill='none' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 22px;
+}
+
+.clipboard-app-filter:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+/* Search field */
+.clipboard-search-wrapper {
+  position: relative;
+  flex: 1;
+  max-width: 240px;
 }
 
 .clipboard-search {
-  flex: 1;
-  min-width: 120px;
-  padding: 4px 10px;
-  border-radius: 8px;
+  width: 100%;
+  padding: 5px 10px 5px 28px;
+  border-radius: 6px;
   background: var(--surface);
   border: 1px solid var(--line);
   font-size: 12px;
   color: var(--ink);
   font-family: inherit;
+  outline: none;
+  transition: border-color 100ms ease, box-shadow 100ms ease;
 }
 
-.clipboard-app-filter {
-  font-size: 12px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--ink);
-  padding: 4px 8px;
-  font-family: inherit;
+.clipboard-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.2);
 }
 
+.clipboard-search::placeholder {
+  color: var(--ink-faint);
+}
+
+.clipboard-search-icon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+
+/* ── Body: sidebar + list ── */
 .clipboard-body {
   display: flex;
   flex: 1;
   min-height: 0;
 }
 
+/* ── Sidebar (source list style) ── */
 .clipboard-categories {
-  width: 200px;
+  width: 180px;
   border-right: 1px solid var(--line);
-  padding: 12px;
+  padding: 8px;
   overflow-y: auto;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .clipboard-categories-list {
@@ -2898,184 +2986,453 @@ textarea.pref-input {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .clipboard-category {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  width: 100%;
+  padding: 5px 8px;
   border-radius: 6px;
+  border: none;
+  background: transparent;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--ink-soft);
-  transition: background-color 80ms ease;
+  transition: background-color 80ms ease, color 80ms ease;
+  text-align: left;
+}
+
+.clipboard-category:hover {
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .clipboard-category.is-active {
   background: var(--surface-strong);
   color: var(--ink);
+  font-weight: 600;
 }
 
 .clipboard-category-swatch {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
-  background: var(--ink-soft);
+  background: var(--ink-faint);
   flex-shrink: 0;
 }
 
 .clipboard-category-add {
   display: flex;
-  gap: 6px;
-  margin-top: 12px;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
 }
 
-.clipboard-category-add input,
-.clipboard-category-add select {
-  font-size: 12px;
+.clipboard-category-add input {
+  flex: 1;
+  font-size: 11px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: 5px;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink);
   font-family: inherit;
+  min-width: 0;
 }
 
-.clipboard-grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
-  padding: 16px;
-  overflow-y: auto;
-  align-content: start;
+.clipboard-category-add input:focus {
+  border-color: var(--accent);
+  outline: none;
 }
 
-.clipboard-card {
-  display: flex;
-  flex-direction: column;
-  border-radius: 12px;
+.clipboard-category-add select {
+  font-size: 10px;
+  padding: 3px 4px;
+  border-radius: 5px;
   border: 1px solid var(--line);
   background: var(--surface);
-  overflow: hidden;
-  transition: transform 100ms ease, border-color 100ms ease;
-  position: relative;
+  color: var(--ink);
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.clipboard-card:hover {
-  transform: translateY(-1px);
-  border-color: var(--line-strong);
+.clipboard-category-add .chrome-button {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 14px;
 }
 
-.clipboard-card-preview {
-  height: 110px;
+.clipboard-category-add .chrome-button:hover:not(:disabled) {
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.clipboard-category-add .chrome-button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.clipboard-category-input {
+  width: 100%;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.2);
+}
+
+/* ── List view ── */
+.clipboard-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.clipboard-list-header {
+  display: grid;
+  grid-template-columns: 1fr 120px 60px;
+  gap: 8px;
+  padding: 6px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  background: var(--canvas);
+  z-index: 1;
+}
+
+.clipboard-list-body {
+  flex: 1;
+}
+
+/* ── List row (replaces card) ── */
+.clipboard-row {
+  display: grid;
+  grid-template-columns: 1fr 120px 60px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 16px;
+  cursor: default;
+  transition: background-color 80ms ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.clipboard-row:hover {
+  background: var(--surface);
+}
+
+.clipboard-row.is-selected {
+  background: rgba(10, 132, 255, 0.15);
+}
+
+.clipboard-row-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.clipboard-row-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface-strong);
-  font-size: 22px;
+  font-size: 13px;
   color: var(--ink-soft);
-  position: relative;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
+  background: var(--surface-strong);
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  overflow: hidden;
 }
 
-.clipboard-card-preview img {
+.clipboard-row-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.clipboard-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.clipboard-row-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipboard-row-label.is-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.clipboard-row-label.is-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clipboard-row-subtitle {
+  font-size: 10px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipboard-row-source {
+  font-size: 11px;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipboard-row-actions {
+  display: flex;
+  gap: 2px;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 80ms ease;
+}
+
+.clipboard-row:hover .clipboard-row-actions {
+  opacity: 1;
+}
+
+.clipboard-row-action {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+}
+
+.clipboard-row-action:hover {
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.clipboard-row-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.clipboard-card-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.clipboard-card-tag:hover {
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.clipboard-card-tag-add {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-faint);
+  border: 1px dashed var(--line);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.clipboard-card-tag-add:hover {
+  border-color: var(--line-strong);
+  color: var(--ink-soft);
+}
+
+/* ── Empty state ── */
+.clipboard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 24px;
+  text-align: center;
+  color: var(--ink-soft);
+  gap: 6px;
+}
+
+.clipboard-empty-eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.clipboard-empty-cta {
+  font-size: 12px;
+  color: var(--ink-faint);
+  max-width: 260px;
+  line-height: 1.4;
+}
+
+/* ============================================================
+ * Notch Dropout — Dynamic Island clipboard quick access
+ * ============================================================ */
+.notch-dropout {
+  width: 700px;
+  height: 200px;
+  clip-path: inset(0 0 168px 0);
+  transition: clip-path 150ms ease-out;
+  background: rgba(30, 30, 30, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 0 0 16px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: none;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  color: #fff;
+}
+
+.notch-dropout.is-expanded {
+  clip-path: inset(0);
+}
+
+.notch-dropout-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  height: 32px;
+}
+
+.notch-dropout-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.notch-dropout-icon {
+  font-size: 14px;
+}
+
+.notch-dropout-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.notch-dropout-thumbnails {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+}
+
+.notch-dropout-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: background-color 80ms ease, border-color 80ms ease;
+}
+
+.notch-dropout-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.notch-dropout-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-.clipboard-card-body {
-  padding: 8px 10px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.clipboard-card-label {
-  font-size: 12px;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-.clipboard-card-label.is-code {
-  font-family: var(--font-mono);
+.notch-dropout-empty {
   font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
 }
 
-.clipboard-card-label.is-color {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.clipboard-card-subtitle {
-  font-size: 11px;
-  color: var(--ink-soft);
+.notch-dropout-actions {
   display: flex;
-  gap: 6px;
-  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
-.clipboard-card-actions {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 100ms ease;
-}
-
-.clipboard-card:hover .clipboard-card-actions {
-  opacity: 1;
-}
-
-.clipboard-card-action {
+.notch-dropout-action {
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.4);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  border: 0;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-}
-
-.clipboard-empty {
-  grid-column: 1 / -1;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 24px;
-  text-align: center;
-  color: var(--ink-soft);
-  gap: 8px;
-}
-
-.clipboard-empty-eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.clipboard-empty-cta {
-  margin-top: 4px;
   font-size: 13px;
-  color: var(--ink);
+  cursor: pointer;
+  transition: background-color 80ms ease, color 80ms ease;
+}
+
+.notch-dropout-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Expanded state: full panel content */
+.notch-dropout.is-expanded .notch-dropout-header {
+  height: auto;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 

@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events'
 import {
   nativeBookmarkResolveSchema,
   nativePermissionStatusSchema,
+  shakeDetectedEventSchema,
   type PreferencesRecord,
   type ShakeSensitivity
 } from '@shared/schema'
@@ -62,6 +63,7 @@ interface NativeHelperProcess extends EventEmitter {
     setEncoding(encoding: BufferEncoding): void
   }
   stderr: EventEmitter
+  kill?(signal?: NodeJS.Signals | number): boolean
 }
 
 interface NativeAgentClientOptions {
@@ -86,6 +88,7 @@ export class NativeAgentClient extends EventEmitter {
   private readonly pending = new Map<number, PendingRequest>()
   private gestureEnabled = false
   private lastPreferences: PreferencesRecord | null = null
+  private clipboardObserverIntervalMs: number | null = null
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private nextRestartDelayMs: number
   private shouldRestart = false
@@ -110,6 +113,25 @@ export class NativeAgentClient extends EventEmitter {
   async start(): Promise<void> {
     this.shouldRestart = true
     await this.launchHelper()
+  }
+
+  /**
+   * Permanently shut the helper down (app quit). Cancels any pending
+   * restart so a kill during teardown doesn't respawn the helper.
+   */
+  stop(): void {
+    this.shouldRestart = false
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    const child = this.child
+    this.child = null
+    this.stdoutBuffer = ''
+    this.rejectPending(helperUnavailableError('Native helper stopped'))
+    if (child) {
+      this.disposeChild(child)
+    }
   }
 
   private async launchHelper(): Promise<void> {
@@ -170,6 +192,12 @@ export class NativeAgentClient extends EventEmitter {
 
       if (this.lastPreferences) {
         await this.configureGesture(this.lastPreferences)
+      }
+
+      // Re-arm the clipboard observer after a crash/restart; without this a
+      // relaunched helper never resumes clipboard.changed notifications.
+      if (this.clipboardObserverIntervalMs !== null && child === this.child) {
+        await this.startClipboardObserver(this.clipboardObserverIntervalMs)
       }
     } catch (error) {
       if (child !== this.child) {
@@ -268,6 +296,7 @@ export class NativeAgentClient extends EventEmitter {
   }
 
   async startClipboardObserver(intervalMs = 500): Promise<void> {
+    this.clipboardObserverIntervalMs = intervalMs
     if (!this.child) {
       return
     }
@@ -361,7 +390,12 @@ export class NativeAgentClient extends EventEmitter {
     }
 
     if (message.method === 'gesture.shakeDetected') {
-      this.emit('shakeDetected', message.params as unknown as ShakeDetectedEvent)
+      const parsed = shakeDetectedEventSchema.safeParse(message.params)
+      if (parsed.success) {
+        this.emit('shakeDetected', parsed.data)
+      } else {
+        console.warn('[ledge] nativeAgent: malformed shakeDetected params, ignoring.', parsed.error.flatten())
+      }
       return
     }
 
@@ -439,6 +473,7 @@ export class NativeAgentClient extends EventEmitter {
 
     this.child = null
     this.stdoutBuffer = ''
+    this.disposeChild(child)
     this.rejectPending(helperUnavailableError(message))
     this.updateStatus({
       nativeHelperAvailable: false,
@@ -446,6 +481,24 @@ export class NativeAgentClient extends EventEmitter {
       lastError: message
     })
     this.scheduleRestart()
+  }
+
+  /**
+   * Detach and kill an abandoned helper. A hung-but-alive process would
+   * otherwise keep streaming stdout notifications (double-reporting every
+   * clipboard change and shake next to its replacement) and clobbering
+   * `lastError` via stderr.
+   */
+  private disposeChild(child: NativeHelperProcess): void {
+    child.stdout.removeAllListeners()
+    child.stderr.removeAllListeners()
+    child.stdin.removeAllListeners()
+    child.removeAllListeners()
+    try {
+      child.kill?.()
+    } catch {
+      // Already dead.
+    }
   }
 
   private rejectPending(error: Error): void {

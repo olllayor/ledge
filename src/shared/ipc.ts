@@ -57,6 +57,7 @@ export const IPC_CHANNELS = {
   clipboardGetRecent: 'ledge:clipboard-get-recent',
   clipboardPeekShow: 'ledge:clipboard-peek:show',
   clipboardPeekHide: 'ledge:clipboard-peek:hide',
+  clipboardPeekHint: 'ledge:clipboard-peek:hint',
   clipboardStartItemDrag: 'ledge:clipboard-start-item-drag',
   clipboardSettingsGet: 'ledge:clipboard-settings:get',
   clipboardSettingsUpdate: 'ledge:clipboard-settings:update',
@@ -68,6 +69,11 @@ export const IPC_CHANNELS = {
   clipboardEntryRemove: 'ledge:clipboard-entry:remove',
   clipboardEntryClearAll: 'ledge:clipboard-entry:clear-all',
   clipboardPruneNow: 'ledge:clipboard-prune-now',
+  // ---- Notch dropout (replaces peek window) ----
+  notchDropoutShow: 'ledge:notch-dropout:show',
+  notchDropoutHide: 'ledge:notch-dropout:hide',
+  notchDropoutStateChanged: 'ledge:notch-dropout:state-changed',
+  notchDropoutDragState: 'ledge:notch-dropout:drag-state',
 } as const;
 
 export type ToastKind = 'success' | 'error' | 'info';
@@ -80,16 +86,6 @@ export const toastPayloadSchema = z.object({
 export type ToastPayload = z.infer<typeof toastPayloadSchema>;
 
 // ---- Clipboard IPC schemas ----
-
-export const clipboardEntryInputSchema = z.object({
-  capturedAt: z.string(),
-  sourceBundleId: z.string().default(''),
-  sourceAppName: z.string().default(''),
-  item: z.unknown(), // Shape validated against shelfItemSchema in the main process.
-  thumbnailDataUri: z.string().optional(),
-  categoryIds: z.array(z.string()).default([]),
-});
-export type ClipboardEntryInputPayload = z.infer<typeof clipboardEntryInputSchema>;
 
 export const clipboardCopyInputSchema = z.object({
   entryId: z.string().min(1),
@@ -215,4 +211,9 @@ export interface LedgeAPI {
   clipboardPeekShow(): void;
   clipboardPeekHide(): void;
   onClipboardPeekHint(listener: (hint: ClipboardPeekHint) => void): () => void;
+  // ---- Notch dropout ----
+  notchDropoutShow(): void;
+  notchDropoutHide(): void;
+  notchDropoutDragState(suppressed: boolean): void;
+  onNotchDropoutStateChanged(listener: (hint: { state: 'visible' | 'hidden' | 'expanded' | 'collapsed' }) => void): () => void;
 }

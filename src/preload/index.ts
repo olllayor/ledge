@@ -21,13 +21,13 @@ import {
   appStateSchema,
   createShelfInputSchema,
   clipboardCategorySchema,
+  clipboardEntrySchema,
   clipboardSettingsSchema,
   ingestPayloadSchema,
   permissionStatusSchema,
   preferencePatchSchema,
   preferencesRecordSchema,
   shelfRecordSchema,
-  type ClipboardEntry,
 } from '@shared/schema';
 
 const api: LedgeAPI = {
@@ -167,7 +167,7 @@ const api: LedgeAPI = {
   async clipboardGetRecent(limit = 200) {
     const parsed = z.object({ limit: z.number().int().positive().max(500) }).parse({ limit });
     const raw = (await ipcRenderer.invoke(IPC_CHANNELS.clipboardGetRecent, parsed)) as unknown;
-    return z.array(z.unknown()).parse(raw) as ClipboardEntry[];
+    return z.array(clipboardEntrySchema).parse(raw);
   },
   async clipboardSettingsGet() {
     const raw = await ipcRenderer.invoke(IPC_CHANNELS.clipboardSettingsGet);
@@ -259,9 +259,33 @@ const api: LedgeAPI = {
       if (!parsed.success) return;
       listener(parsed.data);
     };
-    ipcRenderer.on(IPC_CHANNELS.stateUpdated, wrapped);
+    ipcRenderer.on(IPC_CHANNELS.clipboardPeekHint, wrapped);
     return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.stateUpdated, wrapped);
+      ipcRenderer.removeListener(IPC_CHANNELS.clipboardPeekHint, wrapped);
+    };
+  },
+  // ---- Notch dropout ----
+  notchDropoutShow() {
+    ipcRenderer.send(IPC_CHANNELS.notchDropoutShow);
+  },
+  notchDropoutHide() {
+    ipcRenderer.send(IPC_CHANNELS.notchDropoutHide);
+  },
+  notchDropoutDragState(suppressed: boolean) {
+    ipcRenderer.send(IPC_CHANNELS.notchDropoutDragState, { suppressed });
+  },
+  onNotchDropoutStateChanged(listener) {
+    const schema = z.object({
+      state: z.enum(['visible', 'hidden', 'expanded', 'collapsed']),
+    });
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      const parsed = schema.safeParse(payload);
+      if (!parsed.success) return;
+      listener(parsed.data);
+    };
+    ipcRenderer.on(IPC_CHANNELS.notchDropoutStateChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.notchDropoutStateChanged, wrapped);
     };
   },
 };
