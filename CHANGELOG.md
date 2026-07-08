@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-08
+
+### Fixed
+- **release**: stop electron-builder downloading a 404'd zip URL (`2801667`)
+- **ci**: allow pnpm to run electron/esbuild postinstall scripts (`a9b23e8`)
+
 ## [0.2.0] - 2026-07-08
 
 ### Added
