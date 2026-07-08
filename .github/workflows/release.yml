@@ -35,14 +35,6 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GH_TOKEN: ${{ github.token }}
-      # Code signing (optional): set these repo secrets to ship a signed app.
-      # Leave them unset and electron-builder produces an unsigned build.
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      # Notarization (optional): all three must be set to notarize the DMG.
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
       - name: Checkout
@@ -110,11 +102,27 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Configure code signing (optional)
+        # electron-builder treats a *defined-but-empty* CSC_LINK as a real
+        # cert path and fails trying to resolve it — worse than leaving it
+        # unset, which correctly falls back to ad-hoc signing. So these are
+        # only exported into the job environment when the secrets actually
+        # have a value, never as job-level env (which would always define
+        # them, empty or not).
+        if: secrets.CSC_LINK != '' && secrets.CSC_KEY_PASSWORD != ''
+        run: |
+          echo "CSC_LINK=${{ secrets.CSC_LINK }}" >> "$GITHUB_ENV"
+          echo "CSC_KEY_PASSWORD=${{ secrets.CSC_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+
       - name: Build & Package
         run: pnpm dist:release
 
       - name: Notarize DMG
-        if: env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        if: secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           dmg="$(ls dist/*.dmg | head -1)"
