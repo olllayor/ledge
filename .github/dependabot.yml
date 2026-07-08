@@ -1,0 +1,49 @@
+# Dependabot configuration for Ledge.
+# Keeps the toolchain (pnpm deps, GitHub Actions) on current security patches
+# without manual triage.
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 8
+    groups:
+      electron-and-build:
+        patterns:
+          - "electron*"
+          - "@electron/*"
+          - "electron-builder"
+          - "electron-vite"
+        update-types:
+          - "minor"
+          - "patch"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+      - "automated"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 4
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+      - "automated"
+      - "ci"

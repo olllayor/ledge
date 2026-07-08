@@ -6,9 +6,9 @@ const root = resolve(__dirname, '.');
 const shared = resolve(root, 'src/shared');
 const rendererCspByMode = {
   serve:
-    "default-src 'self' http://localhost:* ws://localhost:* https://*.convex.cloud wss://*.convex.cloud; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset: https://*.convex.cloud; connect-src 'self' http://localhost:* ws://localhost:* https://*.convex.cloud wss://*.convex.cloud;",
+    "default-src 'self' http://localhost:* ws://localhost:* https://*.convex.cloud wss://*.convex.cloud; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset: https://*.convex.cloud; connect-src 'self' http://localhost:* ws://localhost:* https://*.convex.cloud wss://*.convex.cloud; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';",
   build:
-    "default-src 'self' https://*.convex.cloud wss://*.convex.cloud; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset: https://*.convex.cloud; connect-src 'self' https://*.convex.cloud wss://*.convex.cloud;",
+    "default-src 'self' https://*.convex.cloud wss://*.convex.cloud; script-src 'self'; style-src 'self'; img-src 'self' data: blob: file: ledge-asset: https://*.convex.cloud; connect-src 'self' https://*.convex.cloud wss://*.convex.cloud; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';",
 } as const;
 
 export default defineConfig(({ command }) => ({
@@ -50,8 +50,15 @@ export default defineConfig(({ command }) => ({
       outDir: 'out/preload',
       sourcemap: command === 'serve',
       minify: command === 'build',
+      lib: {
+        entry: resolve(root, 'src/preload/index.ts'),
+        formats: ['cjs'],
+      },
       rollupOptions: {
         input: resolve(root, 'src/preload/index.ts'),
+        output: {
+          entryFileNames: '[name].cjs',
+        },
         external: ['electron'],
       },
     },
@@ -67,6 +74,14 @@ export default defineConfig(({ command }) => ({
     build: {
       outDir: resolve(root, 'out/renderer'),
       minify: command === 'build',
+      rollupOptions: {
+        input: {
+          index: resolve(root, 'src/renderer/index.html'),
+          quickPaste: resolve(root, 'src/renderer/quickPaste.html'),
+          peekWindow: resolve(root, 'src/renderer/peekWindow.html'),
+          notchDropout: resolve(root, 'src/renderer/notchDropout.html'),
+        },
+      },
     },
     plugins: [
       react(),

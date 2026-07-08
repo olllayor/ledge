@@ -88,7 +88,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [sessionToken, setSessionToken] = useState(() => localStorage.getItem(SESSION_KEY) ?? '');
   const [email, setEmail] = useState(() => localStorage.getItem(EMAIL_KEY) ?? '');
   const [localState, setLocalState] = useState<Awaited<ReturnType<typeof window.ledge.getState>> | null>(null);
-  const [lastAppliedRemoteUpdatedAt, setLastAppliedRemoteUpdatedAt] = useState('');
+  // Map of remote shelfId -> last applied localUpdatedAt, so we apply each
+  // remote shelf exactly once per change rather than only ever syncing the
+  // first entry returned by the query.
+  const [lastAppliedRemoteByShelf, setLastAppliedRemoteByShelf] = useState<Record<string, string>>({});
   const lastPushedShelfUpdatedAt = useRef('');
   const lastPushedPreferences = useRef('');
   const queueRef = useRef(new MutationQueue());
@@ -254,22 +257,27 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const [remote] = remoteShelves;
-    if (!remote || remote.localUpdatedAt === lastAppliedRemoteUpdatedAt) {
-      return;
+    let updated: Record<string, string> | null = null;
+    for (const remote of remoteShelves) {
+      if (lastAppliedRemoteByShelf[remote.shelfId] === remote.localUpdatedAt) {
+        continue;
+      }
+      updated ??= { ...lastAppliedRemoteByShelf };
+      updated[remote.shelfId] = remote.localUpdatedAt;
+      void window.ledge.applyRemoteShelf({
+        id: remote.shelfId,
+        name: remote.name,
+        color: remote.color,
+        createdAt: remote.localCreatedAt,
+        updatedAt: remote.localUpdatedAt,
+        origin: remote.origin,
+        items: remote.items,
+      });
     }
-
-    setLastAppliedRemoteUpdatedAt(remote.localUpdatedAt);
-    void window.ledge.applyRemoteShelf({
-      id: remote.shelfId,
-      name: remote.name,
-      color: remote.color,
-      createdAt: remote.localCreatedAt,
-      updatedAt: remote.localUpdatedAt,
-      origin: remote.origin,
-      items: remote.items,
-    });
-  }, [lastAppliedRemoteUpdatedAt, remoteShelves, sessionToken]);
+    if (updated) {
+      setLastAppliedRemoteByShelf(updated);
+    }
+  }, [lastAppliedRemoteByShelf, remoteShelves, sessionToken]);
 
   useEffect(() => {
     if (!sessionToken || !localState?.preferences) {
@@ -333,10 +341,18 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const verifyOtp = useCallback(
     async (nextEmail: string, code: string) => {
       const result = await verifyOtpMutation({ email: nextEmail, code });
-      localStorage.setItem(SESSION_KEY, result.sessionToken);
-      localStorage.setItem(EMAIL_KEY, result.email);
-      setSessionToken(result.sessionToken);
-      setEmail(result.email);
+      // verifyOtp returns `{ ok: false, reason: ... }` for failed
+      // attempts (wrong / expired / locked code) and the success
+      // shape `{ sessionToken, email }` on a valid code. Match the
+      // previous `ConvexError` user-facing message.
+      if (!("sessionToken" in result)) {
+        throw new Error("Invalid or expired sign-in code.");
+      }
+      const success = result as { sessionToken: string; email: string };
+      localStorage.setItem(SESSION_KEY, success.sessionToken);
+      localStorage.setItem(EMAIL_KEY, success.email);
+      setSessionToken(success.sessionToken);
+      setEmail(success.email);
     },
     [verifyOtpMutation],
   );

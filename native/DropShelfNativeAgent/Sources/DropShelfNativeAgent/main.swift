@@ -16,6 +16,13 @@ final class NativeAgent {
     private var eventTap: CFMachPort?
     private var eventTapSource: CFRunLoopSource?
     private var tapReinstallScheduled = false
+    private var clipboardTimer: Timer?
+    private var lastClipboardChangeCount: Int = NSPasteboard.general.changeCount
+    // Cached frontmost app between ticks; the quick-paste hotkey reads
+    // this synchronously to avoid the race where the palette window
+    // itself becomes frontmost before a fresh RPC can resolve it.
+    private var lastFrontmostBundleId: String = ""
+    private var lastFrontmostAppName: String = ""
 
     func run() {
         installEventTapIfNeeded()
@@ -89,6 +96,13 @@ final class NativeAgent {
                 "isStale": .bool(resolution.isStale),
                 "isMissing": .bool(resolution.isMissing)
             ])
+        case "clipboard.startObserving":
+            let intervalMs = request.params?["intervalMs"]?.intValue ?? 500
+            startClipboardObserver(intervalMs: intervalMs)
+            return .bool(true)
+        case "clipboard.stopObserving":
+            stopClipboardObserver()
+            return .bool(true)
         default:
             throw NSError(domain: "DropShelfNativeAgent", code: -32601, userInfo: [NSLocalizedDescriptionKey: "Unknown method \(request.method)"])
         }
@@ -113,6 +127,53 @@ final class NativeAgent {
         } catch {
             return (originalPath, false, !FileManager.default.fileExists(atPath: originalPath))
         }
+    }
+
+    private func startClipboardObserver(intervalMs: Int) {
+        stopClipboardObserver()
+        let interval = TimeInterval(max(50, intervalMs)) / 1000.0
+        // Seed the cache from the current frontmost app so the first
+        // tick doesn't read "" even before a paste happens.
+        if let app = NSWorkspace.shared.frontmostApplication {
+            lastFrontmostBundleId = app.bundleIdentifier ?? ""
+            lastFrontmostAppName = app.localizedName ?? ""
+        }
+        // Reset changeCount to the current value so the first tick
+        // doesn't fire for pre-existing content.
+        lastClipboardChangeCount = NSPasteboard.general.changeCount
+        clipboardTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.clipboardTick()
+        }
+        // The timer must run on the main run loop so we can read
+        // `frontmostApplication` and `NSPasteboard.general` safely.
+        if let timer = clipboardTimer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+    }
+
+    private func stopClipboardObserver() {
+        clipboardTimer?.invalidate()
+        clipboardTimer = nil
+    }
+
+    private func clipboardTick() {
+        let pasteboard = NSPasteboard.general
+        let changeCount = pasteboard.changeCount
+        // Update the frontmost app cache on every tick — cheap, and
+        // keeps it close to "what was the user doing when they copied".
+        if let app = NSWorkspace.shared.frontmostApplication {
+            lastFrontmostBundleId = app.bundleIdentifier ?? ""
+            lastFrontmostAppName = app.localizedName ?? ""
+        }
+        guard changeCount != lastClipboardChangeCount else { return }
+        lastClipboardChangeCount = changeCount
+        let formats = pasteboard.types?.map { $0.rawValue } ?? []
+        sendNotification(method: "clipboard.changed", params: [
+            "changeCount": .int(changeCount),
+            "sourceBundleId": .string(lastFrontmostBundleId),
+            "sourceAppName": .string(lastFrontmostAppName),
+            "formats": .array(formats.map(JSONValue.string))
+        ])
     }
 
     private func installEventTapIfNeeded() {

@@ -1,4 +1,4 @@
-import { Menu, Tray, nativeImage } from 'electron'
+import { app, Menu, Tray, nativeImage } from 'electron'
 import { join } from 'node:path'
 import type { AppState, ShelfRecord } from '@shared/schema'
 
@@ -6,6 +6,7 @@ interface TrayCallbacks {
   onNewShelf(): void
   onNewShelfFromClipboard(): void
   onOpenPreferences(): void
+  onOpenClipboardHistory(): void
   onOpenWhatsNew(): void
   onOpenQuickStart(): void
   onOpenAbout(): void
@@ -41,60 +42,77 @@ export class TrayController {
     this.snapshot = snapshot
   }
 
+  buildTemplate(): Electron.MenuItemConstructorOptions[] {
+    return buildTrayMenuTemplate(this.snapshot?.recentShelves ?? [], this.callbacks)
+  }
+
   destroy(): void {
     this.tray.destroy()
   }
 
   private buildMenu(): Menu {
-    const recentShelves = this.snapshot?.recentShelves ?? []
-
-    return Menu.buildFromTemplate([
-      {
-        label: 'New Shelf',
-        click: () => this.callbacks.onNewShelf()
-      },
-      {
-        label: 'New Shelf From Clipboard',
-        click: () => this.callbacks.onNewShelfFromClipboard()
-      },
-      {
-        label: 'Recent Shelves',
-        submenu: recentShelves.length > 0 ? recentShelves.map((shelf) => createRestoreMenuItem(shelf, this.callbacks.onRestoreShelf)) : [{ label: 'No recent shelves', enabled: false }]
-      },
-      {
-        type: 'separator'
-      },
-      {
-        label: `Version ${process.env.npm_package_version ?? '0.1.0'}`,
-        enabled: false
-      },
-      {
-        label: 'New in This Version…',
-        click: () => this.callbacks.onOpenWhatsNew()
-      },
-      {
-        label: 'Quick Start Guide…',
-        click: () => this.callbacks.onOpenQuickStart()
-      },
-      {
-        label: 'About Ledge…',
-        click: () => this.callbacks.onOpenAbout()
-      },
-      {
-        label: 'Settings…',
-        accelerator: 'CommandOrControl+,',
-        click: () => this.callbacks.onOpenPreferences()
-      },
-      {
-        type: 'separator'
-      },
-      {
-        label: 'Quit',
-        accelerator: 'CommandOrControl+Q',
-        click: () => this.callbacks.onQuit()
-      }
-    ])
+    return Menu.buildFromTemplate(this.buildTemplate())
   }
+}
+
+/**
+ * Builds the tray menu template. Exported as a pure function so it can
+ * be unit-tested without instantiating an Electron `Tray`.
+ */
+export function buildTrayMenuTemplate(
+  recentShelves: ShelfRecord[],
+  callbacks: TrayCallbacks,
+): Electron.MenuItemConstructorOptions[] {
+  return [
+    {
+      label: 'New Shelf',
+      click: () => callbacks.onNewShelf()
+    },
+    {
+      label: 'New Shelf From Clipboard',
+      click: () => callbacks.onNewShelfFromClipboard()
+    },
+    {
+      label: 'Recent Shelves',
+      submenu: recentShelves.length > 0 ? recentShelves.map((shelf) => createRestoreMenuItem(shelf, callbacks.onRestoreShelf)) : [{ label: 'No recent shelves', enabled: false }]
+    },
+    {
+      label: 'Clipboard History…',
+      click: () => callbacks.onOpenClipboardHistory()
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: `Version ${app.getVersion()}`,
+      enabled: false
+    },
+    {
+      label: 'New in This Version…',
+      click: () => callbacks.onOpenWhatsNew()
+    },
+    {
+      label: 'Quick Start Guide…',
+      click: () => callbacks.onOpenQuickStart()
+    },
+    {
+      label: 'About Ledge…',
+      click: () => callbacks.onOpenAbout()
+    },
+    {
+      label: 'Settings…',
+      accelerator: 'CommandOrControl+,',
+      click: () => callbacks.onOpenPreferences()
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: 'Quit',
+      accelerator: 'CommandOrControl+Q',
+      click: () => callbacks.onQuit()
+    }
+  ]
 }
 
 function createRestoreMenuItem(shelf: ShelfRecord, onRestore: (id: string) => void) {

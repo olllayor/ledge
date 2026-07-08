@@ -1,5 +1,5 @@
 const MODIFIER_ALIASES = new Map<string, string>([
-  ['alt', 'Alt'],
+  ['alt', 'Option'],
   ['altgr', 'AltGr'],
   ['cmd', 'Command'],
   ['command', 'Command'],
@@ -37,11 +37,28 @@ const FUNCTION_KEY_PATTERN = /^F(?:[1-9]|1\d|2[0-4])$/i
 const SINGLE_KEY_PATTERN = /^[A-Z0-9]$/i
 
 export function normalizeGlobalShortcut(shortcut: string): string {
-  return shortcut
+  const tokens = shortcut
     .split('+')
     .map((token) => token.trim())
     .filter((token) => token.length > 0)
-    .join('+')
+
+  const seen = new Set<string>()
+  const canonical: string[] = []
+  for (const token of tokens) {
+    const modifier = MODIFIER_ALIASES.get(token.toLowerCase())
+    if (modifier) {
+      if (seen.has(modifier)) {
+        continue
+      }
+      seen.add(modifier)
+      canonical.push(modifier)
+      continue
+    }
+
+    canonical.push(token)
+  }
+
+  return canonical.join('+')
 }
 
 export function validateGlobalShortcut(shortcut: string): string {

@@ -1,19 +1,25 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useState } from "react";
 import { ShelfView } from './components/ShelfView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OnboardingView } from './components/OnboardingView';
 import { ToastHost } from './components/ToastHost';
 import { useLedgeState } from './hooks/useLedgeState';
+import { selectShelfView } from './hooks/selectors';
 
 const PreferencesView = lazy(() =>
   import('./components/PreferencesView').then((module) => ({ default: module.PreferencesView })),
 );
+const ClipboardView = lazy(() =>
+  import('./components/ClipboardView').then((module) => ({ default: module.ClipboardView })),
+);
 
 export function App() {
-  const { state, error } = useLedgeState();
-  const [showOnboarding, setShowOnboarding] = useState(
-    () => state && !state.preferences.hasCompletedOnboarding,
-  );
+  const { state, error, fullState } = useLedgeState(selectShelfView);
+  // Derived at render time: state arrives asynchronously, so a useState
+  // initializer would always capture the initial null fullState.
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const showOnboarding =
+    !onboardingDismissed && fullState !== null && !fullState.preferences.hasCompletedOnboarding;
   const view = new URLSearchParams(window.location.search).get('view') ?? 'shelf';
 
   if (error) {
@@ -27,7 +33,7 @@ export function App() {
     );
   }
 
-  if (!state) {
+  if (!fullState) {
     return (
       <main className="loading-shell">
         <div className="loading-card">
@@ -41,7 +47,7 @@ export function App() {
   if (showOnboarding && view === 'shelf') {
     return (
       <>
-        <OnboardingView state={state} onComplete={() => setShowOnboarding(false)} />
+        <OnboardingView state={fullState} onComplete={() => setOnboardingDismissed(true)} />
         <ToastHost />
       </>
     );
@@ -61,7 +67,29 @@ export function App() {
           }
         >
           <ErrorBoundary>
-            <PreferencesView state={state} />
+            <PreferencesView state={fullState} />
+          </ErrorBoundary>
+        </Suspense>
+        <ToastHost />
+      </>
+    );
+  }
+
+  if (view === 'clipboard') {
+    return (
+      <>
+        <Suspense
+          fallback={
+            <main className="loading-shell">
+              <div className="loading-card">
+                <p className="eyebrow">Ledge</p>
+                <p>Loading clipboard…</p>
+              </div>
+            </main>
+          }
+        >
+          <ErrorBoundary>
+            <ClipboardView />
           </ErrorBoundary>
         </Suspense>
         <ToastHost />
@@ -72,7 +100,7 @@ export function App() {
   return (
     <>
       <ErrorBoundary>
-        <ShelfView state={state} />
+        <ShelfView state={state!} />
       </ErrorBoundary>
       <ToastHost />
     </>

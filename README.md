@@ -64,6 +64,20 @@ Outputs are written to `dist/`, including `dist/mac-arm64/Ledge.app`.
 
 macOS Accessibility permissions are tied to the actual app bundle. If you want System Settings to show `Ledge` with its icon instead of the generic Electron dev host, launch the packaged app.
 
+## Branding
+
+The app logo lives at `build/icon-source.png` (a 1024×1024 PNG is recommended). `pnpm brand:build` reads that file and regenerates every brand artifact in one shot:
+
+| Artifact | Path | Used by |
+|---|---|---|
+| Master PNG | `build/icon.png` | Source for iconset + renderer |
+| macOS bundle | `build/app.icns` | `package.json#build.mac.icon` |
+| App icon set | `build/icon.iconset/*` (16/32/128/256/512 + @2x) | macOS bundle, packaged app |
+| Renderer mark | `src/renderer/public/ledge-mark.png` | `<LedgeMark />` (Preferences → About) |
+| Landing logo | `landing/assets/logo.png` | Marketing site favicon + header |
+
+To swap the logo, drop a new `build/icon-source.png` and run `pnpm brand:build`. The menu-bar tray icon is intentionally **not** derived from the source PNG — see `docs/menu-bar-icon-guide.md` for the tray-icon design process.
+
 ## Verification
 
 ```bash

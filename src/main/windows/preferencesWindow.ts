@@ -3,6 +3,7 @@ import type { AppState } from '@shared/schema';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { loadRenderer } from './loadRenderer';
 import { resolvePreloadPath } from './preloadPath';
+import { lockDownWebContents } from './webSecurity';
 
 export class PreferencesWindow {
   private window: BrowserWindow | null = null;
@@ -14,7 +15,8 @@ export class PreferencesWindow {
   }
 
   sendState(state: AppState): void {
-    this.window?.webContents.send(IPC_CHANNELS.stateUpdated, state);
+    if (!this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed()) return;
+    this.window.webContents.send(IPC_CHANNELS.stateUpdated, state);
   }
 
   getBrowserWindow(): BrowserWindow | null {
@@ -40,13 +42,14 @@ export class PreferencesWindow {
       webPreferences: {
         preload: resolvePreloadPath(),
         contextIsolation: true,
-        sandbox: false,
+        sandbox: true,
       },
     });
     this.window.on('closed', () => {
       this.window = null;
     });
     await loadRenderer(this.window, 'preferences');
+    lockDownWebContents(this.window);
     return this.window;
   }
 }

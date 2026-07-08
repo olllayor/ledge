@@ -1,6 +1,15 @@
 <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-  <!-- Ledge shelf -->
-  <rect x="1.5" y="11.5" width="13" height="3" rx="1.5" fill="black"/>
-  <!-- Item/card resting on the shelf -->
-  <rect x="4.5" y="4" width="7" height="7.5" rx="2" fill="black"/>
+  <!-- Ledge: stacked notepad with spiral binding + note sticking out (template: black on transparent) -->
+  <g>
+    <!-- Notepad body (teal cover in brand) -->
+    <rect x="1.75" y="3.75" width="12.5" height="9" rx="1.5" ry="1.5" fill="black"/>
+    <!-- Note peeking out at the bottom (white card in brand) -->
+    <rect x="2.5" y="11.25" width="11" height="3.25" rx="0.9" ry="0.9" fill="black"/>
+    <!-- Spiral binding rings at the top (knock-out dots on the pad) -->
+    <circle cx="4" cy="3.75" r="0.55" fill="white"/>
+    <circle cx="6" cy="3.75" r="0.55" fill="white"/>
+    <circle cx="8" cy="3.75" r="0.55" fill="white"/>
+    <circle cx="10" cy="3.75" r="0.55" fill="white"/>
+    <circle cx="12" cy="3.75" r="0.55" fill="white"/>
+  </g>
 </svg>

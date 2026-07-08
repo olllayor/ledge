@@ -5,7 +5,6 @@ out/
 native/bin/
 native/DropShelfNativeAgent/.build/
 native/DropShelfNativeAgent/.swiftpm/
-native/LedgeNative/.build/
 coverage/
 .env
 .env.*
@@ -18,3 +17,51 @@ build/icon.png
 .codex/*
 !.codex/environments/
 !.codex/environments/environment.toml
+
+# AI / agent tool caches and configs. These are machine-local artifacts
+# and should never enter version control. Add new entries here when a
+# new tool starts writing into the repo root.
+.agents/
+.opencode/
+.antigravitycli/
+.playwright-mcp/
+opencode.json
+.git.save
+
+# AI skill tooling lockfiles. These pin the exact skills a single
+# developer has installed locally (with content hashes from the
+# upstream GitHub repos) and drift per-machine. Keep them out of git
+# so contributors can curate their own skill set.
+skills-lock.json
+.opencode/installed.json
+.opencode/skills.lock
+.claude/skills.lock
+
+# Vim / editor swap files. The repo doesn't pin an editor, but stray
+# .swp / .swo / ~ files have shown up before.
+*.swp
+*.swo
+*~
+
+# Per-developer loop / triage state. `loop-state.md` is updated by the
+# local bug-hunt loop and is intentionally untracked so each developer's
+# run history doesn't pollute the shared repo.
+loop-state.md
+
+.cursor/
+docs/
+.github/
+.mimocode/
+.codex/
+.claude/
+.opencode/
+.antigravitycli/
+.playwright-mcp/
+opencode.json
+.git.save
+.agents/
+.opencode/
+.antigravitycli/
+.playwright-mcp/
+opencode.json
+.git.save

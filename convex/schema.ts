@@ -1,58 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-
-const fileRef = v.object({
-  originalPath: v.string(),
-  resolvedPath: v.string(),
-  isStale: v.boolean(),
-  isMissing: v.boolean(),
-});
-
-const preview = v.object({
-  summary: v.string(),
-  detail: v.string(),
-});
-
-const shelfItemBase = {
-  id: v.string(),
-  createdAt: v.string(),
-  order: v.number(),
-  title: v.string(),
-  subtitle: v.string(),
-  preview,
-};
-
-const shelfItemSchema = v.union(
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("file"),
-    file: fileRef,
-    mimeType: v.string(),
-  }),
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("folder"),
-    file: fileRef,
-  }),
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("imageAsset"),
-    file: fileRef,
-    mimeType: v.string(),
-  }),
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("text"),
-    text: v.string(),
-    savedFilePath: v.optional(v.string()),
-  }),
-  v.object({
-    ...shelfItemBase,
-    kind: v.literal("url"),
-    url: v.string(),
-    savedFilePath: v.optional(v.string()),
-  }),
-);
+import { shelfItemSchema } from "./sharedSchemas";
 
 const preferencesValues = v.object({
   launchAtLogin: v.boolean(),
@@ -75,8 +23,27 @@ export default defineSchema({
     codeHash: v.string(),
     expiresAt: v.number(),
     consumedAt: v.optional(v.number()),
+    failedAttempts: v.optional(v.number()),
     createdAt: v.number(),
-  }).index("by_email", ["email"]),
+  })
+    .index("by_email", ["email"])
+    // Composite index used by `verifyOtp` to look up the exact OTP row
+    // the user is trying to consume, instead of "the newest row for this
+    // email". `codeHash` includes the email salt (see `sha256(`${email}:${code}`)`),
+    // so the lookup is unique in practice.
+    .index("by_email_and_code_hash", ["email", "codeHash"])
+    // Used by `verifyOtp` to find the most recent unconsumed OTP for a
+    // given email when the user enters a wrong code (so we can bump
+    // `failedAttempts` on the row they were actually trying to consume,
+    // not whichever row was newest). Ordered DESC at the call site.
+    .index("by_email_and_createdAt", ["email", "createdAt"])
+    // Cleanup cron: deletes any row whose `expiresAt` is in the past
+    // (consumed or not). Indexing by `expiresAt` keeps the take()
+    // bounded to expired candidates.
+    .index("by_expiresAt", ["expiresAt"])
+    // Lets the cleanup cron pick up consumed-but-not-yet-expired
+    // OTPs in O(rows-with-consumedAt) time.
+    .index("by_consumedAt", ["consumedAt"]),
 
   authSessions: defineTable({
     userId: v.id("users"),
@@ -84,7 +51,23 @@ export default defineSchema({
     expiresAt: v.number(),
     revokedAt: v.optional(v.number()),
     createdAt: v.number(),
-  }).index("by_token_hash", ["tokenHash"]),
+    // Wall-clock time of the most recent successful `refreshSession`
+    // call against this session. Optional so existing rows (pre-fix)
+    // continue to validate; the refresh handler treats `undefined` as
+    // "never refreshed", which always allows a first refresh.
+    lastRefreshedAt: v.optional(v.number()),
+  })
+    .index("by_token_hash", ["tokenHash"])
+    // The cleanup cron deletes any session whose `expiresAt` is in the
+    // past or whose `revokedAt` is set. Indexing by `expiresAt` makes
+    // the take() bounded to candidates, not "the first 100 ever
+    // created" — otherwise an active session created recently would
+    // starve an older expired one.
+    .index("by_expiresAt", ["expiresAt"])
+    // Lets the cleanup cron pick up revoked-but-not-yet-expired
+    // sessions in O(rows-with-revokedAt) time. Without this index
+    // the cron would have to scan the whole table.
+    .index("by_revokedAt", ["revokedAt"]),
 
   devices: defineTable({
     userId: v.id("users"),
@@ -160,4 +143,44 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_and_created", ["userId", "createdAt"]),
+
+  imageUploadEvents: defineTable({
+    userId: v.id("users"),
+    bytes: v.number(),
+    createdAt: v.number(),
+    // `in_flight` rows count toward the 1.5GB/hour cap; `resolved` and
+    // `abandoned` rows are kept for telemetry but no longer count, so a
+    // flaky client that uploads-then-never-records stops blocking itself
+    // as soon as it explicitly abandons the upload.
+    status: v.union(
+      v.literal("in_flight"),
+      v.literal("resolved"),
+      v.literal("abandoned"),
+    ),
+    // When a matching recordImageAsset lands we tag the row with the
+    // resulting imageAsset id. Lets us prove the in-flight event ever
+    // resolved and skip deletion in the cron.
+    resolvedAssetId: v.optional(v.id("imageAssets")),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_created", ["userId", "createdAt"])
+    // Lets us look up the specific event when the client calls
+    // recordImageAsset or abandonImageUpload with the id we returned
+    // from authorizeImageUpload.
+    .index("by_user_and_status", ["userId", "status"])
+    // Cleanup cron: deletes events older than 24h. Indexing by
+    // `createdAt` keeps the take() bounded to old candidates.
+    .index("by_createdAt", ["createdAt"]),
+
+  // Dedupe key for inbound billing webhooks. We persist the Lemon Squeezy
+  // event id (or a synthetic id derived from subscription id + status) so
+  // a replayed event is a no-op rather than re-applying an entitlement
+  // and possibly reverting a cancellation.
+  processedWebhookEvents: defineTable({
+    eventId: v.string(),
+    source: v.string(),
+    processedAt: v.number(),
+  })
+    .index("by_event", ["source", "eventId"])
+    .index("by_processed_at", ["processedAt"]),
 });

@@ -20,10 +20,14 @@ export function OnboardingView({ state, onComplete }: OnboardingViewProps) {
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<'forward' | 'backward'>('forward');
 
-  // Interactive step completion states
+  // Interactive step completion states. Steps 2 and 3 are pure
+  // information screens; only step 1 requires the user to actually drop a
+  // file before the "Next" button unlocks. The setters for steps 2 and 3
+  // are kept (always `true`) so the dev-mode bypass can flip them in
+  // sync with step 1.
   const [step1Done, setStep1Done] = useState(false);
-  const [step2Done, setStep2Done] = useState(true); // Unlocked by default in Phase 1; to be bound in Phase 2
-  const [step3Done, setStep3Done] = useState(true); // Unlocked by default in Phase 1; to be bound in Phase 3
+  const [step2Done, setStep2Done] = useState(true);
+  const [step3Done, setStep3Done] = useState(true);
 
   // Step 1 interactive states
   const [step1FileDropped, setStep1FileDropped] = useState(false);
@@ -57,8 +61,9 @@ export function OnboardingView({ state, onComplete }: OnboardingViewProps) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Dev-mode bypass shortcut: Alt + D (or Option + D) completes all steps instantly
-      if (event.altKey && event.key.toLowerCase() === 'd') {
+      // Dev-mode bypass: Alt + D instantly completes all steps. Stripped from
+      // production builds by Vite's import.meta.env.DEV replacement.
+      if (import.meta.env.DEV && event.altKey && event.key.toLowerCase() === 'd') {
         event.preventDefault();
         setStep1Done(true);
         setStep2Done(true);
@@ -67,12 +72,25 @@ export function OnboardingView({ state, onComplete }: OnboardingViewProps) {
       }
 
       if (event.key === 'Enter' || event.key === ' ') {
+        if (currentStepLocked) {
+          // Mirror the disabled-button affordance: don't swallow the
+          // keystroke (the user might be typing in another field) and
+          // don't fire a no-op advance.
+          return;
+        }
         event.preventDefault();
         advance();
+        return;
       }
       if (event.key === 'ArrowLeft') {
+        if (step === 0) {
+          // No previous step to go back to — leave the keystroke
+          // alone so it can be handled by whatever has focus.
+          return;
+        }
         event.preventDefault();
         goBack();
+        return;
       }
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -86,8 +104,8 @@ export function OnboardingView({ state, onComplete }: OnboardingViewProps) {
   }, [advance, goBack, onComplete]);
 
   const handleDotClick = (i: number) => {
-    // Dev-mode bypass: Alt/Option click instantly unlocks and jumps to that step
-    if (window.event && (window.event as MouseEvent).altKey) {
+    if (import.meta.env.DEV && window.event && (window.event as MouseEvent).altKey) {
+      // Dev-mode bypass: Alt/Option click unlocks and jumps to that step.
       setStep1Done(true);
       setStep2Done(true);
       setStep3Done(true);

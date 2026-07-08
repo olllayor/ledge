@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events'
 import {
   nativeBookmarkResolveSchema,
   nativePermissionStatusSchema,
+  shakeDetectedEventSchema,
   type PreferencesRecord,
   type ShakeSensitivity
 } from '@shared/schema'
@@ -42,19 +43,27 @@ export interface ShakeDetectedEvent {
   sourceBundleId: string
 }
 
+export interface ClipboardChangedEvent {
+  changeCount: number
+  sourceBundleId: string
+  sourceAppName: string
+  formats: string[]
+}
+
 type PendingRequest = {
   resolve: (value: unknown) => void
   reject: (reason?: unknown) => void
 }
 
 interface NativeHelperProcess extends EventEmitter {
-  stdin: {
+  stdin: EventEmitter & {
     write(chunk: string): boolean
   }
   stdout: EventEmitter & {
     setEncoding(encoding: BufferEncoding): void
   }
   stderr: EventEmitter
+  kill?(signal?: NodeJS.Signals | number): boolean
 }
 
 interface NativeAgentClientOptions {
@@ -79,6 +88,7 @@ export class NativeAgentClient extends EventEmitter {
   private readonly pending = new Map<number, PendingRequest>()
   private gestureEnabled = false
   private lastPreferences: PreferencesRecord | null = null
+  private clipboardObserverIntervalMs: number | null = null
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private nextRestartDelayMs: number
   private shouldRestart = false
@@ -103,6 +113,25 @@ export class NativeAgentClient extends EventEmitter {
   async start(): Promise<void> {
     this.shouldRestart = true
     await this.launchHelper()
+  }
+
+  /**
+   * Permanently shut the helper down (app quit). Cancels any pending
+   * restart so a kill during teardown doesn't respawn the helper.
+   */
+  stop(): void {
+    this.shouldRestart = false
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    const child = this.child
+    this.child = null
+    this.stdoutBuffer = ''
+    this.rejectPending(helperUnavailableError('Native helper stopped'))
+    if (child) {
+      this.disposeChild(child)
+    }
   }
 
   private async launchHelper(): Promise<void> {
@@ -139,6 +168,10 @@ export class NativeAgentClient extends EventEmitter {
       const message = error instanceof Error ? error.message : 'Native helper failed unexpectedly'
       this.handleChildUnavailable(child, message)
     })
+    child.stdin.on('error', (error) => {
+      const message = error instanceof Error ? error.message : 'Native helper stdin error'
+      this.handleChildUnavailable(child, message)
+    })
 
     this.updateStatus({
       nativeHelperAvailable: true,
@@ -159,6 +192,12 @@ export class NativeAgentClient extends EventEmitter {
 
       if (this.lastPreferences) {
         await this.configureGesture(this.lastPreferences)
+      }
+
+      // Re-arm the clipboard observer after a crash/restart; without this a
+      // relaunched helper never resumes clipboard.changed notifications.
+      if (this.clipboardObserverIntervalMs !== null && child === this.child) {
+        await this.startClipboardObserver(this.clipboardObserverIntervalMs)
       }
     } catch (error) {
       if (child !== this.child) {
@@ -205,7 +244,11 @@ export class NativeAgentClient extends EventEmitter {
 
   async configureGesture(preferences: PreferencesRecord): Promise<void> {
     this.lastPreferences = preferences
-    this.gestureEnabled = preferences.shakeEnabled
+    // Don't flip gestureEnabled to true until the helper actually
+    // accepts gesture.start. Otherwise a rejection would leave
+    // `shakeReady` reporting "Ready" while the helper is silently
+    // refusing to listen, with no diagnostic surfaced to the UI.
+    const desiredEnabled = preferences.shakeEnabled
 
     if (!this.child) {
       this.updateStatus({})
@@ -214,15 +257,25 @@ export class NativeAgentClient extends EventEmitter {
 
     try {
       await this.call('gesture.start', {
-        enabled: preferences.shakeEnabled,
+        enabled: desiredEnabled,
         excludedBundleIds: preferences.excludedBundleIds,
         sensitivity: preferences.shakeSensitivity
       })
-    } catch {
-      // The helper may be restarting. Preserve the desired preference and let recovery reapply it.
+      this.gestureEnabled = desiredEnabled
+      // Clear any prior gesture-start failure so a successful retry
+      // doesn't leave the banner stuck on a stale message.
+      this.updateStatus({ lastError: '' })
+    } catch (error) {
+      // The helper may be restarting. Preserve the desired preference
+      // and let recovery reapply it. But surface the rejection: if
+      // gesture.start is failing for any other reason (e.g. the user
+      // revoked Accessibility between permissions.getStatus and the
+      // gesture call), the renderer would otherwise keep showing
+      // "Ready" in Preferences while shakes silently don't work.
+      const message = error instanceof Error ? error.message : 'Native helper rejected gesture.start'
+      this.gestureEnabled = false
+      this.updateStatus({ lastError: message })
     }
-
-    this.updateStatus({})
   }
 
   async stopGesture(): Promise<void> {
@@ -240,6 +293,30 @@ export class NativeAgentClient extends EventEmitter {
     }
 
     this.updateStatus({})
+  }
+
+  async startClipboardObserver(intervalMs = 500): Promise<void> {
+    this.clipboardObserverIntervalMs = intervalMs
+    if (!this.child) {
+      return
+    }
+    try {
+      await this.call('clipboard.startObserving', { intervalMs })
+    } catch {
+      // The clipboard observer is best-effort: the TS-side
+      // ClipboardMonitor will fall back to its own polling loop.
+    }
+  }
+
+  async stopClipboardObserver(): Promise<void> {
+    if (!this.child) {
+      return
+    }
+    try {
+      await this.call('clipboard.stopObserving')
+    } catch {
+      // ignore
+    }
   }
 
   async createBookmark(path: string): Promise<string> {
@@ -313,7 +390,12 @@ export class NativeAgentClient extends EventEmitter {
     }
 
     if (message.method === 'gesture.shakeDetected') {
-      this.emit('shakeDetected', message.params as unknown as ShakeDetectedEvent)
+      const parsed = shakeDetectedEventSchema.safeParse(message.params)
+      if (parsed.success) {
+        this.emit('shakeDetected', parsed.data)
+      } else {
+        console.warn('[ledge] nativeAgent: malformed shakeDetected params, ignoring.', parsed.error.flatten())
+      }
       return
     }
 
@@ -324,6 +406,10 @@ export class NativeAgentClient extends EventEmitter {
 
     if (message.method === 'gesture.dragEnded') {
       this.emit('dragEnded', message.params ?? {})
+    }
+
+    if (message.method === 'clipboard.changed') {
+      this.emit('clipboardChanged', message.params ?? {})
     }
   }
 
@@ -368,10 +454,14 @@ export class NativeAgentClient extends EventEmitter {
 
       try {
         child.stdin.write(`${JSON.stringify(payload)}\n`)
-      } catch {
+      } catch (error) {
         const pending = this.pending.get(id)
         this.pending.delete(id)
         pending?.reject(helperUnavailableError())
+        this.handleChildUnavailable(
+          child,
+          error instanceof Error ? error.message : 'Native helper stdin write failed'
+        )
       }
     })
   }
@@ -383,6 +473,7 @@ export class NativeAgentClient extends EventEmitter {
 
     this.child = null
     this.stdoutBuffer = ''
+    this.disposeChild(child)
     this.rejectPending(helperUnavailableError(message))
     this.updateStatus({
       nativeHelperAvailable: false,
@@ -390,6 +481,24 @@ export class NativeAgentClient extends EventEmitter {
       lastError: message
     })
     this.scheduleRestart()
+  }
+
+  /**
+   * Detach and kill an abandoned helper. A hung-but-alive process would
+   * otherwise keep streaming stdout notifications (double-reporting every
+   * clipboard change and shake next to its replacement) and clobbering
+   * `lastError` via stderr.
+   */
+  private disposeChild(child: NativeHelperProcess): void {
+    child.stdout.removeAllListeners()
+    child.stderr.removeAllListeners()
+    child.stdin.removeAllListeners()
+    child.removeAllListeners()
+    try {
+      child.kill?.()
+    } catch {
+      // Already dead.
+    }
   }
 
   private rejectPending(error: Error): void {

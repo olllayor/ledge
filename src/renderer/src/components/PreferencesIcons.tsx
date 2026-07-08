@@ -3,6 +3,8 @@
  * SF Symbols-inspired, 24x24 viewBox, strokeWidth 2.
  */
 
+import { useState } from 'react';
+
 /** Sparkles — Shelf Interaction */
 export function IconSparkles() {
   return (
@@ -287,5 +289,66 @@ export function IconLock() {
       <rect x="4" y="11" width="16" height="10" rx="2" />
       <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
+  );
+}
+
+/** Clipboard — Clipboard History */
+export function IconClipboard() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="6" y="4" width="12" height="18" rx="2" />
+      <path d="M9 4V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1" />
+      <path d="M9 12h6M9 16h4" />
+    </svg>
+  );
+}
+
+/**
+ * LedgeMark — full-color app logo for any surface bigger than ~24px.
+ *
+ * Source: src/renderer/public/ledge-mark.png — seeded from build/icon.png by
+ * scripts/build-brand.mjs whenever the brand source is regenerated, so swapping
+ * the logo at build/icon-source.png flows through every consumer automatically.
+ *
+ * Falls back to the inline <IconApp /> mark if the asset is missing (e.g. fresh
+ * checkout before the first `pnpm brand:build`), so the UI never breaks.
+ *
+ * Use this in places that show the full logo (Onboarding hero, About, future
+ * splash). The tiny 12px sidebar slot should keep using <IconApp /> for crisp
+ * vector scaling.
+ */
+export function LedgeMark({
+  size = 96,
+  className,
+  alt = 'Ledge',
+}: {
+  size?: number;
+  className?: string;
+  alt?: string;
+}) {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError) {
+    return <IconApp aria-label={alt} />;
+  }
+
+  return (
+    <img
+      src="./ledge-mark.png"
+      width={size}
+      height={size}
+      alt={alt}
+      className={className}
+      draggable={false}
+      onError={() => setHasError(true)}
+    />
   );
 }

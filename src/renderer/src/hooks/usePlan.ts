@@ -1,36 +1,14 @@
 import { useMemo } from 'react';
-import type { AppState, BillingPlan, ShelfColor } from '@shared/schema';
-import {
-  FREE_RECENT_SHELVES_LIMIT,
-  FREE_SHELF_COLORS,
-  PRO_RECENT_SHELVES_LIMIT,
-  PRO_SHELF_COLORS,
-  isShelfColorAllowed,
-  recentShelvesLimitForPlan,
-} from '@shared/sync';
+import type { AppState } from '@shared/schema';
+import { selectPlan, type PlanInfo } from './selectors';
 
-export interface PlanLimits {
-  plan: BillingPlan;
-  isPro: boolean;
-  recentShelvesLimit: number;
-  recentShelvesUsed: number;
-  availableColors: readonly ShelfColor[];
-  isColorAllowed(color: ShelfColor): boolean;
+/**
+ * Memoized plan/limit projection. The result is recomputed only when
+ * `state.sync.plan` or `state.recentShelves.length` changes; the
+ * `isColorAllowed` callback is a fresh function each render but it's
+ * a pure pass-through so its identity churn doesn't affect any
+ * consumer (no consumer uses it in a dep array).
+ */
+export function usePlan(state: AppState): PlanInfo {
+  return useMemo(() => selectPlan(state), [state.sync.plan, state.recentShelves.length]);
 }
-
-export function usePlan(state: AppState): PlanLimits {
-  return useMemo(() => {
-    const plan: BillingPlan = state.sync.plan;
-    const isPro = plan === 'pro';
-    return {
-      plan,
-      isPro,
-      recentShelvesLimit: recentShelvesLimitForPlan(plan),
-      recentShelvesUsed: state.recentShelves.length,
-      availableColors: isPro ? PRO_SHELF_COLORS : FREE_SHELF_COLORS,
-      isColorAllowed: (color) => isShelfColorAllowed(color, plan),
-    };
-  }, [state.sync.plan, state.recentShelves.length]);
-}
-
-export { FREE_RECENT_SHELVES_LIMIT, FREE_SHELF_COLORS, PRO_RECENT_SHELVES_LIMIT, PRO_SHELF_COLORS };

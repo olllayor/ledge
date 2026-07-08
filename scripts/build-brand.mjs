@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '..')
 const buildDir = resolve(repoRoot, 'build')
@@ -8,6 +8,8 @@ const sourcePath = resolve(buildDir, 'icon-source.png')
 const pngPath = resolve(buildDir, 'icon.png')
 const iconsetDir = resolve(buildDir, 'icon.iconset')
 const icnsPath = resolve(buildDir, 'app.icns')
+const renderPath = resolve(repoRoot, 'src/renderer/public/ledge-mark.png')
+const landingLogoPath = resolve(repoRoot, 'landing/assets/logo.png')
 
 if (!existsSync(sourcePath)) {
   throw new Error(`Brand source is missing at ${sourcePath}`)
@@ -39,6 +41,21 @@ for (const size of sizes) {
 }
 
 execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', icnsPath], {
+  cwd: repoRoot,
+  stdio: 'inherit'
+})
+
+// ── Renderer mark ────────────────────────────────────────────────────────
+// Mirror the 1024px master into the renderer's public/ folder so the React UI
+// can show the same brand at large sizes. Inline <IconApp /> stays for tiny slots.
+mkdirSync(dirname(renderPath), { recursive: true })
+copyFileSync(pngPath, renderPath)
+
+// ── Landing page logo ───────────────────────────────────────────────────
+// Marketing site (landing/) reads /assets/logo.png. Resize the 1024px master
+// to 512px (largest size the landing page actually uses is 34px) and copy it.
+mkdirSync(dirname(landingLogoPath), { recursive: true })
+execFileSync('sips', ['-z', '512', '512', pngPath, '--out', landingLogoPath], {
   cwd: repoRoot,
   stdio: 'inherit'
 })

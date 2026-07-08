@@ -3,6 +3,7 @@ import type { AppState } from '@shared/schema';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { loadRenderer } from './loadRenderer';
 import { resolvePreloadPath } from './preloadPath';
+import { lockDownWebContents } from './webSecurity';
 
 export class ShelfWindow {
   private window: BrowserWindow | null = null;
@@ -33,7 +34,7 @@ export class ShelfWindow {
       webPreferences: {
         preload: resolvePreloadPath(),
         contextIsolation: true,
-        sandbox: false,
+        sandbox: true,
       },
     });
 
@@ -53,6 +54,7 @@ export class ShelfWindow {
       this.window = null;
     });
     await loadRenderer(this.window, 'shelf');
+    lockDownWebContents(this.window);
     return this.window;
   }
 
@@ -90,7 +92,8 @@ export class ShelfWindow {
   }
 
   sendState(state: AppState): void {
-    this.window?.webContents.send(IPC_CHANNELS.stateUpdated, state);
+    if (!this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed()) return;
+    this.window.webContents.send(IPC_CHANNELS.stateUpdated, state);
   }
 
   previewFile(path: string, displayName?: string): boolean {
