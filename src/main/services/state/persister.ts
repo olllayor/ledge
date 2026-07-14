@@ -19,8 +19,9 @@ const persistedStateEnvelopeV1Schema = appStateSchema
   .extend({ version: z.literal(1) })
 const persistedStateEnvelopeV2Schema = persistedStateSchema.extend({ version: z.literal(2) })
 const persistedStateEnvelopeV3Schema = persistedStateSchema.extend({ version: z.literal(3) })
+const persistedStateEnvelopeV4Schema = persistedStateSchema.extend({ version: z.literal(4) })
 
-export const PERSISTED_STATE_VERSION = 3
+export const PERSISTED_STATE_VERSION = 4
 
 export interface StateFileLayout {
   userDataDir: string
@@ -180,14 +181,21 @@ export class StatePersister {
 function migratePersistedState(parsed: unknown, _defaultState: PersistedState): LoadResult {
   if (parsed && typeof parsed === 'object' && 'version' in parsed) {
     const version = (parsed as { version: number }).version
-    if (version === 1) {
-      const envelope = persistedStateEnvelopeV1Schema.parse(parsed)
+
+    if (version === 4) {
+      const envelope = persistedStateEnvelopeV4Schema.parse(parsed)
+      return { state: envelope, didMigrate: false }
+    }
+
+    if (version === 3) {
+      const envelope = persistedStateEnvelopeV3Schema.parse(parsed)
       return {
         state: {
           liveShelf: envelope.liveShelf,
           recentShelves: envelope.recentShelves,
           preferences: envelope.preferences,
-          sync: syncStateSchema.parse({}),
+          sync: envelope.sync,
+          team: { activeTeamId: null },
           clipboardHistory: envelope.clipboardHistory,
           clipboardCategories: envelope.clipboardCategories,
           clipboardSettings: envelope.clipboardSettings
@@ -204,6 +212,7 @@ function migratePersistedState(parsed: unknown, _defaultState: PersistedState): 
           recentShelves: envelope.recentShelves,
           preferences: envelope.preferences,
           sync: envelope.sync,
+          team: { activeTeamId: null },
           clipboardHistory: envelope.clipboardHistory,
           clipboardCategories: envelope.clipboardCategories,
           clipboardSettings: envelope.clipboardSettings
@@ -212,25 +221,29 @@ function migratePersistedState(parsed: unknown, _defaultState: PersistedState): 
       }
     }
 
-    const envelope = persistedStateEnvelopeV3Schema.parse(parsed)
-    return {
-      state: {
-        liveShelf: envelope.liveShelf,
-        recentShelves: envelope.recentShelves,
-        preferences: envelope.preferences,
-        sync: envelope.sync,
-        clipboardHistory: envelope.clipboardHistory,
-        clipboardCategories: envelope.clipboardCategories,
-        clipboardSettings: envelope.clipboardSettings
-      },
-      didMigrate: false
+    if (version === 1) {
+      const envelope = persistedStateEnvelopeV1Schema.parse(parsed)
+      return {
+        state: {
+          liveShelf: envelope.liveShelf,
+          recentShelves: envelope.recentShelves,
+          preferences: envelope.preferences,
+          sync: syncStateSchema.parse({}),
+          team: { activeTeamId: null },
+          clipboardHistory: envelope.clipboardHistory,
+          clipboardCategories: envelope.clipboardCategories,
+          clipboardSettings: envelope.clipboardSettings
+        },
+        didMigrate: true
+      }
     }
   }
 
   return {
     state: {
       ...persistedStateSchema.omit({ sync: true }).parse(parsed),
-      sync: syncStateSchema.parse({})
+      sync: syncStateSchema.parse({}),
+      team: { activeTeamId: null },
     },
     didMigrate: true
   }

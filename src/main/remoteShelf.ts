@@ -44,6 +44,7 @@ export function sanitizeRemoteFileRefs(shelf: ShelfRecord): ShelfRecord {
 export type RemoteShelfDecision =
   | { apply: false; reason: 'no-local'; nextWatermark: number }
   | { apply: false; reason: 'stale'; nextWatermark: number }
+  | { apply: false; reason: 'local-newer'; nextWatermark: number }
   | { apply: true; reason: 'first-contact' | 'fresher' | 'watermark-fresh'; nextWatermark: number };
 
 /**
@@ -89,11 +90,30 @@ export function decideRemoteShelfApply(args: {
   const currentWatermark = args.lastSyncedRemoteUpdatedAt ?? 0;
   const nextWatermark = Math.max(currentWatermark, safeRemoteUpdatedAt);
 
+  // Guard against clobbering the device's own newer-but-not-yet-pushed
+  // edit. `updatedAt` is written to local disk the moment the user touches
+  // a shelf, but the push to the cloud is debounced — a remote snapshot
+  // can reactively arrive in that window. If local carries real content
+  // (non-empty) stamped later than the incoming remote, applying would
+  // silently discard the just-made edit. Refuse; local wins until it
+  // pushes and round-trips. Empty locals are exempt so the intentional
+  // first-contact clock-skew override (cloud is canonical) still holds.
+  const localUpdatedAt = args.local ? Date.parse(args.local.updatedAt) : NaN;
+  const safeLocalUpdatedAt = Number.isFinite(localUpdatedAt) ? localUpdatedAt : 0;
+  const localHasNewerEdit =
+    args.local !== null && args.local.items.length > 0 && safeLocalUpdatedAt > safeRemoteUpdatedAt;
+
   if (args.lastSyncedRemoteUpdatedAt === null) {
+    if (localHasNewerEdit) {
+      return { apply: false, reason: 'local-newer', nextWatermark };
+    }
     return { apply: true, reason: 'first-contact', nextWatermark };
   }
 
   if (safeRemoteUpdatedAt > currentWatermark) {
+    if (localHasNewerEdit) {
+      return { apply: false, reason: 'local-newer', nextWatermark };
+    }
     return { apply: true, reason: 'fresher', nextWatermark };
   }
 

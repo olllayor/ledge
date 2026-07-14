@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, screen } from 'electron'
+import { ipcMain, screen } from 'electron'
 import { z } from 'zod'
 import { IPC_CHANNELS, type ToastPayload } from '@shared/ipc'
 import {
@@ -6,6 +6,7 @@ import {
   preferencePatchSchema,
   shelfRecordSchema,
   syncStatePatchSchema,
+  teamStateSchema,
   type AppState,
   type ShelfItemRecord,
 } from '@shared/schema'
@@ -34,7 +35,9 @@ import type { PeekWindow } from './windows/peekWindow'
 import type { ClipboardMonitor } from './services/clipboardMonitor'
 import type { ShelfItemOps } from './services/shelfItemOps'
 import type { ShelfContextMenus } from './services/contextMenus'
+import type { SecureSessionStore } from './services/secureSessionStore'
 import { decideRemoteShelfApply } from './remoteShelf'
+import { syncSessionSchema } from '@shared/ipc'
 
 export interface IpcRegistrarDeps {
   stateStore: StateStore
@@ -49,6 +52,7 @@ export interface IpcRegistrarDeps {
   contextMenus: ShelfContextMenus
   preferencesSync: PreferencesSyncService
   clipboardIpc: ClipboardIpcController
+  secureSessionStore: SecureSessionStore
   broadcastState(): AppState
   onInactivityTick(): void
   remoteShelfWatermarks: Map<string, number>
@@ -85,15 +89,19 @@ export class IpcRegistrar {
     ipcMain.handle(IPC_CHANNELS.openPermissionSettings, async () =>
       this.deps.nativeAgent.openPermissionSettings(),
     )
-    ipcMain.on(IPC_CHANNELS.showToast, (_event, message: unknown, kind: unknown) => {
+    ipcMain.on(IPC_CHANNELS.showToast, (event, message: unknown, kind: unknown) => {
       const parsedMessage = toastMessageSchema.safeParse(message)
       if (!parsedMessage.success) return
       const parsedKind = toastKindSchema.safeParse(kind ?? 'info')
       if (!parsedKind.success) return
       const payload: ToastPayload = { message: parsedMessage.data, kind: parsedKind.data }
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (window.isDestroyed()) continue
-        window.webContents.send(IPC_CHANNELS.showToast, payload)
+      // Route the toast back to the window that raised it. Broadcasting to
+      // every window meant a toast fired from the Peek / Notch overlay was
+      // rendered only by the (often hidden) Shelf window's ToastHost — the
+      // user saw nothing. The originating window now always renders its
+      // own toast (Peek/Notch mount their own ToastHost).
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(IPC_CHANNELS.showToast, payload)
       }
     })
     ipcMain.on(IPC_CHANNELS.shelfInteractionPing, () => this.deps.onInactivityTick())
@@ -199,6 +207,17 @@ export class IpcRegistrar {
     ipcMain.handle(IPC_CHANNELS.setSyncState, async (_event, patch: unknown) => {
       this.deps.stateStore.setSyncState(syncStatePatchSchema.parse(patch))
       return this.deps.broadcastState()
+    })
+    ipcMain.handle(IPC_CHANNELS.setTeamState, async (_event, patch: unknown) => {
+      this.deps.stateStore.setTeamState(teamStateSchema.partial().parse(patch))
+      return this.deps.broadcastState()
+    })
+    ipcMain.handle(IPC_CHANNELS.syncSessionGet, async () => this.deps.secureSessionStore.get())
+    ipcMain.handle(IPC_CHANNELS.syncSessionSet, async (_event, session: unknown) => {
+      this.deps.secureSessionStore.set(syncSessionSchema.parse(session))
+    })
+    ipcMain.handle(IPC_CHANNELS.syncSessionClear, async () => {
+      this.deps.secureSessionStore.clear()
     })
     ipcMain.handle(IPC_CHANNELS.getSyncBackfillCandidates, async () =>
       this.deps.stateStore.getAllShelves(),

@@ -1,15 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { shelfItemSchema } from "./sharedSchemas";
-
-const preferencesValues = v.object({
-  launchAtLogin: v.boolean(),
-  shakeEnabled: v.boolean(),
-  shakeSensitivity: v.union(v.literal("gentle"), v.literal("balanced"), v.literal("firm")),
-  excludedBundleIds: v.array(v.string()),
-  globalShortcut: v.string(),
-  hasSeenShelfLimitMigration: v.boolean(),
-});
+import { shelfItemSchema, preferencesValues } from "./sharedSchemas";
 
 export default defineSchema({
   users: defineTable({
@@ -99,6 +90,7 @@ export default defineSchema({
     imageStorageBytes: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
+    itemsMigratedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_user_and_shelf", ["userId", "shelfId"])
@@ -144,6 +136,64 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_user_and_created", ["userId", "createdAt"]),
 
+  // Phase 1: Per-item shelf storage for team-ready sync.
+  // - teamId: empty string "" for personal shelves, actual team ID for team shelves.
+  //   Convex cannot index on null, so we use "" as sentinel.
+  // - order: v.string() for lexorank (fractional-indexing) to avoid conflict storms
+  //   on reorder. NOT v.number().
+  // - version + serverUpdatedAt for LWW. NOT localUpdatedAt (client timestamps untrusted).
+  // - deletedAt for soft-delete tombstones.
+  shelfItems: defineTable({
+    shelfId: v.string(),
+    teamId: v.string(),
+    itemId: v.string(),
+    createdBy: v.id("users"),
+    updatedBy: v.optional(v.id("users")),
+    kind: v.union(
+      v.literal("file"),
+      v.literal("folder"),
+      v.literal("imageAsset"),
+      v.literal("text"),
+      v.literal("url"),
+      v.literal("color"),
+      v.literal("code"),
+    ),
+    title: v.string(),
+    subtitle: v.string(),
+    preview: v.object({
+      summary: v.string(),
+      detail: v.string(),
+    }),
+    order: v.string(),
+    file: v.optional(v.object({
+      originalPath: v.string(),
+      resolvedPath: v.string(),
+      isStale: v.boolean(),
+      isMissing: v.boolean(),
+    })),
+    mimeType: v.optional(v.string()),
+    text: v.optional(v.string()),
+    savedFilePath: v.optional(v.string()),
+    url: v.optional(v.string()),
+    cloudStorageId: v.optional(v.string()),
+    cloudStorageBytes: v.optional(v.number()),
+    hex: v.optional(v.string()),
+    name: v.optional(v.string()),
+    codeText: v.optional(v.string()),
+    language: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+    storageBytes: v.optional(v.number()),
+    localUpdatedAt: v.optional(v.string()),
+    version: v.number(),
+    serverUpdatedAt: v.number(),
+    deletedAt: v.optional(v.number()),
+    migratedAt: v.optional(v.number()),
+  })
+    .index("by_team_shelf", ["teamId", "shelfId"])
+    .index("by_team_shelf_updated", ["teamId", "shelfId", "serverUpdatedAt"])
+    .index("by_team_shelf_item", ["teamId", "shelfId", "itemId"])
+    .index("by_migrated", ["migratedAt"]),
+
   imageUploadEvents: defineTable({
     userId: v.id("users"),
     bytes: v.number(),
@@ -171,6 +221,48 @@ export default defineSchema({
     // Cleanup cron: deletes events older than 24h. Indexing by
     // `createdAt` keeps the take() bounded to old candidates.
     .index("by_createdAt", ["createdAt"]),
+
+  // Phase 2: Team collaboration tables.
+  // - teamId joins teams, team_members, team_invitations, and scopes shelfItems.
+  // - team_members.role controls permissions (admin vs member).
+
+  teams: defineTable({
+    name: v.string(),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_created_by", ["createdBy"]),
+
+  teamMembers: defineTable({
+    teamId: v.id("teams"),
+    userId: v.id("users"),
+    role: v.union(v.literal("admin"), v.literal("member")),
+    joinedAt: v.number(),
+  })
+    .index("by_team", ["teamId"])
+    .index("by_user", ["userId"])
+    .index("by_team_and_user", ["teamId", "userId"]),
+
+  teamInvitations: defineTable({
+    teamId: v.id("teams"),
+    email: v.string(),
+    invitedBy: v.id("users"),
+    role: v.union(v.literal("admin"), v.literal("member")),
+    token: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("rejected"),
+      v.literal("revoked"),
+    ),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+    respondedAt: v.optional(v.number()),
+  })
+    .index("by_team", ["teamId"])
+    .index("by_token", ["token"])
+    .index("by_email", ["email"])
+    .index("by_email_and_status", ["email", "status"]),
 
   // Dedupe key for inbound billing webhooks. We persist the Lemon Squeezy
   // event id (or a synthetic id derived from subscription id + status) so

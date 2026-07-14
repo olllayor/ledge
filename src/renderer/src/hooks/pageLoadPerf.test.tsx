@@ -130,6 +130,7 @@ function makeAppState(overrides: Partial<AppState> = {}): AppState {
       peekHotkey: '',
       syntheticPasteEnabled: false,
     },
+    team: { activeTeamId: null },
     ...overrides,
   } as AppState;
 }

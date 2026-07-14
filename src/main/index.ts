@@ -24,6 +24,7 @@ import { resolveAllowedAssetPath } from './services/assetPathResolver'
 import { broadcastToast, createThrottledToast } from './services/toastBroadcaster'
 import { IpcRegistrar } from './ipc'
 import { ClipboardIpcController } from './services/clipboard/ipcController'
+import { SecureSessionStore } from './services/secureSessionStore'
 import { FEATURE_FLAGS } from './services/featureFlags'
 import { NotchDropoutWindow } from './windows/notchDropoutWindow'
 import { NotchHoverMonitor } from './services/notchHoverMonitor'
@@ -45,6 +46,7 @@ const QUIT_FLUSH_TIMEOUT_MS = 1500
  * the most recent remote, which is idempotent.
  */
 const remoteShelfWatermarks = new Map<string, number>()
+const secureSessionStore = new SecureSessionStore()
 
 // Module-scope wiring. Filled in by `app.whenReady()`.
 let stateStore: StateStore
@@ -335,8 +337,10 @@ app.whenReady().then(async () => {
       quickPasteWindow,
       peekWindow,
       notchDropoutWindow: FEATURE_FLAGS.useNotchDropout ? (notchDropoutWindow ?? undefined) : undefined,
-      broadcastState: () => broadcastState()
+      broadcastState: () => broadcastState(),
+      reregisterShortcuts: () => preferencesSync.sync()
     }),
+    secureSessionStore,
     broadcastState: () => broadcastState(),
     onInactivityTick: () => tickInactivity(),
     remoteShelfWatermarks,

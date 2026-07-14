@@ -1,4 +1,6 @@
 import { IconLock, IconStar } from './PreferencesIcons';
+import { useSync } from '../providers/SyncProvider';
+import { openProCheckout } from '../lib/proCheckout';
 
 interface ProUpgradePromptProps {
   message: string;
@@ -7,11 +9,9 @@ interface ProUpgradePromptProps {
 }
 
 export function ProUpgradePrompt({ message, ctaLabel = 'Upgrade to Pro', source }: ProUpgradePromptProps) {
+  const { email } = useSync();
   const handleClick = () => {
-    if (typeof window !== 'undefined' && import.meta.env.DEV) {
-      console.log('[analytics] pro_upgrade_clicked', { source: source ?? 'unknown' });
-    }
-    window.open('https://ledge.app/pro', '_blank');
+    openProCheckout({ email, source });
   };
 
   return (

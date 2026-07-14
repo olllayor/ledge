@@ -66,6 +66,28 @@ export async function storageBytesUsed(ctx: QueryCtx | MutationCtx, userId: Id<"
   return assets.reduce((total, asset) => total + asset.bytes, 0);
 }
 
+export async function assertTeamPermission(
+  ctx: QueryCtx | MutationCtx,
+  teamId: Id<"teams">,
+  userId: Id<"users">,
+  requiredRole?: "admin" | "member",
+): Promise<Doc<"teamMembers">> {
+  const membership = await ctx.db
+    .query("teamMembers")
+    .withIndex("by_team_and_user", (q) => q.eq("teamId", teamId).eq("userId", userId))
+    .unique();
+
+  if (!membership) {
+    throw new ConvexError("You are not a member of this team.");
+  }
+
+  if (requiredRole === "admin" && membership.role !== "admin") {
+    throw new ConvexError("Admin permission required.");
+  }
+
+  return membership;
+}
+
 export async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);

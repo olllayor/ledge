@@ -8,6 +8,7 @@ import type {
   PreferencesRecord,
   ShelfRecord,
   SyncStatePatch,
+  TeamState,
   ClipboardCategory,
   ClipboardEntry,
   ClipboardSettings,
@@ -74,7 +75,19 @@ export const IPC_CHANNELS = {
   notchDropoutHide: 'ledge:notch-dropout:hide',
   notchDropoutStateChanged: 'ledge:notch-dropout:state-changed',
   notchDropoutDragState: 'ledge:notch-dropout:drag-state',
+  // ---- Team sharing ----
+  setTeamState: 'ledge:set-team-state',
+  // ---- Secure cloud-sync session (OS-keychain backed, main process) ----
+  syncSessionGet: 'ledge:sync-session:get',
+  syncSessionSet: 'ledge:sync-session:set',
+  syncSessionClear: 'ledge:sync-session:clear',
 } as const;
+
+export const syncSessionSchema = z.object({
+  sessionToken: z.string(),
+  email: z.string(),
+});
+export type SyncSession = z.infer<typeof syncSessionSchema>;
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -211,6 +224,11 @@ export interface LedgeAPI {
   clipboardPeekShow(): void;
   clipboardPeekHide(): void;
   onClipboardPeekHint(listener: (hint: ClipboardPeekHint) => void): () => void;
+  setTeamState(patch: Partial<TeamState>): Promise<AppState>;
+  // ---- Secure cloud-sync session ----
+  getSyncSession(): Promise<SyncSession>;
+  setSyncSession(session: SyncSession): Promise<void>;
+  clearSyncSession(): Promise<void>;
   // ---- Notch dropout ----
   notchDropoutShow(): void;
   notchDropoutHide(): void;

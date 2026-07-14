@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { PeekWindowView } from './components/PeekWindowView';
+import { ToastHost } from './components/ToastHost';
 import './styles.css';
 
 const container = document.getElementById('root');
@@ -12,5 +13,6 @@ if (!container) {
 createRoot(container).render(
   <StrictMode>
     <PeekWindowView />
+    <ToastHost />
   </StrictMode>,
 );

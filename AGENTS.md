@@ -59,7 +59,7 @@ Swift binary communicates via stdout JSON lines. Commands sent via stdin. Handle
 
 Cloud sync is optional — local shelf works without it. Key env vars:
 - `VITE_CONVEX_URL` — for dev with sync
-- `RESEND_API_KEY`, `LEDGE_AUTH_EMAIL_FROM` — email OTP
+- `RESEND_API_KEY`, `EMAIL_FROM` — email OTP (Resend)
 - `LEMON_SQUEEZY_API_KEY`, `LEMON_SQUEEZY_WEBHOOK_SECRET` — billing
 
 Run `pnpm convex:dev` for local Convex dev. Tests in `convex/*.test.ts` use `convex-test` with `@edge-runtime/vm`.

@@ -52,16 +52,21 @@ jobs:
 
       - name: Resolve diff window
         id: window
+        env:
+          # Pass dispatch inputs via env rather than splicing ${{ }} into
+          # the shell — avoids the Actions script-injection anti-pattern.
+          SINCE_INPUT: ${{ github.event.inputs.since }}
+          UNTIL_INPUT: ${{ github.event.inputs.until }}
         run: |
           set -euo pipefail
-          if [ -n "${{ github.event.inputs.since }}" ]; then
-            SINCE="${{ github.event.inputs.since }}"
+          if [ -n "${SINCE_INPUT}" ]; then
+            SINCE="${SINCE_INPUT}"
           else
             # Yesterday at 00:00 UTC.
             SINCE="$(date -u -d 'yesterday 00:00:00' +'%Y-%m-%dT%H:%M:%SZ')"
           fi
-          if [ -n "${{ github.event.inputs.until }}" ]; then
-            UNTIL="${{ github.event.inputs.until }}"
+          if [ -n "${UNTIL_INPUT}" ]; then
+            UNTIL="${UNTIL_INPUT}"
           else
             # Today at 00:00 UTC.
             UNTIL="$(date -u -d 'today 00:00:00' +'%Y-%m-%dT%H:%M:%SZ')"
@@ -74,10 +79,12 @@ jobs:
         id: build
         env:
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          # Step outputs carry the (possibly user-supplied) window values;
+          # read them via env, not inline ${{ }}, to keep the shell safe.
+          SINCE: ${{ steps.window.outputs.since }}
+          UNTIL: ${{ steps.window.outputs.until }}
         run: |
           set -euo pipefail
-          SINCE="${{ steps.window.outputs.since }}"
-          UNTIL="${{ steps.window.outputs.until }}"
           echo "Filtering commits with author/committer date in [${SINCE}, ${UNTIL})"
           node scripts/build-changelog.mjs --since "${SINCE}" --until "${UNTIL}"
           if [ "${DRY_RUN}" = "true" ]; then

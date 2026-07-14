@@ -85,8 +85,12 @@ class MutationQueue {
 }
 
 export function SyncProvider({ children }: { children: ReactNode }) {
-  const [sessionToken, setSessionToken] = useState(() => localStorage.getItem(SESSION_KEY) ?? '');
-  const [email, setEmail] = useState(() => localStorage.getItem(EMAIL_KEY) ?? '');
+  // The session token is a long-lived bearer credential, so it is held in
+  // the main process encrypted via the OS keychain (see SecureSessionStore)
+  // rather than in renderer localStorage. It loads asynchronously on mount,
+  // so both start empty and Convex queries stay 'skip' until it arrives.
+  const [sessionToken, setSessionToken] = useState('');
+  const [email, setEmail] = useState('');
   const [localState, setLocalState] = useState<Awaited<ReturnType<typeof window.ledge.getState>> | null>(null);
   // Map of remote shelfId -> last applied localUpdatedAt, so we apply each
   // remote shelf exactly once per change rather than only ever syncing the
@@ -97,6 +101,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef(new MutationQueue());
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingShelfRef = useRef<{ shelf: NonNullable<NonNullable<typeof localState>['liveShelf']>; updatedAt: string } | null>(null);
+  // Snapshot of shelf ids present locally, so we can detect when a shelf is
+  // permanently discarded on this device (evicted from Recents or cleared)
+  // and reclaim its cloud row. `null` until the first observation so a
+  // fresh launch never mistakes "not loaded yet" for "deleted".
+  const knownLocalShelfIdsRef = useRef<Set<string> | null>(null);
 
   const overview = useQuery(api.sync.overview, sessionToken ? { sessionToken } : 'skip') as SyncOverview | undefined;
   const remoteShelves = useQuery(api.sync.listShelves, sessionToken ? { sessionToken } : 'skip') as
@@ -112,6 +121,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const refreshSessionMutation = useMutation(api.auth.refreshSession);
   const registerDeviceMutation = useMutation(api.sync.registerDevice);
   const upsertShelfMutation = useMutation(api.sync.upsertShelf);
+  const deleteShelfMutation = useMutation(api.sync.deleteShelf);
   const patchPreferencesMutation = useMutation(api.sync.patchPreferences);
   const refreshEntitlementsAction = useAction(api.billing.refreshEntitlements);
 
@@ -120,6 +130,35 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void window.ledge.getState().then(setLocalState);
     return window.ledge.subscribeState(setLocalState);
+  }, []);
+
+  // Load the encrypted session from the main process on mount, migrating
+  // any legacy plaintext token that older builds wrote to localStorage.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const stored = await window.ledge.getSyncSession();
+      let { sessionToken: token, email: storedEmail } = stored;
+
+      const legacyToken = localStorage.getItem(SESSION_KEY);
+      const legacyEmail = localStorage.getItem(EMAIL_KEY);
+      if (!token && legacyToken) {
+        token = legacyToken;
+        storedEmail = legacyEmail ?? '';
+        await window.ledge.setSyncSession({ sessionToken: token, email: storedEmail });
+      }
+      // Always purge the plaintext copy once migration is handled.
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(EMAIL_KEY);
+
+      if (!cancelled && token) {
+        setSessionToken(token);
+        setEmail(storedEmail);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -166,6 +205,41 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       }),
     );
   }, [localState?.sync.deviceId, registerDeviceMutation, sessionToken]);
+
+  // Reclaim cloud storage for shelves discarded on this device. A shelf
+  // that leaves the local set (Recents eviction, clear, or close) is
+  // deleted from Convex; if another device still has it, that device's
+  // next upsert re-creates it, so the delete only sticks when nothing
+  // references the shelf anymore.
+  useEffect(() => {
+    if (!localState) {
+      return;
+    }
+    const currentIds = new Set<string>();
+    if (localState.liveShelf) {
+      currentIds.add(localState.liveShelf.id);
+    }
+    for (const shelf of localState.recentShelves) {
+      currentIds.add(shelf.id);
+    }
+
+    const previousIds = knownLocalShelfIdsRef.current;
+    knownLocalShelfIdsRef.current = currentIds;
+    if (!previousIds || !sessionToken) {
+      return;
+    }
+
+    for (const id of previousIds) {
+      if (!currentIds.has(id)) {
+        queueRef.current.enqueue(() =>
+          deleteShelfMutation({ sessionToken, shelfId: id }).catch(() => {
+            // Best-effort reclamation; a failed delete simply leaves the
+            // row to be retried on a future discard or reconciliation.
+          }),
+        );
+      }
+    }
+  }, [localState, sessionToken, deleteShelfMutation]);
 
   const pushPendingShelf = useCallback(() => {
     const pending = pendingShelfRef.current;
@@ -349,8 +423,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         throw new Error("Invalid or expired sign-in code.");
       }
       const success = result as { sessionToken: string; email: string };
-      localStorage.setItem(SESSION_KEY, success.sessionToken);
-      localStorage.setItem(EMAIL_KEY, success.email);
+      await window.ledge.setSyncSession({ sessionToken: success.sessionToken, email: success.email });
       setSessionToken(success.sessionToken);
       setEmail(success.email);
     },
@@ -361,8 +434,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     if (sessionToken) {
       await signOutMutation({ sessionToken });
     }
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem(EMAIL_KEY);
+    await window.ledge.clearSyncSession();
     setSessionToken('');
     setEmail('');
     await window.ledge.setSyncState({ enabled: false, status: 'signedOut', signedInEmail: undefined });

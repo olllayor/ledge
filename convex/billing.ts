@@ -87,14 +87,19 @@ export const applyEntitlement = internalMutation({
       .query("entitlements")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .first();
+    // Preserve existing Lemon Squeezy identifiers when the caller omits
+    // them. A webhook event (subscription payment, cancellation) carries
+    // only a subset of these fields; without the `?? existing` fallback it
+    // would overwrite the stored license key / order id with `undefined`
+    // and silently detach the purchase from the account.
     const patch = {
       plan: args.plan,
       status: args.status,
-      lemonSqueezyCustomerId: args.lemonSqueezyCustomerId,
-      lemonSqueezySubscriptionId: args.lemonSqueezySubscriptionId,
-      lemonSqueezyOrderId: args.lemonSqueezyOrderId,
-      lemonSqueezyLicenseKey: args.lemonSqueezyLicenseKey,
-      renewsAt: args.renewsAt,
+      lemonSqueezyCustomerId: args.lemonSqueezyCustomerId ?? existing?.lemonSqueezyCustomerId,
+      lemonSqueezySubscriptionId: args.lemonSqueezySubscriptionId ?? existing?.lemonSqueezySubscriptionId,
+      lemonSqueezyOrderId: args.lemonSqueezyOrderId ?? existing?.lemonSqueezyOrderId,
+      lemonSqueezyLicenseKey: args.lemonSqueezyLicenseKey ?? existing?.lemonSqueezyLicenseKey,
+      renewsAt: args.renewsAt ?? existing?.renewsAt,
       updatedAt: Date.now(),
     };
 
@@ -107,6 +112,63 @@ export const applyEntitlement = internalMutation({
       userId: args.userId,
       ...patch,
     });
+  },
+});
+
+// Admin-only: grant (or revoke) a Pro entitlement by email, bypassing
+// Lemon Squeezy. `internalMutation` is NOT callable from clients — only via
+// `npx convex run billing:grantProByEmail '{"email":"..."}'` or the
+// dashboard — so this cannot be used to self-upgrade. Creates the user row
+// if they have never signed in yet, so the grant is already in place the
+// first time they authenticate.
+export const grantProByEmail = internalMutation({
+  args: {
+    email: v.string(),
+    plan: v.optional(v.union(v.literal("free"), v.literal("pro"))),
+  },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    if (!email) {
+      throw new ConvexError("Email is required.");
+    }
+    const plan = args.plan ?? "pro";
+
+    let user = await ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .unique();
+    if (!user) {
+      const userId = await ctx.db.insert("users", {
+        email,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      user = await ctx.db.get(userId);
+    }
+    if (!user) {
+      throw new ConvexError("Failed to resolve user.");
+    }
+
+    const status = plan === "pro" ? ("active" as const) : ("inactive" as const);
+    const existing = await ctx.db
+      .query("entitlements")
+      .withIndex("by_user", (q) => q.eq("userId", user!._id))
+      .first();
+
+    let entitlementId;
+    if (existing) {
+      await ctx.db.patch(existing._id, { plan, status, updatedAt: Date.now() });
+      entitlementId = existing._id;
+    } else {
+      entitlementId = await ctx.db.insert("entitlements", {
+        userId: user._id,
+        plan,
+        status,
+        updatedAt: Date.now(),
+      });
+    }
+
+    return { email, plan, userId: user._id, entitlementId };
   },
 });
 
@@ -153,5 +215,6 @@ async function fetchLemonSqueezyEntitlement(
   return {
     active: response.ok && json.data?.attributes?.status !== "refunded",
     customerId: json.data?.attributes?.customer_id ? String(json.data.attributes.customer_id) : undefined,
+    userEmail: json.data?.attributes?.user_email ? String(json.data.attributes.user_email) : undefined,
   };
 }

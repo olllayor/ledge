@@ -72,6 +72,7 @@ http.route({
       lemonSqueezyCustomerId: attributes.customer_id ? String(attributes.customer_id) : undefined,
       lemonSqueezySubscriptionId: payload.data?.id ? String(payload.data.id) : undefined,
       lemonSqueezyOrderId: attributes.order_id ? String(attributes.order_id) : undefined,
+      lemonSqueezyLicenseKey: attributes.key ? String(attributes.key) : undefined,
       renewsAt: attributes.renews_at ? Date.parse(String(attributes.renews_at)) : undefined,
     });
 

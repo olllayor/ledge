@@ -46,6 +46,7 @@ async function buildShelfStore(): Promise<{
     sync: defaultSyncStateRecord(),
     clipboardHistory: [],
     clipboardCategories: [],
+    team: { activeTeamId: null },
     clipboardSettings: defaultClipboardSettingsRecord()
   }
   const shelves = new ShelfStore(persister, () => state)

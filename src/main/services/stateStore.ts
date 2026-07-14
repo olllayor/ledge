@@ -3,6 +3,7 @@ import { ShelfStore } from './state/shelfStore'
 import { ClipboardStore, type ClipboardEntryInput } from './state/clipboardStore'
 import { PreferencesStore } from './state/preferencesStore'
 import { SyncStore } from './state/syncStore'
+import { TeamStore } from './state/teamStore'
 import {
   StatePersister,
   buildStateFileLayout,
@@ -44,6 +45,7 @@ export class StateStore {
   readonly clipboard: ClipboardStore
   readonly preferences: PreferencesStore
   readonly sync: SyncStore
+  readonly team: TeamStore
 
   private readonly persister: StatePersister
   private readonly persisted: PersistedState
@@ -59,6 +61,7 @@ export class StateStore {
       recentShelves: [],
       preferences: defaultPreferences(),
       sync: defaultSyncStateRecord(),
+      team: { activeTeamId: null },
       clipboardHistory: [],
       clipboardCategories: [],
       clipboardSettings: defaultClipboardSettingsRecord()
@@ -77,6 +80,7 @@ export class StateStore {
     this.clipboard = new ClipboardStore(this.persister, () => this.persisted)
     this.preferences = new PreferencesStore(this.persister, () => this.persisted)
     this.sync = new SyncStore(this.persister, () => this.persisted)
+    this.team = new TeamStore(this.persister, () => this.persisted)
 
     if (loaded.didMigrate) {
       this.persister.save(this.persisted)
@@ -185,6 +189,16 @@ export class StateStore {
 
   currentPlan() {
     return this.sync.get().plan
+  }
+
+  // ---- Team facade (delegated to `TeamStore`) ----
+
+  getTeamState() {
+    return this.team.get()
+  }
+
+  setTeamState(patch: Parameters<TeamStore['set']>[0]) {
+    return this.team.set(patch)
   }
 
   // ---- Clipboard facade (delegated to `ClipboardStore`) ----

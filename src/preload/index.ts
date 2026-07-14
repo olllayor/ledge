@@ -12,6 +12,7 @@ import {
   clipboardQuickPastePasteInputSchema,
   clipboardSettingsUpdateInputSchema,
   clipboardStartItemDragInputSchema,
+  syncSessionSchema,
   toastPayloadSchema,
   type LedgeAPI,
   type StateListener,
@@ -28,6 +29,8 @@ import {
   preferencePatchSchema,
   preferencesRecordSchema,
   shelfRecordSchema,
+  syncStatePatchSchema,
+  teamStateSchema,
 } from '@shared/schema';
 
 const api: LedgeAPI = {
@@ -61,7 +64,9 @@ const api: LedgeAPI = {
     );
   },
   async setSyncState(patch) {
-    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.setSyncState, patch));
+    return appStateSchema.parse(
+      await ipcRenderer.invoke(IPC_CHANNELS.setSyncState, syncStatePatchSchema.parse(patch)),
+    );
   },
   async getSyncBackfillCandidates() {
     return z.array(shelfRecordSchema).parse(await ipcRenderer.invoke(IPC_CHANNELS.getSyncBackfillCandidates));
@@ -81,7 +86,7 @@ const api: LedgeAPI = {
     return permissionStatusSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.getPermissionStatus));
   },
   async openPermissionSettings() {
-    return ipcRenderer.invoke(IPC_CHANNELS.openPermissionSettings);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.openPermissionSettings)) as boolean;
   },
   startItemDrag(itemId) {
     return ipcRenderer.sendSync(IPC_CHANNELS.startItemDrag, itemId) as boolean;
@@ -90,19 +95,19 @@ const api: LedgeAPI = {
     return ipcRenderer.sendSync(IPC_CHANNELS.startItemsDrag, itemIds) as boolean;
   },
   async previewItem(itemId) {
-    return ipcRenderer.invoke(IPC_CHANNELS.previewItem, itemId);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.previewItem, itemId)) as boolean;
   },
   async revealItem(itemId) {
-    return ipcRenderer.invoke(IPC_CHANNELS.revealItem, itemId);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.revealItem, itemId)) as boolean;
   },
   async openItem(itemId) {
-    return ipcRenderer.invoke(IPC_CHANNELS.openItem, itemId);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.openItem, itemId)) as boolean;
   },
   async copyItem(itemId) {
-    return ipcRenderer.invoke(IPC_CHANNELS.copyItem, itemId);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.copyItem, itemId)) as boolean;
   },
   async saveItem(itemId) {
-    return ipcRenderer.invoke(IPC_CHANNELS.saveItem, itemId);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.saveItem, itemId)) as boolean;
   },
   async removeItem(itemId) {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.removeItem, itemId));
@@ -119,13 +124,13 @@ const api: LedgeAPI = {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.reorderItems, parsed));
   },
   async shareShelfItems(itemIds) {
-    return ipcRenderer.invoke(IPC_CHANNELS.shareShelfItems, itemIds);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.shareShelfItems, itemIds)) as boolean;
   },
   async showItemContextMenu(itemId) {
-    return ipcRenderer.invoke(IPC_CHANNELS.showItemContextMenu, itemId);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.showItemContextMenu, itemId)) as boolean;
   },
   async showShelfContextMenu() {
-    return ipcRenderer.invoke(IPC_CHANNELS.showShelfContextMenu);
+    return (await ipcRenderer.invoke(IPC_CHANNELS.showShelfContextMenu)) as boolean;
   },
   showToast(message, kind: ToastKind = 'info') {
     ipcRenderer.send(IPC_CHANNELS.showToast, message, kind);
@@ -263,6 +268,21 @@ const api: LedgeAPI = {
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.clipboardPeekHint, wrapped);
     };
+  },
+  // ---- Team sharing ----
+  async setTeamState(patch) {
+    const parsed = teamStateSchema.partial().parse(patch);
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.setTeamState, parsed));
+  },
+  // ---- Secure cloud-sync session ----
+  async getSyncSession() {
+    return syncSessionSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.syncSessionGet));
+  },
+  async setSyncSession(session) {
+    await ipcRenderer.invoke(IPC_CHANNELS.syncSessionSet, syncSessionSchema.parse(session));
+  },
+  async clearSyncSession() {
+    await ipcRenderer.invoke(IPC_CHANNELS.syncSessionClear);
   },
   // ---- Notch dropout ----
   notchDropoutShow() {

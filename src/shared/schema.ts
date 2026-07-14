@@ -191,12 +191,19 @@ export const defaultClipboardSettings = {
   syntheticPasteEnabled: false,
 };
 
+export const teamStateSchema = z.object({
+  activeTeamId: z.string().nullable().default(null),
+});
+
+export type TeamState = z.infer<typeof teamStateSchema>;
+
 export const appStateSchema = z.object({
   liveShelf: shelfRecordSchema.nullable(),
   recentShelves: z.array(shelfRecordSchema).max(10).default([]),
   preferences: preferencesRecordSchema,
   permissionStatus: permissionStatusSchema,
   sync: syncStateSchema.default(defaultSyncState),
+  team: teamStateSchema.default({ activeTeamId: null }),
   clipboardHistory: z.array(clipboardEntrySchema).default([]),
   clipboardCategories: z.array(clipboardCategorySchema).default([]),
   clipboardSettings: clipboardSettingsSchema.default(defaultClipboardSettings),

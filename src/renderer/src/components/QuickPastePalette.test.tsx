@@ -67,7 +67,8 @@ function buildState(): AppState {
       quickPasteHotkey: 'CommandOrControl+Shift+V',
       peekHotkey: '',
       syntheticPasteEnabled: false
-    }
+    },
+    team: { activeTeamId: null }
   };
 }
 

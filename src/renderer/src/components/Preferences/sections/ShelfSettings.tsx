@@ -1,5 +1,7 @@
 import type { AppState } from '@shared/schema';
 import { usePlan } from '../../../hooks/usePlan';
+import { useSync } from '../../../providers/SyncProvider';
+import { openProCheckout } from '../../../lib/proCheckout';
 import { ProBadge, ProUpgradePrompt } from '../../ProUpgradePrompt';
 import { IconMonitor, IconSparkles } from '../../PreferencesIcons';
 import { SettingsGroup, SettingsRow, Toggle, Picker, type ShowToast } from '../primitives';
@@ -7,6 +9,7 @@ import { SettingsGroup, SettingsRow, Toggle, Picker, type ShowToast } from '../p
 
 export function ShelfSettings({ state, showToast }: { state: AppState; showToast: ShowToast }) {
   const plan = usePlan(state);
+  const { email } = useSync();
   const interaction = state.preferences.shelfInteraction ?? {};
   const isPro = plan.isPro;
   const autoCloseEnabled = interaction.autoCloseShelf ?? false;
@@ -63,7 +66,7 @@ export function ShelfSettings({ state, showToast }: { state: AppState; showToast
               <button
                 className="settings-cta-small"
                 type="button"
-                onClick={() => window.open('https://ledge.app/pro', '_blank')}
+                onClick={() => openProCheckout({ email, source: 'shelf_recents_cap' })}
               >
                 Get more
               </button>

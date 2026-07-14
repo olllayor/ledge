@@ -10,12 +10,14 @@ import {
   IconSparkles,
   IconStar,
   IconClipboard,
+  IconTeam,
 } from './PreferencesIcons';
 import { GeneralSettings } from './Preferences/sections/GeneralSettings';
 import { ShelfSettings } from './Preferences/sections/ShelfSettings';
 import { ActivationSettings } from './Preferences/sections/ActivationSettings';
 import { ClipboardSettings } from './Preferences/sections/ClipboardSettings';
 import { CloudSyncSettings } from './Preferences/sections/CloudSyncSettings';
+import { TeamSettings } from './Preferences/sections/TeamSettings';
 import { ProSettings } from './Preferences/sections/ProSettings';
 import { AboutSettings } from './Preferences/sections/AboutSettings';
 
@@ -35,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'activation', label: 'Activation', icon: <IconBolt /> },
   { id: 'clipboard', label: 'Clipboard', icon: <IconClipboard /> },
   { id: 'cloud', label: 'Cloud Sync', icon: <IconCloud /> },
+  { id: 'teams', label: 'Teams', icon: <IconTeam /> },
   { id: 'pro', label: 'Ledge Pro', icon: <IconStar /> },
   { id: 'about', label: 'About', icon: <IconInfo /> },
 ];
@@ -63,6 +66,7 @@ export function PreferencesView({ state }: PreferencesViewProps) {
     activation: { title: 'Activation', subtitle: 'Choose how to open shelves — shake, shortcut, or tray.' },
     clipboard: { title: 'Clipboard', subtitle: 'History, quick paste, and the floating peek window.' },
     cloud: { title: 'Cloud Sync', subtitle: 'Sync your shelves across devices.' },
+    teams: { title: 'Teams', subtitle: 'Create teams and invite collaborators.' },
     pro: { title: 'Ledge Pro', subtitle: 'Upgrade for higher limits and cloud image storage.' },
     about: { title: 'About Ledge', subtitle: 'Version, links, and acknowledgments.' },
   };
@@ -108,6 +112,7 @@ export function PreferencesView({ state }: PreferencesViewProps) {
           {activeSection === 'activation' && <ActivationSettings state={state} showToast={showToast} />}
           {activeSection === 'clipboard' && <ClipboardSettings state={state} showToast={showToast} />}
           {activeSection === 'cloud' && <CloudSyncSettings state={state} showToast={showToast} />}
+          {activeSection === 'teams' && <TeamSettings state={state} showToast={showToast} />}
           {activeSection === 'pro' && <ProSettings state={state} showToast={showToast} />}
           {activeSection === 'about' && <AboutSettings />}
         </div>

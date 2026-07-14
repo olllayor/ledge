@@ -8,7 +8,7 @@ const modules = import.meta.glob("./**/*.ts");
 
 test("requestOtp refuses when too many active codes are outstanding", async () => {
   const t = convexTest(schema, modules);
-  // Unset Resend so the action takes the console branch.
+  // Unset RESEND_API_KEY so the action logs the code to the console.
   const previousKey = process.env.RESEND_API_KEY;
   delete process.env.RESEND_API_KEY;
 

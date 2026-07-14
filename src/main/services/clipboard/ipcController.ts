@@ -36,6 +36,13 @@ export interface ClipboardIpcDeps {
   peekWindow: PeekWindow
   notchDropoutWindow?: NotchDropoutWindow
   broadcastState(): void
+  /**
+   * Re-apply global shortcut registration. Called after clipboard
+   * settings change so a new Quick Paste / Peek hotkey takes effect
+   * immediately instead of only after an app restart. Optional so tests
+   * that don't exercise shortcut wiring can omit it.
+   */
+  reregisterShortcuts?(): void
   /** Optional override so tests can register a fake main module. */
   ipcMain?: { handle: typeof ipcMain.handle; on: typeof ipcMain.on }
   /** Optional writer override so tests can capture writes without
@@ -85,6 +92,10 @@ export class ClipboardIpcController {
     )
     this.bus.handle(IPC_CHANNELS.clipboardSettingsUpdate, async (_event, patch: unknown) => {
       this.deps.stateStore.updateClipboardSettings(clipboardSettingsUpdateSchema.parse(patch))
+      // Re-register global shortcuts so a changed Quick Paste / Peek hotkey
+      // is live immediately; persisting alone leaves the stale binding
+      // registered until the next full preferences sync / app restart.
+      this.deps.reregisterShortcuts?.()
       this.deps.broadcastState()
       return this.deps.stateStore.getClipboardSettings()
     })

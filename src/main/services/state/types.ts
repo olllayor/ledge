@@ -5,6 +5,7 @@ import type {
   PreferencesRecord,
   ShelfRecord,
   SyncState,
+  TeamState,
 } from '@shared/schema'
 
 /**
@@ -20,6 +21,7 @@ export interface PersistedState {
   recentShelves: ShelfRecord[]
   preferences: PreferencesRecord
   sync: SyncState
+  team: TeamState
   clipboardHistory: ClipboardEntry[]
   clipboardCategories: ClipboardCategory[]
   clipboardSettings: ClipboardSettings

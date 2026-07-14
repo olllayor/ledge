@@ -1720,6 +1720,13 @@ button {
   min-width: 200px;
 }
 
+.pro-copy.pro-hint {
+  margin-top: 12px;
+  margin-bottom: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
 /* ── Pro Compare Grid ── */
 
 .pro-compare {
@@ -3433,6 +3440,348 @@ textarea.pref-input {
   flex-wrap: wrap;
   padding-bottom: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ── Team ── */
+
+.team-switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  flex-shrink: 0;
+  max-width: 140px;
+}
+
+.team-switcher:hover {
+  background: var(--surface-strong);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.team-switcher-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.team-switcher-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+}
+
+.team-switcher-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-switcher-chevron {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  opacity: 0.5;
+}
+
+.team-switcher-popup {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  min-width: 160px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: rgba(30, 30, 32, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  z-index: 100;
+}
+
+@media (prefers-color-scheme: light) {
+  .team-switcher-popup {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+}
+
+.team-switcher-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.74rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.team-switcher-option:hover {
+  background: var(--surface);
+}
+
+.team-switcher-option.is-active {
+  color: var(--accent);
+  background: var(--surface);
+}
+
+.team-switcher-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 2px 4px;
+}
+
+/* Invitation banner */
+
+.invitation-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+
+.invitation-banner-text {
+  flex: 1;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.invitation-banner-text strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.invitation-banner-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.invitation-banner-action {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: none;
+  font-size: 0.7rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.invitation-banner-action.is-accept {
+  background: var(--accent);
+  color: #fff;
+}
+
+.invitation-banner-action.is-reject {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+
+.invitation-banner-action.is-reject:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.invitation-banner-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Team detail */
+
+.team-detail-section {
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
+.team-member-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.team-member-email {
+  flex: 1;
+  font-size: 0.78rem;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-member-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.team-member-role-badge.is-admin {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.team-member-role-badge.is-member {
+  background: var(--surface);
+  color: var(--ink-faint);
+}
+
+.team-member-joined {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* Preferences team styles */
+
+.team-pref-create {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.team-pref-create-input {
+  flex: 1;
+}
+
+.team-pref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.team-pref-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--pref-text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  text-align: left;
+  width: 100%;
+}
+
+.team-pref-item:hover {
+  background: var(--pref-card-hover, rgba(0,0,0,0.03));
+}
+
+@media (prefers-color-scheme: dark) {
+  .team-pref-item:hover {
+    background: var(--pref-card-hover, rgba(255,255,255,0.06));
+  }
+}
+
+.team-pref-item.is-active {
+  border-color: var(--pref-accent, var(--accent));
+  background: color-mix(in srgb, var(--pref-accent, var(--accent)) 8%, transparent);
+}
+
+.team-pref-item-meta {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--pref-text-tertiary);
+  white-space: nowrap;
+}
+
+.team-pref-name-edit {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.team-pref-name-edit .pref-input {
+  flex: 1;
+}
+
+.team-pref-invite {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.team-pref-invite .pref-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.team-pref-invite .settings-picker {
+  width: auto;
+}
+
+.team-pref-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.team-pref-pending-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.76rem;
+}
+
+.team-pref-pending-row .team-pending-email {
+  flex: 1;
+  color: var(--pref-text);
+}
+
+.team-pref-pending-row .team-pending-status {
+  font-size: 0.68rem;
+  color: var(--pref-text-tertiary);
+}
+
+/* Danger zone */
+
+.settings-danger-zone {
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: 8px;
+  padding: 12px 14px;
 }
 
 

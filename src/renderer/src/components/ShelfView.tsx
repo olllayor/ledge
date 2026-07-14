@@ -16,6 +16,7 @@ import {
   IconFolder,
   IconArrowUpRight,
 } from './Icons';
+import { TeamSwitcher } from './TeamSwitcher';
 
 function EmptyStateIllustration() {
   return (
@@ -404,6 +405,8 @@ function ShelfView({ state }: ShelfViewProps) {
             >
               <IconClose />
             </button>
+
+            <TeamSwitcher />
 
             <button
               ref={menuButtonRef}

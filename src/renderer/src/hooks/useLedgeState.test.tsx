@@ -25,6 +25,7 @@ function makeState(): AppState {
     clipboardHistory: [],
     clipboardCategories: [],
     clipboardSettings: {} as AppState['clipboardSettings'],
+    team: { activeTeamId: null },
   } as AppState;
 }
 

@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireUserWithSession, sessionArgs, sha256 } from "./model";
+import { sendOtpEmail } from "./email";
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -52,18 +53,6 @@ export const requestOtp = action({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const email = normalizeEmail(args.email);
-    const apiKey = process.env.RESEND_API_KEY;
-    const from = process.env.LEDGE_AUTH_EMAIL_FROM ?? "Ledge <auth@ledge.app>";
-    // In production, refuse to issue an OTP that we can’t deliver.
-    // Local `npx convex dev` deployments have no email service in scope,
-    // so we keep the console.log fallback behind a deployment check.
-    const deployment = process.env.CONVEX_DEPLOYMENT ?? "";
-    const isProd = deployment.startsWith("prod:") || deployment.includes(":prod");
-    if (!apiKey && isProd) {
-      throw new ConvexError(
-        "Email delivery is not configured. Set RESEND_API_KEY in the Convex dashboard.",
-      );
-    }
 
     // Use a cryptographically secure random generator; Math.random() is
     // predictable and not safe for security tokens. We use rejection
@@ -78,35 +67,7 @@ export const requestOtp = action({
       draw = crypto.getRandomValues(new Uint32Array(1))[0]!;
     } while (draw >= MAX_UNBIASED);
     const code = String(1_000_000 + (draw % 1_000_000)).slice(1);
-
-    if (!apiKey) {
-      console.warn(
-        `[ledge auth] RESEND_API_KEY not set; logging OTP for ${email} (dev only)`,
-      );
-      console.log(`Ledge OTP for ${email}: ${code}`);
-    } else {
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to: email,
-          subject: "Your Ledge sign-in code",
-          text: `Your Ledge sign-in code is ${code}. It expires in 10 minutes.`,
-        }),
-      });
-      if (!response.ok) {
-        // Don’t store the OTP if the email was never sent. Otherwise
-        // a transient Resend outage would burn one of the user’s three
-        // active-code slots and they’d be stuck waiting 10 minutes.
-        throw new ConvexError(
-          `Email delivery failed (${response.status}). Please try again.`,
-        );
-      }
-    }
+    await sendOtpEmail(email, code);
 
     const stored = await ctx.runMutation(internal.auth.tryStoreOtp, {
       email,

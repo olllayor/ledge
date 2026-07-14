@@ -87,7 +87,13 @@ const basePreferences = {
   shakeSensitivity: "balanced" as const,
   excludedBundleIds: [] as string[],
   globalShortcut: "CommandOrControl+Shift+Space",
+  hasCompletedOnboarding: false,
   hasSeenShelfLimitMigration: false,
+  shelfInteraction: {
+    doubleClickAction: "open" as const,
+    autoCloseShelf: false,
+    autoRetract: false,
+  },
 };
 
 test("FREE_SYNC_SHELF_LIMIT is 100", () => {
@@ -268,6 +274,69 @@ test("upsertShelf: free user is capped at FREE_SYNC_SHELF_LIMIT", async () => {
       imageStorageBytes: 0,
     }),
   ).rejects.toThrow("Cloud shelf limit reached");
+});
+
+test("deleteShelf: removes the cloud row and frees the shelf cap", async () => {
+  const t = convexTest(schema, modules);
+  const { sessionToken } = await setupUser(t, "delete-shelf@example.com", "free");
+
+  // Fill to the free cap.
+  for (let i = 0; i < FREE_SYNC_SHELF_LIMIT; i++) {
+    await t.mutation(api.sync.upsertShelf, {
+      sessionToken,
+      shelfId: `shelf-${i}`,
+      name: `Shelf ${i}`,
+      color: "ember",
+      origin: "manual",
+      items: [],
+      localCreatedAt: new Date().toISOString(),
+      localUpdatedAt: new Date().toISOString(),
+      imageStorageBytes: 0,
+    });
+  }
+
+  // A new shelf is rejected at the cap.
+  await expect(
+    t.mutation(api.sync.upsertShelf, {
+      sessionToken,
+      shelfId: "over-limit",
+      name: "Over",
+      color: "ember",
+      origin: "manual",
+      items: [],
+      localCreatedAt: new Date().toISOString(),
+      localUpdatedAt: new Date().toISOString(),
+      imageStorageBytes: 0,
+    }),
+  ).rejects.toThrow("Cloud shelf limit reached");
+
+  // Delete one, then the new shelf fits.
+  const result = await t.mutation(api.sync.deleteShelf, { sessionToken, shelfId: "shelf-0" });
+  expect(result.deleted).toBe(true);
+
+  const shelves = await t.query(api.sync.listShelves, { sessionToken });
+  expect(shelves.some((s) => s.shelfId === "shelf-0")).toBe(false);
+  expect(shelves.length).toBe(FREE_SYNC_SHELF_LIMIT - 1);
+
+  await t.mutation(api.sync.upsertShelf, {
+    sessionToken,
+    shelfId: "now-fits",
+    name: "Fits",
+    color: "ember",
+    origin: "manual",
+    items: [],
+    localCreatedAt: new Date().toISOString(),
+    localUpdatedAt: new Date().toISOString(),
+    imageStorageBytes: 0,
+  });
+});
+
+test("deleteShelf: deleting a non-existent shelf is a no-op", async () => {
+  const t = convexTest(schema, modules);
+  const { sessionToken } = await setupUser(t, "delete-missing@example.com", "free");
+  const result = await t.mutation(api.sync.deleteShelf, { sessionToken, shelfId: "nope" });
+  expect(result.deleted).toBe(false);
+  expect(result.assetsDeleted).toBe(0);
 });
 
 test("registerDevice: free user is capped at FREE_SYNC_DEVICE_LIMIT", async () => {

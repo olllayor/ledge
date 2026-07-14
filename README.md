@@ -42,7 +42,7 @@ VITE_CONVEX_URL="https://<deployment>.convex.cloud" pnpm dev
 
 Convex environment variables used by the paid-sync backend:
 
-- `RESEND_API_KEY` and `LEDGE_AUTH_EMAIL_FROM` for email OTP delivery
+- `RESEND_API_KEY` and `EMAIL_FROM` for email OTP delivery (Resend)
 - `LEMON_SQUEEZY_API_KEY` for manual entitlement refresh
 - `LEMON_SQUEEZY_WEBHOOK_SECRET` for webhook signature verification
 

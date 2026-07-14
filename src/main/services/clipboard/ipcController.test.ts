@@ -197,6 +197,14 @@ describe('ClipboardIpcController', () => {
     expect(deps.broadcastState).toHaveBeenCalledTimes(1)
   })
 
+  it('re-registers shortcuts after settings are updated so a new hotkey takes effect immediately', async () => {
+    const reregisterShortcuts = vi.fn()
+    const c = new ClipboardIpcController({ ...deps, reregisterShortcuts })
+    c.registerAll()
+    await bus.call(IPC_CHANNELS.clipboardSettingsUpdate, { quickPasteHotkey: 'CommandOrControl+Shift+C' })
+    expect(reregisterShortcuts).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects an invalid settings patch', async () => {
     const c = new ClipboardIpcController(deps)
     c.registerAll()

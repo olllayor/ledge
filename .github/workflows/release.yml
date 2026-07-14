@@ -58,13 +58,19 @@ jobs:
 
       - name: Resolve release tag
         id: release-tag
+        env:
+          # Pass the dispatch input through the environment instead of
+          # splicing it into the shell via ${{ }} — templating it inline is
+          # the GitHub Actions script-injection anti-pattern (a crafted
+          # tag_name would run arbitrary shell in this contents:write job).
+          TAG_NAME_INPUT: ${{ github.event.inputs.tag_name }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             tag="${GITHUB_REF_NAME}"
-          elif [ -n "${{ github.event.inputs.tag_name }}" ]; then
-            tag="${{ github.event.inputs.tag_name }}"
+          elif [ -n "${TAG_NAME_INPUT}" ]; then
+            tag="${TAG_NAME_INPUT}"
           else
             tag="v${version}"
           fi

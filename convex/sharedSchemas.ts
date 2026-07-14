@@ -74,7 +74,13 @@ export const preferencesValues = v.object({
   shakeSensitivity: v.union(v.literal("gentle"), v.literal("balanced"), v.literal("firm")),
   excludedBundleIds: v.array(v.string()),
   globalShortcut: v.string(),
+  hasCompletedOnboarding: v.boolean(),
   hasSeenShelfLimitMigration: v.boolean(),
+  shelfInteraction: v.object({
+    doubleClickAction: v.union(v.literal("open"), v.literal("reveal")),
+    autoCloseShelf: v.boolean(),
+    autoRetract: v.boolean(),
+  }),
 });
 
 export const PRO_IMAGE_STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;

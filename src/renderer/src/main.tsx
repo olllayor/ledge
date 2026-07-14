@@ -21,9 +21,10 @@ const convexUrl = import.meta.env.VITE_CONVEX_URL
 // first cold start, and nothing on subsequent launches because the
 // chunk is cached in the renderer's module map.
 const ConvexApp = lazy(async (): Promise<{ default: () => ReactElement }> => {
-  const [{ ConvexProvider, ConvexReactClient }, { SyncProvider }] = await Promise.all([
+  const [{ ConvexProvider, ConvexReactClient }, { SyncProvider }, { TeamsProvider }] = await Promise.all([
     import('convex/react'),
     import('./providers/SyncProvider'),
+    import('./providers/TeamsProvider'),
   ])
   if (!convexUrl) {
     // Belt-and-braces: convexUrl is gated at the call site, but the
@@ -36,7 +37,9 @@ const ConvexApp = lazy(async (): Promise<{ default: () => ReactElement }> => {
   const ConvexAppImpl = () => (
     <ConvexProvider client={client}>
       <SyncProvider>
-        <App />
+        <TeamsProvider>
+          <App />
+        </TeamsProvider>
       </SyncProvider>
     </ConvexProvider>
   )

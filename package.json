@@ -109,8 +109,11 @@
     "nodeGypRebuild": false
   },
   "dependencies": {
+    "@convex-dev/migrations": "^0.3.5",
     "clsx": "^2.1.1",
     "convex": "^1.38.0",
+    "fractional-indexing": "^4.0.0",
+    "resend": "^6.17.2",
     "tailwind-merge": "^3.6.0"
   },
   "pnpm": {

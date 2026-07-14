@@ -1,5 +1,12 @@
-import { execFile } from 'node:child_process';
+import { execFile as execFileCb } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { promisify } from 'node:util';
+
+// Callback-form execFile returns a ChildProcess, not a Promise — awaiting
+// it resolves on the next microtask, before osascript has actually
+// delivered the ⌘V keystroke. Promisify so `await` waits for the child
+// process to exit and a real failure is observable in the catch below.
+const execFile = promisify(execFileCb);
 import type { ClipboardEntry } from '@shared/schema';
 import { getFileBackedPath, isFileBackedItem } from '@shared/fileUtils';
 import { writeShelfItemToClipboard } from './clipboard/writer';

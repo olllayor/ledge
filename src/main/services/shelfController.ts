@@ -159,18 +159,28 @@ export class ShelfController {
       return false
     }
 
+    // `restoreShelf` above already moved the shelf out of Recents, set it
+    // live, and persisted to disk. A rejected bookmark resolution here
+    // (native helper timeout/crash/bad response) must NOT abort the flow —
+    // otherwise the shelf is committed off Recents but the window never
+    // opens and the shelf vanishes. Degrade per-item to the un-refreshed
+    // ref instead of throwing.
     const refreshedItems = await Promise.all(
       shelf.items.map(async (item) => {
         if (!isFileBackedItem(item)) {
           return item
         }
 
-        return {
-          ...item,
-          file: await refreshFileRef(item.file, {
-            resolveBookmark: (bookmarkBase64, originalPath) =>
-              this.deps.nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
-          }),
+        try {
+          return {
+            ...item,
+            file: await refreshFileRef(item.file, {
+              resolveBookmark: (bookmarkBase64, originalPath) =>
+                this.deps.nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
+            }),
+          }
+        } catch {
+          return item
         }
       }),
     )

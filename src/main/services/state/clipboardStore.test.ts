@@ -32,6 +32,7 @@ async function buildStore(): Promise<{
     sync: defaultSyncStateRecord(),
     clipboardHistory: [],
     clipboardCategories: [],
+    team: { activeTeamId: null },
     clipboardSettings: defaultClipboardSettingsRecord()
   }
   const clipboard = new ClipboardStore(persister, () => state)
@@ -190,6 +191,7 @@ describe('ClipboardStore.prune (regression: BUG-001)', () => {
       sync: defaultSyncStateRecord(),
       clipboardHistory: [],
       clipboardCategories: [],
+      team: { activeTeamId: null },
       clipboardSettings: defaultClipboardSettingsRecord()
     })
     expect(onDisk.clipboardHistory).toHaveLength(2)
@@ -207,6 +209,7 @@ describe('ClipboardStore.prune (regression: BUG-001)', () => {
       sync: defaultSyncStateRecord(),
       clipboardHistory: [],
       clipboardCategories: [],
+      team: { activeTeamId: null },
       clipboardSettings: defaultClipboardSettingsRecord()
     }
     const clipboard = new ClipboardStore(persister, () => state)

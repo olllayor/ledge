@@ -107,7 +107,7 @@ describe('StateStore', () => {
     await store.whenIdle()
     const persisted = JSON.parse(await readFile(statePath, 'utf8')) as { version: number; preferences: { globalShortcut: string } }
 
-    expect(persisted.version).toBe(3)
+    expect(persisted.version).toBe(4)
     expect(persisted.preferences.globalShortcut).toBe('CommandOrControl+Shift+Space')
   })
 
@@ -131,7 +131,7 @@ describe('StateStore', () => {
       preferences: { launchAtLogin: boolean }
     }
 
-    expect(persisted.version).toBe(3)
+    expect(persisted.version).toBe(4)
     expect(persisted.liveShelf).toBeNull()
     expect(persisted.preferences.launchAtLogin).toBe(true)
   })

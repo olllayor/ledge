@@ -155,6 +155,25 @@ function makeShelf(updatedAt: string, id = 'shelf-1'): ShelfRecord {
   };
 }
 
+function makeShelfWithItem(updatedAt: string, id = 'shelf-1'): ShelfRecord {
+  const shelf = makeShelf(updatedAt, id);
+  return {
+    ...shelf,
+    items: [
+      {
+        id: 'item-local',
+        kind: 'text',
+        createdAt: '2025-01-01T00:00:00.000Z',
+        order: 0,
+        title: 'unpushed',
+        subtitle: '8 characters',
+        preview: { summary: 'unpushed', detail: '' },
+        text: 'unpushed',
+      },
+    ],
+  };
+}
+
 describe('decideRemoteShelfApply', () => {
   it('applies on first contact even when local is newer (clock skew)', () => {
     const decision = decideRemoteShelfApply({
@@ -236,6 +255,43 @@ describe('decideRemoteShelfApply', () => {
     expect(fresher.apply).toBe(true);
     expect(fresher.reason).toBe('fresher');
     expect(fresher.nextWatermark).toBe(Date.parse(t1));
+  });
+
+  it('refuses to clobber a non-empty local shelf with newer unpushed edits (fresher branch)', () => {
+    const t0 = '2025-01-01T00:00:00.000Z';
+    const remoteMid = '2025-01-01T00:00:07.000Z';
+    const localNew = '2025-01-01T00:00:10.000Z';
+    // Watermark is at T0. A remote lands at T0.7 (fresher than watermark),
+    // but the local shelf already has an unpushed item stamped at T1.
+    const decision = decideRemoteShelfApply({
+      remote: makeShelf(remoteMid),
+      local: makeShelfWithItem(localNew),
+      lastSyncedRemoteUpdatedAt: Date.parse(t0),
+    });
+    expect(decision.apply).toBe(false);
+    expect(decision.reason).toBe('local-newer');
+  });
+
+  it('refuses to clobber a non-empty local with newer edits on first contact', () => {
+    const decision = decideRemoteShelfApply({
+      remote: makeShelf('2025-01-01T00:00:00.000Z'),
+      local: makeShelfWithItem('2025-01-01T00:00:10.000Z'),
+      lastSyncedRemoteUpdatedAt: null,
+    });
+    expect(decision.apply).toBe(false);
+    expect(decision.reason).toBe('local-newer');
+  });
+
+  it('still applies a fresher remote when local is older', () => {
+    const t0 = '2025-01-01T00:00:00.000Z';
+    const remoteNew = '2025-01-01T00:00:10.000Z';
+    const decision = decideRemoteShelfApply({
+      remote: makeShelf(remoteNew),
+      local: makeShelfWithItem('2025-01-01T00:00:05.000Z'),
+      lastSyncedRemoteUpdatedAt: Date.parse(t0),
+    });
+    expect(decision.apply).toBe(true);
+    expect(decision.reason).toBe('fresher');
   });
 
   it('coerces unparseable remote timestamps to 0 and still applies on first contact', () => {

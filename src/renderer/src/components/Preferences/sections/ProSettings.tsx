@@ -2,6 +2,7 @@ import type { AppState } from '@shared/schema';
 import { useState } from 'react';
 import { usePlan } from '../../../hooks/usePlan';
 import { useSync } from '../../../providers/SyncProvider';
+import { openProCheckout } from '../../../lib/proCheckout';
 import { IconLock, IconCheck } from '../../PreferencesIcons';
 import { SettingsGroup, SettingsRow, StatusPill, type ShowToast } from '../primitives';
 
@@ -54,18 +55,20 @@ export function ProSettings({ state, showToast }: { state: AppState; showToast: 
           <p className="pro-price">$9.99 <span className="pro-price-suffix">/ year</span></p>
           <p className="pro-copy">Ledge Pro unlocks the full color palette, more recent shelves, cloud sync for all your devices, preferences sync, and auto-close.</p>
           {!plan.isPro && (
-            <button
-              className="settings-cta pro-cta"
-              type="button"
-              onClick={() => {
-                if (import.meta.env.DEV) {
-                  console.log('[analytics] pro_upgrade_clicked', { source: 'pro_section' });
-                }
-                window.open('https://ledge.app/pro', '_blank');
-              }}
-            >
-              Upgrade to Pro
-            </button>
+            <>
+              <button
+                className="settings-cta pro-cta"
+                type="button"
+                onClick={() => openProCheckout({ email: sync.email, source: 'pro_section' })}
+              >
+                Upgrade to Pro
+              </button>
+              <p className="pro-copy pro-hint">
+                {sync.email
+                  ? `Checkout is pre-filled with ${sync.email}. Pay with that email and Pro unlocks automatically — no license key needed.`
+                  : 'Sign in under Cloud Sync first so your purchase links to your account automatically.'}
+              </p>
+            </>
           )}
         </div>
       </SettingsGroup>
@@ -90,11 +93,11 @@ export function ProSettings({ state, showToast }: { state: AppState; showToast: 
         </div>
       </SettingsGroup>
 
-      <SettingsGroup title="Activate license">
+      <SettingsGroup title="Already purchased? Activate manually">
         <SettingsRow
           icon={<IconLock />}
           title="License key"
-          copy="Paste a license key from your Lemon Squeezy receipt."
+          copy="Only needed if you paid with a different email — paste the key from your Lemon Squeezy receipt."
           trailing={<span />}
           fullWidth
         >

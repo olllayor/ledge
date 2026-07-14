@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalMutation } from "./_generated/server";
 import {
   currentPlan,
   deviceLimitForPlan,
@@ -11,6 +11,8 @@ import {
   storageBytesUsed,
 } from "./model";
 import { shelfItemSchema, preferencesValues } from "./sharedSchemas";
+
+const PERSONAL = "";
 
 const shelfPayload = {
   shelfId: v.string(),
@@ -28,6 +30,56 @@ const shelfPayload = {
   localUpdatedAt: v.string(),
   imageStorageBytes: v.number(),
 };
+
+interface ShelfItemMeta {
+  shelfId: string;
+  teamId: string;
+  userId: string;
+  version: number;
+  serverUpdatedAt: number;
+  migratedAt?: number;
+}
+
+function itemToShelfItemRow(item: Record<string, unknown>, meta: ShelfItemMeta): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    shelfId: meta.shelfId,
+    teamId: meta.teamId,
+    itemId: item.id,
+    createdBy: meta.userId,
+    updatedBy: meta.userId,
+    kind: item.kind,
+    title: item.title,
+    subtitle: item.subtitle,
+    preview: item.preview,
+    order: item.order,
+    version: meta.version,
+    serverUpdatedAt: meta.serverUpdatedAt,
+    deletedAt: undefined,
+    localUpdatedAt: item.createdAt,
+  };
+  if (meta.migratedAt !== undefined) {
+    base.migratedAt = meta.migratedAt;
+  }
+
+  switch (item.kind) {
+    case "file":
+      return { ...base, file: item.file, mimeType: item.mimeType };
+    case "folder":
+      return { ...base, file: item.file };
+    case "imageAsset":
+      return { ...base, file: item.file, mimeType: item.mimeType };
+    case "text":
+      return { ...base, text: item.text, savedFilePath: item.savedFilePath };
+    case "url":
+      return { ...base, url: item.url, savedFilePath: item.savedFilePath };
+    case "color":
+      return { ...base, hex: item.hex, name: item.name };
+    case "code":
+      return { ...base, codeText: item.text, language: item.language };
+    default:
+      return base;
+  }
+}
 
 export const overview = query({
   args: sessionArgs,
@@ -176,15 +228,103 @@ export const upsertShelf = mutation({
         return existing._id;
       }
       await ctx.db.patch(existing._id, next);
+
+      // Dual-write: backfill new items into shelfItems for migration. Only
+      // insert items that don't already have a row (existing items already
+      // tracked via per-item mutations). Phase 2 will remove the items array
+      // and switch reads exclusively to shelfItems.
+      for (const item of args.items) {
+        const existingItem = await ctx.db
+          .query("shelfItems")
+          .withIndex("by_team_shelf_item", (q) =>
+            q.eq("teamId", PERSONAL).eq("shelfId", args.shelfId).eq("itemId", item.id),
+          )
+          .unique();
+        if (!existingItem) {
+          await ctx.db.insert("shelfItems", itemToShelfItemRow(item, {
+            shelfId: args.shelfId,
+            teamId: PERSONAL,
+            userId,
+            version: 1,
+            serverUpdatedAt: serverNow,
+          }) as any);
+        }
+      }
+
       return existing._id;
     }
 
-    return await ctx.db.insert("shelves", {
+    const shelfId = await ctx.db.insert("shelves", {
       userId,
       shelfId: args.shelfId,
       ...next,
       createdAt: serverNow,
     });
+
+    // Dual-write all items to shelfItems (new shelf, all items are fresh).
+    const serverNowDedup = serverNow;
+    for (const item of args.items) {
+      await ctx.db.insert("shelfItems", itemToShelfItemRow(item, {
+        shelfId: args.shelfId,
+        teamId: PERSONAL,
+        userId,
+        version: 1,
+        serverUpdatedAt: serverNowDedup,
+      }) as any);
+    }
+
+    return shelfId;
+  },
+});
+
+// Reclaim all cloud storage for a shelf the user permanently discarded on
+// a device. Without this, `shelves` and `imageAssets` rows accumulate
+// forever (Ledge is a transient-shelf workflow), eventually tripping the
+// per-plan shelf cap in `upsertShelf` and the image-storage cap even
+// though the user's live state uses a fraction of it.
+//
+// Safe across devices: a shelf still present on another device is
+// re-created by that device's next `upsertShelf`, so deleting here only
+// sticks when no device references the shelf anymore.
+export const deleteShelf = mutation({
+  args: {
+    ...sessionArgs,
+    shelfId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx, args.sessionToken);
+
+    const shelf = await ctx.db
+      .query("shelves")
+      .withIndex("by_user_and_shelf", (q) => q.eq("userId", userId).eq("shelfId", args.shelfId))
+      .unique();
+    if (shelf) {
+      await ctx.db.delete(shelf._id);
+    }
+
+    // Delete image assets and their underlying _storage blobs so the
+    // per-user storage cap (storageBytesUsed) is actually reclaimed.
+    const assets = await ctx.db
+      .query("imageAssets")
+      .withIndex("by_user_and_shelf", (q) => q.eq("userId", userId).eq("shelfId", args.shelfId))
+      .collect();
+    for (const asset of assets) {
+      await ctx.storage.delete(asset.storageId);
+      await ctx.db.delete(asset._id);
+    }
+
+    // Remove per-item rows for the personal copy of this shelf.
+    const items = await ctx.db
+      .query("shelfItems")
+      .withIndex("by_team_shelf_item", (q) =>
+        q.eq("teamId", PERSONAL).eq("shelfId", args.shelfId),
+      )
+      .collect();
+    for (const item of items) {
+      await ctx.db.delete(item._id);
+    }
+
+    return { deleted: shelf !== null, assetsDeleted: assets.length };
   },
 });
 
@@ -400,5 +540,233 @@ export const recordSyncEvent = mutation({
       message: args.message,
       createdAt: Date.now(),
     });
+  },
+});
+
+// ============================================================
+// Phase 1: Per-item sync mutations (team-ready)
+// ============================================================
+
+const shelfItemCommonArgs = {
+  shelfId: v.string(),
+  teamId: v.string(),
+  itemId: v.string(),
+  kind: v.union(
+    v.literal("file"),
+    v.literal("folder"),
+    v.literal("imageAsset"),
+    v.literal("text"),
+    v.literal("url"),
+    v.literal("color"),
+    v.literal("code"),
+  ),
+  title: v.string(),
+  subtitle: v.string(),
+  preview: v.object({ summary: v.string(), detail: v.string() }),
+  order: v.string(),
+};
+
+// Upsert a single shelf item with version-based LWW.
+// - version + serverUpdatedAt is the source of truth (not localUpdatedAt)
+// - teamId sentinel "" for personal shelves
+export const upsertShelfItem = mutation({
+  args: {
+    ...sessionArgs,
+    ...shelfItemCommonArgs,
+    version: v.number(),
+    serverUpdatedAt: v.number(),
+    file: v.optional(v.object({
+      originalPath: v.string(),
+      resolvedPath: v.string(),
+      isStale: v.boolean(),
+      isMissing: v.boolean(),
+    })),
+    mimeType: v.optional(v.string()),
+    text: v.optional(v.string()),
+    savedFilePath: v.optional(v.string()),
+    url: v.optional(v.string()),
+    hex: v.optional(v.string()),
+    name: v.optional(v.string()),
+    codeText: v.optional(v.string()),
+    language: v.optional(v.string()),
+    localUpdatedAt: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx, args.sessionToken);
+
+    const existing = await ctx.db
+      .query("shelfItems")
+      .withIndex("by_team_shelf_item", (q) =>
+        q.eq("teamId", args.teamId).eq("shelfId", args.shelfId).eq("itemId", args.itemId),
+      )
+      .unique();
+
+    if (existing) {
+      // LWW by version, then serverUpdatedAt.
+      if (args.version < existing.version) {
+        return { applied: false, reason: "stale_version" };
+      }
+      if (args.version === existing.version && args.serverUpdatedAt <= existing.serverUpdatedAt) {
+        return { applied: false, reason: "stale_timestamp" };
+      }
+      await ctx.db.patch(existing._id, {
+        kind: args.kind,
+        title: args.title,
+        subtitle: args.subtitle,
+        preview: args.preview,
+        order: args.order,
+        file: args.file,
+        mimeType: args.mimeType,
+        text: args.text,
+        savedFilePath: args.savedFilePath,
+        url: args.url,
+        hex: args.hex,
+        name: args.name,
+        codeText: args.codeText,
+        language: args.language,
+        updatedBy: userId,
+        version: args.version,
+        serverUpdatedAt: args.serverUpdatedAt,
+        localUpdatedAt: args.localUpdatedAt,
+        deletedAt: undefined,
+      });
+      return { applied: true, reason: "updated" };
+    }
+
+    await ctx.db.insert("shelfItems", {
+      shelfId: args.shelfId,
+      teamId: args.teamId,
+      itemId: args.itemId,
+      createdBy: userId,
+      updatedBy: userId,
+      kind: args.kind,
+      title: args.title,
+      subtitle: args.subtitle,
+      preview: args.preview,
+      order: args.order,
+      file: args.file,
+      mimeType: args.mimeType,
+      text: args.text,
+      savedFilePath: args.savedFilePath,
+      url: args.url,
+      hex: args.hex,
+      name: args.name,
+      codeText: args.codeText,
+      language: args.language,
+      version: args.version,
+      serverUpdatedAt: args.serverUpdatedAt,
+      localUpdatedAt: args.localUpdatedAt,
+      deletedAt: undefined,
+    });
+    return { applied: true, reason: "inserted" };
+  },
+});
+
+// Soft-delete a shelf item (sets deletedAt tombstone).
+export const deleteShelfItem = mutation({
+  args: {
+    ...sessionArgs,
+    teamId: v.string(),
+    shelfId: v.string(),
+    itemId: v.string(),
+    version: v.number(),
+    serverUpdatedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx, args.sessionToken);
+
+    const existing = await ctx.db
+      .query("shelfItems")
+      .withIndex("by_team_shelf_item", (q) =>
+        q.eq("teamId", args.teamId).eq("shelfId", args.shelfId).eq("itemId", args.itemId),
+      )
+      .unique();
+
+    if (!existing) {
+      return { applied: false, reason: "not_found" };
+    }
+
+    // LWW on version exactly like upsertShelfItem.
+    if (args.version < existing.version) {
+      return { applied: false, reason: "stale_version" };
+    }
+    if (args.version === existing.version && args.serverUpdatedAt <= existing.serverUpdatedAt) {
+      return { applied: false, reason: "stale_timestamp" };
+    }
+
+    await ctx.db.patch(existing._id, {
+      deletedAt: Date.now(),
+      updatedBy: userId,
+      version: args.version,
+      serverUpdatedAt: args.serverUpdatedAt,
+    });
+    return { applied: true, reason: "deleted" };
+  },
+});
+
+// List shelf items with cursor-based pagination. Returns:
+// - items: active (non-deleted) items
+// - tombstones: deleted item metadata so the client can remove local copies
+// - nextCursor: pass as `cursor` in the next call (or null when done)
+export const listShelfItems = query({
+  args: {
+    ...sessionArgs,
+    teamId: v.string(),
+    shelfId: v.string(),
+    cursor: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireUser(ctx, args.sessionToken);
+
+    const page = await ctx.db
+      .query("shelfItems")
+      .withIndex("by_team_shelf_updated", (q) =>
+        q.eq("teamId", args.teamId).eq("shelfId", args.shelfId).gt("serverUpdatedAt", args.cursor ?? 0),
+      )
+      .order("asc")
+      .take(args.limit ?? 100);
+
+    return {
+      items: page.filter((i) => !i.deletedAt),
+      tombstones: page
+        .filter((i) => i.deletedAt)
+        .map((i) => ({ itemId: i.itemId, version: i.version, deletedAt: i.deletedAt })),
+      nextCursor: page.length > 0 ? page[page.length - 1].serverUpdatedAt : args.cursor ?? 0,
+    };
+  },
+});
+
+// Internal: backfill shelfItems from existing shelves.items array.
+// Used by @convex-dev/migrations during Phase 1 migration.
+export const migrateOneShelf = internalMutation({
+  args: {
+    shelfDocId: v.id("shelves"),
+    userId: v.id("users"),
+    shelfId: v.string(),
+    items: v.array(shelfItemSchema),
+    shelfUpdatedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const serverNow = Date.now();
+    for (const item of args.items) {
+      const existing = await ctx.db
+        .query("shelfItems")
+        .withIndex("by_team_shelf_item", (q) =>
+          q.eq("teamId", PERSONAL).eq("shelfId", args.shelfId).eq("itemId", item.id),
+        )
+        .unique();
+      if (!existing) {
+        await ctx.db.insert("shelfItems", itemToShelfItemRow(item, {
+          shelfId: args.shelfId,
+          teamId: PERSONAL,
+          userId: args.userId,
+          version: 1,
+          serverUpdatedAt: args.shelfUpdatedAt ?? serverNow,
+          migratedAt: serverNow,
+        }) as any);
+      }
+    }
+    await ctx.db.patch(args.shelfDocId, { itemsMigratedAt: serverNow });
   },
 });
