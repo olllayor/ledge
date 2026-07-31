@@ -110,7 +110,7 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
-    "convex": "^1.38.0",
+    "convex": "^1.42.1",
     "tailwind-merge": "^3.6.0"
   },
   "pnpm": {
