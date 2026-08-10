@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
 import { PeekWindowView } from './PeekWindowView';
 import type { ClipboardEntry, AppState } from '@shared/schema';
 
@@ -65,23 +65,6 @@ describe('PeekWindowView (user stories 8.1-8.7)', () => {
     render(<PeekWindowView />);
     expect(() => hintListeners.forEach((cb) => cb({ hint: 'visible' }))).not.toThrow();
     expect(() => hintListeners.forEach((cb) => cb({ hint: 'hidden' }))).not.toThrow();
-  });
-
-  it('8.3 mouseenter expands the strip (height changes from 48 to 168)', () => {
-    const { container } = render(<PeekWindowView />);
-    const main = container.querySelector('main.peek') as HTMLElement;
-    expect(main.style.height).toBe('48px');
-    fireEvent.mouseEnter(main);
-    expect(main.style.height).toBe('168px');
-  });
-
-  it('8.4 mouseleave collapses the strip back to 48', () => {
-    const { container } = render(<PeekWindowView />);
-    const main = container.querySelector('main.peek') as HTMLElement;
-    fireEvent.mouseEnter(main);
-    expect(main.style.height).toBe('168px');
-    fireEvent.mouseLeave(main);
-    expect(main.style.height).toBe('48px');
   });
 
   it('8.5/8.6 shows up to 12 thumbnails; drag starts clipboardStartItemDrag', async () => {

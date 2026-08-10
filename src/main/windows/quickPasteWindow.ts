@@ -8,6 +8,7 @@ import { lockDownWebContents } from './webSecurity';
 export class QuickPasteWindow {
   private window: BrowserWindow | null = null;
   private previousBundleId = '';
+  private previousAppName = '';
 
   async ensure(): Promise<BrowserWindow> {
     if (this.window && !this.window.isDestroyed()) {
@@ -55,8 +56,9 @@ export class QuickPasteWindow {
     return this.window;
   }
 
-  async show(previousBundleId: string): Promise<void> {
+  async show(previousBundleId: string, previousAppName: string): Promise<void> {
     this.previousBundleId = previousBundleId;
+    this.previousAppName = previousAppName;
     const window = await this.ensure();
     window.webContents.send(IPC_CHANNELS.clipboardQuickPastePaste, {
       // 'shown' is a sentinel payload the renderer uses to focus index 0
@@ -64,6 +66,7 @@ export class QuickPasteWindow {
       // id via its own snapshot subscription. Avoid a parallel channel.
       hint: 'shown',
       previousBundleId,
+      previousAppName,
     });
     this.positionAtBottomCenter(window);
     window.show();
@@ -84,6 +87,7 @@ export class QuickPasteWindow {
       hint: 'focus',
       index,
       previousBundleId: this.previousBundleId,
+      previousAppName: this.previousAppName,
     });
   }
 

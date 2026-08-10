@@ -8,7 +8,7 @@ afterEach(() => {
 
 describe('proCheckoutUrl', () => {
   it('returns the default checkout URL when no email is given', () => {
-    expect(proCheckoutUrl()).toBe('https://ledge.app/pro');
+    expect(proCheckoutUrl()).toBe('http://localhost:5173/pro');
   });
 
   it('appends the email as the Lemon Squeezy checkout[email] param', () => {

@@ -325,6 +325,7 @@ app.whenReady().then(async () => {
     shelfWindow,
     quickPasteWindow,
     peekWindow,
+    clipboardWindow,
     clipboardMonitor,
     shelfController,
     shelfActions,

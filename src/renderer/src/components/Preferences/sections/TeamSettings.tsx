@@ -8,9 +8,39 @@ import { useTeams } from '../../../providers/TeamsProvider';
 import { SettingsGroup, SettingsRow, Picker, type ShowToast } from '../primitives';
 
 export function TeamSettings({ state, showToast }: { state: AppState; showToast: ShowToast }) {
+  const isConfigured = !!import.meta.env.VITE_CONVEX_URL;
+
+  if (!isConfigured) {
+    return (
+      <SettingsGroup>
+        <div style={{ padding: '24px 16px', textAlign: 'center' }}>
+          <p className="settings-row-title" style={{ marginBottom: 8 }}>Cloud Sync is not configured</p>
+          <p className="settings-row-copy">Set <code>VITE_CONVEX_URL</code> to enable team features.</p>
+        </div>
+      </SettingsGroup>
+    );
+  }
+
+  return <TeamSettingsConfiguredWrapper state={state} showToast={showToast} />;
+}
+
+function TeamSettingsConfiguredWrapper({ state, showToast }: { state: AppState; showToast: ShowToast }) {
   const sync = useSync();
   const teams = useTeams();
-  const isConfigured = sync.configured;
+  return <TeamSettingsConfigured state={state} showToast={showToast} sync={sync} teams={teams} />;
+}
+
+function TeamSettingsConfigured({
+  state,
+  showToast,
+  sync,
+  teams,
+}: {
+  state: AppState;
+  showToast: ShowToast;
+  sync: ReturnType<typeof useSync>;
+  teams: ReturnType<typeof useTeams>;
+}) {
   const isLoggedIn = !!state.sync.signedInEmail;
 
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
@@ -97,17 +127,6 @@ export function TeamSettings({ state, showToast }: { state: AppState; showToast:
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to delete team', 'error');
     }
-  }
-
-  if (!isConfigured) {
-    return (
-      <SettingsGroup>
-        <div style={{ padding: '24px 16px', textAlign: 'center' }}>
-          <p className="settings-row-title" style={{ marginBottom: 8 }}>Cloud Sync is not configured</p>
-          <p className="settings-row-copy">Set <code>VITE_CONVEX_URL</code> to enable team features.</p>
-        </div>
-      </SettingsGroup>
-    );
   }
 
   if (!isLoggedIn) {

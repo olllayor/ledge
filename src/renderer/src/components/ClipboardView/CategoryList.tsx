@@ -73,7 +73,9 @@ function CategoryListImpl({
               }}
               onContextMenu={(event) => {
                 event.preventDefault()
-                onRemove(category.id)
+                if (window.confirm('Are you sure you want to delete this category?')) {
+                  onRemove(category.id)
+                }
               }}
               title="Double-click to rename · Right-click to delete"
             >

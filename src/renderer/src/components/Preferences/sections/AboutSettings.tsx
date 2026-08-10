@@ -1,8 +1,9 @@
 import { LedgeMark } from '../../PreferencesIcons';
 import { SettingsGroup, SettingsRow } from '../primitives';
+import { useAppVersion } from '../../../hooks/useAppVersion';
 
 export function AboutSettings() {
-  const version = '0.1.9';
+  const version = useAppVersion();
 
   return (
     <>

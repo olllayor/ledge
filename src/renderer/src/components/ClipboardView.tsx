@@ -2,9 +2,10 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ClipboardEntry } from '@shared/schema';
 import { useClipboardEntries, type TypeFilter } from '../hooks/useClipboardEntries';
 import { useClipboardActions } from '../hooks/useClipboardActions';
-import { ClipboardCard } from './ClipboardCard';
-import { ClipboardCategories } from './ClipboardCategories';
-import { ClipboardFilters } from './ClipboardFilters';
+import { ClipboardCard } from './ClipboardView/ClipboardCard';
+import { ClipboardCategories } from './ClipboardView/ClipboardCategories';
+import { ClipboardFilters } from './ClipboardView/ClipboardFilters';
+import { IconClose } from './Icons';
 
 export function ClipboardView() {
   const [type, setType] = useState<TypeFilter>('all');
@@ -18,18 +19,32 @@ export function ClipboardView() {
     [type, app, category, search],
   );
   const { entries, categories, filtered, availableApps } = useClipboardEntries(filter);
-  const actions = useClipboardActions();
+  const {
+    copyEntry,
+    removeEntry,
+    startItemDrag,
+    createCategory,
+    renameCategory,
+    removeCategory,
+    clearAllEntries,
+    pruneNow
+  } = useClipboardActions();
 
   const handleCopy = useCallback((entry: ClipboardEntry) => {
-    void actions.copyEntry(entry).then((ok) => {
+    void copyEntry(entry).then((ok) => {
       if (ok) window.ledge?.showToast('Copied to clipboard', 'success');
     });
-  }, [actions]);
+  }, [copyEntry]);
+
+  const handleDragStart = useCallback((entry: ClipboardEntry) => {
+    const ok = startItemDrag(entry);
+    if (!ok) window.ledge?.showToast('This item cannot be dragged out', 'info');
+  }, [startItemDrag]);
 
   const handleClearAll = useCallback(() => {
     if (entries.length === 0) return;
-    void actions.clearAllEntries();
-  }, [actions, entries.length]);
+    void clearAllEntries();
+  }, [clearAllEntries, entries.length]);
 
   const handleClose = useCallback(() => {
     window.close();
@@ -40,7 +55,7 @@ export function ClipboardView() {
       <header className="clipboard-topbar">
         <h1>Clipboard</h1>
         <div className="clipboard-topbar-actions">
-          <button type="button" className="chrome-button" onClick={actions.pruneNow} title="Prune old entries">
+          <button type="button" className="chrome-button" onClick={pruneNow} title="Prune old entries">
             ⟳
           </button>
           <button
@@ -53,7 +68,7 @@ export function ClipboardView() {
             Clear
           </button>
           <button type="button" className="chrome-button" onClick={handleClose} title="Close">
-            ×
+            <IconClose />
           </button>
         </div>
       </header>
@@ -73,9 +88,9 @@ export function ClipboardView() {
           categories={categories}
           selected={category}
           onSelect={setCategory}
-          onCreate={actions.createCategory}
-          onRename={actions.renameCategory}
-          onRemove={actions.removeCategory}
+          onCreate={createCategory}
+          onRename={renameCategory}
+          onRemove={removeCategory}
         />
         <section className="clipboard-list" aria-label="Clipboard entries">
           {filtered.length === 0 ? (
@@ -104,11 +119,8 @@ export function ClipboardView() {
                     isSelected={selectedId === entry.id}
                     onSelect={setSelectedId}
                     onCopy={handleCopy}
-                    onRemove={actions.removeEntry}
-                    onDragStart={(entry) => {
-                      const ok = actions.startItemDrag(entry);
-                      if (!ok) window.ledge?.showToast('This item cannot be dragged out', 'info');
-                    }}
+                    onRemove={removeEntry}
+                    onDragStart={handleDragStart}
                   />
                 ))}
               </div>

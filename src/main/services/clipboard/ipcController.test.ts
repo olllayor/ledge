@@ -218,14 +218,14 @@ describe('ClipboardIpcController', () => {
     const c = new ClipboardIpcController(deps)
     c.registerAll()
     bus.emit(IPC_CHANNELS.clipboardQuickPasteShow)
-    expect(deps.quickPasteWindow.show).toHaveBeenCalledWith('com.apple.Terminal')
+    expect(deps.quickPasteWindow.show).toHaveBeenCalledWith('com.apple.Terminal', 'Terminal')
   })
 
   it('falls back to empty bundle id when no snapshot is cached', () => {
     const c = new ClipboardIpcController(deps)
     c.registerAll()
     bus.emit(IPC_CHANNELS.clipboardQuickPasteShow)
-    expect(deps.quickPasteWindow.show).toHaveBeenCalledWith('')
+    expect(deps.quickPasteWindow.show).toHaveBeenCalledWith('', '')
   })
 
   it('rejects out-of-range quick paste focus indices', () => {

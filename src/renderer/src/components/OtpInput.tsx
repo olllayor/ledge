@@ -1,5 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type ClipboardEvent } from 'react';
-import { applyOtpPaste, otpGroupLabel, sanitizeOtpDigit, sanitizeOtpPaste } from './otpUtils';
+import { applyOtpPaste, otpGroupLabel, sanitizeOtpDigit, sanitizeOtpPaste } from '../lib/otpUtils';
 
 interface OtpInputProps {
   length?: number;

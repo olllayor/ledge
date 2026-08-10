@@ -36,6 +36,7 @@ import type { ClipboardMonitor } from './services/clipboardMonitor'
 import type { ShelfItemOps } from './services/shelfItemOps'
 import type { ShelfContextMenus } from './services/contextMenus'
 import type { SecureSessionStore } from './services/secureSessionStore'
+import type { ClipboardWindow } from './windows/clipboardWindow'
 import { decideRemoteShelfApply } from './remoteShelf'
 import { syncSessionSchema } from '@shared/ipc'
 
@@ -45,6 +46,7 @@ export interface IpcRegistrarDeps {
   shelfWindow: ShelfWindow
   quickPasteWindow: QuickPasteWindow
   peekWindow: PeekWindow
+  clipboardWindow: ClipboardWindow
   clipboardMonitor: ClipboardMonitor
   shelfController: ShelfController
   shelfActions: ShelfActions
@@ -105,6 +107,9 @@ export class IpcRegistrar {
       }
     })
     ipcMain.on(IPC_CHANNELS.shelfInteractionPing, () => this.deps.onInactivityTick())
+    ipcMain.on(IPC_CHANNELS.clipboardWindowShow, () => {
+      void this.deps.clipboardWindow.show()
+    })
   }
 
   // ---- Shelf ----

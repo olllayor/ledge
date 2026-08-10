@@ -137,11 +137,12 @@ export class NotchDropoutWindow {
   private positionTopCenter(window: BrowserWindow): void {
     const cursor = screen.getCursorScreenPoint();
     const display = screen.getDisplayNearestPoint(cursor);
-    const { workArea } = display;
-    const menubarHeight = workArea.y > 0 ? workArea.y : PEEK_FALLBACK_MENUBAR_HEIGHT;
-    const bounds = window.getBounds();
-    const x = Math.round(workArea.x + (workArea.width - bounds.width) / 2);
+    const { bounds, workArea } = display;
+    const hasMenuBar = workArea.y > bounds.y;
+    const menubarHeight = hasMenuBar ? workArea.y : bounds.y + (bounds.y === 0 ? PEEK_FALLBACK_MENUBAR_HEIGHT : 0);
+    const windowBounds = window.getBounds();
+    const x = Math.round(workArea.x + (workArea.width - windowBounds.width) / 2);
     const y = menubarHeight + PEEK_BELOW_MENUBAR;
-    window.setBounds({ x, y, width: bounds.width, height: bounds.height }, false);
+    window.setBounds({ x, y, width: windowBounds.width, height: windowBounds.height }, false);
   }
 }

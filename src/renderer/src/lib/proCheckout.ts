@@ -12,7 +12,7 @@
  * their account (it matches by email) with no manual license-key entry. The
  * reactive `overview` query then flips the UI to Pro on its own.
  */
-const DEFAULT_CHECKOUT_URL = 'https://ledge.app/pro';
+const DEFAULT_CHECKOUT_URL = 'http://localhost:5173/pro';
 
 export function proCheckoutUrl(email?: string): string {
   const base = (import.meta.env.VITE_PRO_CHECKOUT_URL as string | undefined) || DEFAULT_CHECKOUT_URL;

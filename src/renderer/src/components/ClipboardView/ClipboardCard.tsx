@@ -1,6 +1,7 @@
 import { memo, useCallback } from 'react';
 import type { ClipboardEntry } from '@shared/schema';
-import { CardLabel, CardPreview, CardSubtitle } from './ClipboardView/CardPreview';
+import { CardLabel, CardPreview, CardSubtitle } from './CardPreview';
+import { IconClose, IconCopy } from '../Icons';
 
 interface ClipboardCardProps {
   entry: ClipboardEntry;
@@ -73,7 +74,7 @@ function CardImpl({
           title="Copy to clipboard"
           aria-label="Copy to clipboard"
         >
-          ⎘
+          <IconCopy />
         </button>
         <button
           type="button"
@@ -82,7 +83,7 @@ function CardImpl({
           title="Remove from history"
           aria-label="Remove from history"
         >
-          ×
+          <IconClose />
         </button>
       </div>
     </article>

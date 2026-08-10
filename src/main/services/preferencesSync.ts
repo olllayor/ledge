@@ -125,8 +125,10 @@ export class PreferencesSyncService {
       alreadyRegistered: registeredShortcuts,
       label: 'quick-paste',
       onTrigger: () => {
-        const previousBundleId = this.clipboardMonitor.getLastFrontmostApp()?.bundleId ?? ''
-        void this.quickPasteWindow.show(previousBundleId)
+        const previousApp = this.clipboardMonitor.getLastFrontmostApp()
+        const previousBundleId = previousApp?.bundleId ?? ''
+        const previousAppName = previousApp?.name ?? ''
+        void this.quickPasteWindow.show(previousBundleId, previousAppName)
       },
     })
 

@@ -198,8 +198,10 @@ export class ClipboardIpcController {
     this.bus.on(IPC_CHANNELS.clipboardQuickPasteShow, () => {
       // Use the cached snapshot to avoid the IPC race where the palette
       // window itself becomes frontmost before we read the previous app.
-      const previousBundleId = this.deps.clipboardMonitor.getLastFrontmostApp()?.bundleId ?? ''
-      void this.deps.quickPasteWindow.show(previousBundleId)
+      const previousApp = this.deps.clipboardMonitor.getLastFrontmostApp()
+      const previousBundleId = previousApp?.bundleId ?? ''
+      const previousAppName = previousApp?.name ?? ''
+      void this.deps.quickPasteWindow.show(previousBundleId, previousAppName)
     })
     this.bus.on(IPC_CHANNELS.clipboardQuickPasteHide, () => {
       this.deps.quickPasteWindow.hide()

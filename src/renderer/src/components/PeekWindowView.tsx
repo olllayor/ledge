@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ClipboardEntry, ShelfItemRecord } from '@shared/schema';
+import type { ClipboardEntry, ShelfItemRecord, AppState } from '@shared/schema';
+import { useLedgeState } from '../hooks/useLedgeState';
 
-const COLLAPSED_HEIGHT = 48;
-const EXPANDED_HEIGHT = 168;
 const PEEK_MAX_THUMBS = 12;
 
 type Item = ShelfItemRecord;
@@ -41,27 +40,17 @@ function entryLabel(entry: ClipboardEntry): string {
   return item.title;
 }
 
+const selectPeekEntries = (state: AppState) => state.clipboardHistory.slice(0, PEEK_MAX_THUMBS);
+
 export function PeekWindowView() {
-  const [entries, setEntries] = useState<ClipboardEntry[]>([]);
+  const { state } = useLedgeState(selectPeekEntries);
+  const entries = state || [];
   const [expanded, setExpanded] = useState(false);
   const hideTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (!window.ledge) return;
     let active = true;
-    const refresh = async () => {
-      try {
-        const next = await window.ledge.clipboardGetRecent(PEEK_MAX_THUMBS);
-        if (active) setEntries(next);
-      } catch {
-        // ignore
-      }
-    };
-    void refresh();
-    const unsubscribeState = window.ledge.subscribeState((state) => {
-      if (!active) return;
-      setEntries(state.clipboardHistory.slice(0, PEEK_MAX_THUMBS));
-    });
     const unsubscribeHint = window.ledge.onClipboardPeekHint((hint) => {
       if (!active) return;
       if (hint.hint === 'visible') {
@@ -79,7 +68,6 @@ export function PeekWindowView() {
     });
     return () => {
       active = false;
-      unsubscribeState();
       unsubscribeHint();
     };
   }, []);
@@ -109,7 +97,6 @@ export function PeekWindowView() {
   return (
     <main
       className={`peek${expanded ? ' is-expanded' : ''}`}
-      style={{ height: expanded ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT }}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
       aria-label="Clipboard peek"

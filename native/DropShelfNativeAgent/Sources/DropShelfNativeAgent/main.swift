@@ -291,19 +291,24 @@ final class NativeAgent {
         }
     }
 
+    private func quartzFrame(for screen: NSScreen) -> CGRect {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        let frame = screen.frame
+        let quartzY = primaryHeight - (frame.origin.y + frame.size.height)
+        return CGRect(x: frame.origin.x, y: quartzY, width: frame.size.width, height: frame.size.height)
+    }
+
     private func displayIndex(for point: CGPoint) -> Int {
-        for (index, screen) in NSScreen.screens.enumerated() where screen.frame.contains(point) {
-            return index
+        for (index, screen) in NSScreen.screens.enumerated() {
+            if quartzFrame(for: screen).contains(point) {
+                return index
+            }
         }
         return 0
     }
 
     private func electronPoint(for point: CGPoint) -> CGPoint {
-        for screen in NSScreen.screens where screen.frame.contains(point) {
-            let translatedY = screen.frame.maxY - point.y
-            return CGPoint(x: point.x, y: translatedY)
-        }
-
+        // CGEvent points are already in Quartz screen coordinates, which match Electron coordinates.
         return point
     }
 

@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { TypeFilter } from '../hooks/useClipboardEntries';
+import type { TypeFilter } from '../../hooks/useClipboardEntries';
 
 const TYPES: Array<{ id: TypeFilter; label: string }> = [
   { id: 'all', label: 'All' },

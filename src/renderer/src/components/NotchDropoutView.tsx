@@ -1,30 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ClipboardEntry } from '@shared/schema';
+import type { ClipboardEntry, AppState } from '@shared/schema';
+import { useLedgeState } from '../hooks/useLedgeState';
+import { IconClose, IconCopy } from './Icons';
 
 const MAX_ENTRIES = 20;
 
+const selectNotchEntries = (state: AppState) => state.clipboardHistory.slice(0, MAX_ENTRIES);
+
 export function NotchDropoutView() {
-  const [entries, setEntries] = useState<ClipboardEntry[]>([]);
+  const { state } = useLedgeState(selectNotchEntries);
+  const entries = state || [];
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!window.ledge) return;
     let active = true;
-
-    const refresh = async () => {
-      try {
-        const next = await window.ledge.clipboardGetRecent(MAX_ENTRIES);
-        if (active) setEntries(next);
-      } catch {
-        // ignore
-      }
-    };
-    void refresh();
-
-    const unsubscribeState = window.ledge.subscribeState((state) => {
-      if (!active) return;
-      setEntries(state.clipboardHistory.slice(0, MAX_ENTRIES));
-    });
 
     const unsubscribeHint = window.ledge.onNotchDropoutStateChanged((hint) => {
       if (!active) return;
@@ -35,7 +25,6 @@ export function NotchDropoutView() {
 
     return () => {
       active = false;
-      unsubscribeState();
       unsubscribeHint();
     };
   }, []);
@@ -66,7 +55,7 @@ export function NotchDropoutView() {
 
   const handleOpenFull = useCallback(() => {
     window.ledge?.notchDropoutHide();
-    // TODO: open full clipboard history window
+    window.ledge?.clipboardWindowShow();
   }, []);
 
   const handleEnter = useCallback(() => setExpanded(true), []);
@@ -116,7 +105,7 @@ export function NotchDropoutView() {
             onClick={handleOpenFull}
             title="Open clipboard history"
           >
-            ⎘
+            <IconCopy />
           </button>
           <button
             type="button"
@@ -124,10 +113,15 @@ export function NotchDropoutView() {
             onClick={() => window.ledge?.notchDropoutHide()}
             title="Close"
           >
-            ×
+            <IconClose />
           </button>
         </div>
       </div>
+      {expanded && (
+        <div className="notch-dropout-body">
+          {/* Main content or visual placeholder for expanded body */}
+        </div>
+      )}
     </main>
   );
 }

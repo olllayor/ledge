@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ClipboardEntry, ShelfItemRecord } from '@shared/schema';
+import type { ClipboardEntry, ShelfItemRecord, AppState } from '@shared/schema';
+import { useLedgeState } from '../hooks/useLedgeState';
 
 const MAX_ENTRIES = 9;
 
@@ -79,8 +80,11 @@ function entrySwatch(entry: ClipboardEntry): { background: string; letter: strin
 // pulled from the resolved path on disk).
 void filePathOf;
 
+const selectQuickPasteEntries = (state: AppState) => state.clipboardHistory.slice(0, MAX_ENTRIES);
+
 export function QuickPastePalette() {
-  const [entries, setEntries] = useState<ClipboardEntry[]>([]);
+  const { state } = useLedgeState(selectQuickPasteEntries);
+  const entries = state || [];
   const [focusIndex, setFocusIndex] = useState(0);
   const [previousAppName, setPreviousAppName] = useState('');
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -88,32 +92,17 @@ export function QuickPastePalette() {
   useEffect(() => {
     if (!window.ledge) return;
     let active = true;
-    const refresh = async () => {
-      try {
-        const next = await window.ledge.clipboardGetRecent(MAX_ENTRIES);
-        if (active) setEntries(next);
-      } catch {
-        // ignore
-      }
-    };
-    void refresh();
-    const unsubscribeState = window.ledge.subscribeState((state) => {
-      if (!active) return;
-      setEntries(state.clipboardHistory.slice(0, MAX_ENTRIES));
-    });
     const unsubscribeHint = window.ledge.onClipboardQuickPasteHint((hint) => {
       if (!active) return;
       if (hint.hint === 'shown') {
         setFocusIndex(0);
-        setPreviousAppName(hint.previousBundleId ?? '');
-        void refresh();
+        setPreviousAppName(hint.previousAppName || hint.previousBundleId || '');
       } else if (hint.hint === 'focus' && typeof hint.index === 'number') {
         setFocusIndex(hint.index);
       }
     });
     return () => {
       active = false;
-      unsubscribeState();
       unsubscribeHint();
     };
   }, []);

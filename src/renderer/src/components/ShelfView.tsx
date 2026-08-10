@@ -1,12 +1,12 @@
 import { memo, useCallback, useEffect,  useRef, useState, type RefObject } from 'react';
 import type { AppState, IngestPayload, ShelfItemRecord } from '@shared/schema';
-import { getExportableItems, getHeroCountLabel, getHeroMode, type HeroMode, type SessionMode } from './shelfFlow';
+import { getExportableItems, getHeroCountLabel, getHeroMode, type HeroMode, type SessionMode } from '../lib/shelfFlow';
 import {
   getHeroPreviewSource,
   heroStackClassName,
   isExternalTransfer,
   payloadsFromTransfer,
-} from './shelfDrop';
+} from '../lib/shelfDrop';
 import {
   IconClose,
   IconMenuDots,
@@ -95,12 +95,16 @@ function EmptyStateIllustration() {
 }
 
 interface ShelfViewState {
-  liveShelf: AppState['liveShelf'];
-  preferences: {
-    shelfInteraction: AppState['preferences']['shelfInteraction'];
-    shakeEnabled: AppState['preferences']['shakeEnabled'];
-  };
-  permissionStatus: AppState['permissionStatus'];
+  liveShelfId: string | null;
+  liveShelfItems: ShelfItemRecord[];
+  liveShelfUpdatedAt: string | null;
+  autoCloseShelf: boolean | undefined;
+  doubleClickAction: 'open' | 'reveal' | undefined;
+  shakeEnabled: boolean;
+  nativeHelperAvailable: boolean;
+  accessibilityTrusted: boolean;
+  lastError: string | null;
+  syncPlan: AppState['sync']['plan'];
 }
 
 interface ShelfViewProps {
@@ -108,14 +112,15 @@ interface ShelfViewProps {
 }
 
 function ShelfView({ state }: ShelfViewProps) {
-  const liveShelf = state.liveShelf;
-  const items = liveShelf?.items ?? [];
+  const liveShelf = state.liveShelfId
+    ? { id: state.liveShelfId, items: state.liveShelfItems, updatedAt: state.liveShelfUpdatedAt }
+    : null;
+  const items = state.liveShelfItems;
   const primaryItem = items[0] ?? null;
   const itemCount = items.length;
   const heroMode = getHeroMode(items);
-  const shelfInteraction = state.preferences.shelfInteraction;
-  const autoCloseShelf = shelfInteraction.autoCloseShelf ?? false;
-  const doubleClickAction = shelfInteraction.doubleClickAction ?? 'open';
+  const autoCloseShelf = state.autoCloseShelf ?? false;
+  const doubleClickAction = state.doubleClickAction ?? 'open';
   const [isImporting, setIsImporting] = useState(false);
   const [sessionMode, setSessionMode] = useState<SessionMode>('idle');
   const [isHovering, setIsHovering] = useState(false);
@@ -133,20 +138,20 @@ function ShelfView({ state }: ShelfViewProps) {
   const isExporting = sessionMode === 'exporting';
   const isMenuOpen = sessionMode === 'menuOpen';
   const isItemListOpen = sessionMode === 'itemListOpen';
-  const banner = !state.permissionStatus.nativeHelperAvailable
+  const banner = !state.nativeHelperAvailable
     ? {
         title: 'Native helper is unavailable',
-        copy: state.permissionStatus.lastError || 'Rebuild the bundled helper to re-enable shake detection.',
+        copy: state.lastError || 'Rebuild the bundled helper to re-enable shake detection.',
       }
-    : state.preferences.shakeEnabled && !state.permissionStatus.accessibilityTrusted
+    : state.shakeEnabled && !state.accessibilityTrusted
       ? {
           title: 'Accessibility access is off',
           copy: 'Enable it if you want shake-to-open.',
         }
-      : state.permissionStatus.lastError
+      : state.lastError
         ? {
             title: 'Native helper reported an error',
-            copy: state.permissionStatus.lastError,
+            copy: state.lastError,
           }
         : null;
 
@@ -558,24 +563,21 @@ function shelfItemsEqual(a: ShelfItemRecord[], b: ShelfItemRecord[]): boolean {
 }
 
 const ShelfViewMemo = memo(ShelfView, (prevProps, nextProps) => {
-  const prevShelf = prevProps.state.liveShelf;
-  const nextShelf = nextProps.state.liveShelf;
+  const prev = prevProps.state;
+  const next = nextProps.state;
 
-  if (prevShelf?.id !== nextShelf?.id) return false;
-  if (prevShelf?.updatedAt !== nextShelf?.updatedAt) return false;
-  if (!shelfItemsEqual(prevShelf?.items ?? [], nextShelf?.items ?? [])) return false;
+  if (prev.liveShelfId !== next.liveShelfId) return false;
+  if (prev.liveShelfUpdatedAt !== next.liveShelfUpdatedAt) return false;
+  if (!shelfItemsEqual(prev.liveShelfItems, next.liveShelfItems)) return false;
 
-  const prevPrefs = prevProps.state.preferences;
-  const nextPrefs = nextProps.state.preferences;
-  if (prevPrefs.shelfInteraction.doubleClickAction !== nextPrefs.shelfInteraction.doubleClickAction) return false;
-  if (prevPrefs.shelfInteraction.autoCloseShelf !== nextPrefs.shelfInteraction.autoCloseShelf) return false;
-  if (prevPrefs.shakeEnabled !== nextPrefs.shakeEnabled) return false;
+  if (prev.doubleClickAction !== next.doubleClickAction) return false;
+  if (prev.autoCloseShelf !== next.autoCloseShelf) return false;
+  if (prev.shakeEnabled !== next.shakeEnabled) return false;
 
-  const prevPerm = prevProps.state.permissionStatus;
-  const nextPerm = nextProps.state.permissionStatus;
-  if (prevPerm.nativeHelperAvailable !== nextPerm.nativeHelperAvailable) return false;
-  if (prevPerm.accessibilityTrusted !== nextPerm.accessibilityTrusted) return false;
-  if (prevPerm.lastError !== nextPerm.lastError) return false;
+  if (prev.nativeHelperAvailable !== next.nativeHelperAvailable) return false;
+  if (prev.accessibilityTrusted !== next.accessibilityTrusted) return false;
+  if (prev.lastError !== next.lastError) return false;
+  if (prev.syncPlan !== next.syncPlan) return false;
 
   return true;
 });

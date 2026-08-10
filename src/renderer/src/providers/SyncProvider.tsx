@@ -99,7 +99,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const lastPushedShelfUpdatedAt = useRef('');
   const lastPushedPreferences = useRef('');
   const queueRef = useRef(new MutationQueue());
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shelfDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prefDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingShelfRef = useRef<{ shelf: NonNullable<NonNullable<typeof localState>['liveShelf']>; updatedAt: string } | null>(null);
   // Snapshot of shelf ids present locally, so we can detect when a shelf is
   // permanently discarded on this device (evicted from Recents or cleared)
@@ -315,13 +316,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
+    if (shelfDebounceTimerRef.current) {
+      clearTimeout(shelfDebounceTimerRef.current);
     }
 
     pendingShelfRef.current = { shelf: localState.liveShelf, updatedAt: localState.liveShelf.updatedAt };
-    debounceTimerRef.current = setTimeout(() => {
-      debounceTimerRef.current = null;
+    shelfDebounceTimerRef.current = setTimeout(() => {
+      shelfDebounceTimerRef.current = null;
       pushPendingShelf();
     }, DEBOUNCE_MS);
   }, [localState?.liveShelf, remoteShelves, sessionToken, pushPendingShelf]);
@@ -363,21 +364,24 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
+    if (prefDebounceTimerRef.current) {
+      clearTimeout(prefDebounceTimerRef.current);
     }
 
-    debounceTimerRef.current = setTimeout(() => {
-      debounceTimerRef.current = null;
+    prefDebounceTimerRef.current = setTimeout(() => {
+      prefDebounceTimerRef.current = null;
       pushPreferences();
     }, DEBOUNCE_MS);
   }, [localState?.preferences, sessionToken, pushPreferences]);
 
   useEffect(() => {
     return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
+      if (shelfDebounceTimerRef.current) {
+        clearTimeout(shelfDebounceTimerRef.current);
         pushPendingShelf();
+      }
+      if (prefDebounceTimerRef.current) {
+        clearTimeout(prefDebounceTimerRef.current);
         pushPreferences();
       }
     };

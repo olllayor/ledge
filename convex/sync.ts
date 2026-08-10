@@ -1,4 +1,5 @@
 import { ConvexError, v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { mutation, query, internalMutation } from "./_generated/server";
 import {
   currentPlan,
@@ -707,32 +708,33 @@ export const deleteShelfItem = mutation({
 // List shelf items with cursor-based pagination. Returns:
 // - items: active (non-deleted) items
 // - tombstones: deleted item metadata so the client can remove local copies
-// - nextCursor: pass as `cursor` in the next call (or null when done)
+// - continueCursor: pass as `cursor` in the next call's paginationOpts (or null when done)
 export const listShelfItems = query({
   args: {
     ...sessionArgs,
     teamId: v.string(),
     shelfId: v.string(),
-    cursor: v.optional(v.number()),
-    limit: v.optional(v.number()),
+    paginationOpts: paginationOptsValidator,
+    since: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireUser(ctx, args.sessionToken);
 
-    const page = await ctx.db
+    const result = await ctx.db
       .query("shelfItems")
       .withIndex("by_team_shelf_updated", (q) =>
-        q.eq("teamId", args.teamId).eq("shelfId", args.shelfId).gt("serverUpdatedAt", args.cursor ?? 0),
+        q.eq("teamId", args.teamId).eq("shelfId", args.shelfId).gt("serverUpdatedAt", args.since ?? 0),
       )
       .order("asc")
-      .take(args.limit ?? 100);
+      .paginate(args.paginationOpts);
 
     return {
-      items: page.filter((i) => !i.deletedAt),
-      tombstones: page
+      items: result.page.filter((i) => !i.deletedAt),
+      tombstones: result.page
         .filter((i) => i.deletedAt)
         .map((i) => ({ itemId: i.itemId, version: i.version, deletedAt: i.deletedAt })),
-      nextCursor: page.length > 0 ? page[page.length - 1].serverUpdatedAt : args.cursor ?? 0,
+      continueCursor: result.continueCursor,
+      isDone: result.isDone,
     };
   },
 });

@@ -214,6 +214,9 @@ const api: LedgeAPI = {
   async clipboardPruneNow() {
     await ipcRenderer.invoke(IPC_CHANNELS.clipboardPruneNow);
   },
+  clipboardWindowShow() {
+    ipcRenderer.send(IPC_CHANNELS.clipboardWindowShow);
+  },
   clipboardStartItemDrag(payload) {
     const parsed = clipboardStartItemDragInputSchema.parse(payload);
     return ipcRenderer.sendSync(IPC_CHANNELS.clipboardStartItemDrag, parsed) as boolean;
@@ -240,6 +243,7 @@ const api: LedgeAPI = {
       hint: z.enum(['shown', 'focus']),
       index: z.number().int().min(0).max(8).optional(),
       previousBundleId: z.string().optional(),
+      previousAppName: z.string().optional(),
     });
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
       const parsed = hintSchema.safeParse(payload);

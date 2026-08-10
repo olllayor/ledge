@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { useAppVersion } from '../hooks/useAppVersion';
 import type { AppState } from '@shared/schema';
 import { IconGear } from './Icons';
@@ -45,19 +45,9 @@ const NAV_ITEMS: NavItem[] = [
 export function PreferencesView({ state }: PreferencesViewProps) {
   const appVersion = useAppVersion();
   const [activeSection, setActiveSection] = useState('general');
-  const [toast, setToast] = useState<{ message: string; kind: 'success' | 'error' } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showToast = useCallback((message: string, kind: 'success' | 'error' = 'success') => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ message, kind });
-    toastTimer.current = setTimeout(() => setToast(null), 2500);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    };
+  const showToast = useCallback((message: string, kind: 'success' | 'error' | 'info' = 'success') => {
+    window.ledge?.showToast(message, kind);
   }, []);
 
   const sectionTitles: Record<string, { title: string; subtitle: string }> = {
@@ -118,11 +108,6 @@ export function PreferencesView({ state }: PreferencesViewProps) {
         </div>
       </section>
 
-      {toast && (
-        <div className={`pref-toast is-${toast.kind}`} role="status" aria-live="polite">
-          {toast.message}
-        </div>
-      )}
     </main>
   );
 }

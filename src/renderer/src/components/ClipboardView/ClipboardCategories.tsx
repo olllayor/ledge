@@ -1,15 +1,15 @@
 import { memo } from 'react'
 import type { ClipboardCategory, ShelfColor } from '@shared/schema'
-import { CategoryList } from './ClipboardView/CategoryList'
-import { CategoryForm } from './ClipboardView/CategoryForm'
+import { CategoryList } from './CategoryList'
+import { CategoryForm } from './CategoryForm'
 
 interface ClipboardCategoriesProps {
   categories: ClipboardCategory[]
   selected: string | 'all'
-  onSelect: (id: string | 'all') => void
-  onCreate: (name: string, color: ShelfColor) => void
-  onRename: (id: string, name: string) => void
-  onRemove: (id: string) => void
+  onSelect: (id: string | 'all') => void;
+  onCreate: (name: string, color: ShelfColor) => void;
+  onRename: (id: string, name: string) => void;
+  onRemove: (id: string) => void;
 }
 
 /**

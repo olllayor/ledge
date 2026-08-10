@@ -25,7 +25,7 @@ export interface SettingsRowProps {
 
 export function SettingsRow({ icon, title, copy, trailing, fullWidth, children }: SettingsRowProps) {
   return (
-    <div className={`settings-row${fullWidth ? ' is-fullwidth' : ''}`}>
+    <div className={`settings-row${fullWidth ? ' is-full-width' : ''}`}>
       {icon ? <div className="settings-row-icon">{icon}</div> : null}
       <div className="settings-row-body">
         <div className="settings-row-title">{title}</div>
@@ -47,15 +47,16 @@ export function Toggle({
   disabled?: boolean;
 }) {
   return (
-    <label className="settings-toggle">
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
+    <button
+      type="button"
+      className={`toggle${checked ? ' is-on' : ''}`}
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
       <span aria-hidden="true" />
-    </label>
+    </button>
   );
 }
 
@@ -82,6 +83,14 @@ export function Picker({
   );
 }
 
+const statusPillVariantMap: Record<'good' | 'warn' | 'error' | 'muted' | 'neutral', string> = {
+  good: 'is-good',
+  warn: 'is-warn',
+  error: 'is-warn',
+  muted: 'is-neutral',
+  neutral: 'is-neutral',
+};
+
 export function StatusPill({
   label,
   variant,
@@ -89,5 +98,9 @@ export function StatusPill({
   label: string;
   variant: 'good' | 'warn' | 'error' | 'muted' | 'neutral';
 }) {
-  return <span className={`status-pill status-pill-${variant}`}>{label}</span>;
+  return (
+    <span className={`settings-state-pill ${statusPillVariantMap[variant]}`}>
+      {label}
+    </span>
+  );
 }

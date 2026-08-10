@@ -21,18 +21,19 @@ import {
  */
 
 export const selectShelfView = (state: AppState) => ({
-  liveShelf: state.liveShelf,
-  preferences: {
-    shelfInteraction: state.preferences.shelfInteraction,
-    shakeEnabled: state.preferences.shakeEnabled
-  },
-  permissionStatus: state.permissionStatus,
-  sync: { plan: state.sync.plan }
+  liveShelfId: state.liveShelf?.id ?? null,
+  liveShelfItems: state.liveShelf?.items ?? [],
+  liveShelfUpdatedAt: state.liveShelf?.updatedAt ?? null,
+  autoCloseShelf: state.preferences.shelfInteraction.autoCloseShelf,
+  doubleClickAction: state.preferences.shelfInteraction.doubleClickAction,
+  shakeEnabled: state.preferences.shakeEnabled,
+  nativeHelperAvailable: state.permissionStatus.nativeHelperAvailable,
+  accessibilityTrusted: state.permissionStatus.accessibilityTrusted,
+  lastError: state.permissionStatus.lastError,
+  syncPlan: state.sync.plan,
 });
 
-export const selectOnboarding = (state: AppState) => ({
-  preferences: { hasCompletedOnboarding: state.preferences.hasCompletedOnboarding }
-});
+export const selectOnboarding = (state: AppState) => state.preferences.hasCompletedOnboarding;
 
 export interface PlanInfo {
   plan: BillingPlan

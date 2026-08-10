@@ -70,6 +70,7 @@ export const IPC_CHANNELS = {
   clipboardEntryRemove: 'ledge:clipboard-entry:remove',
   clipboardEntryClearAll: 'ledge:clipboard-entry:clear-all',
   clipboardPruneNow: 'ledge:clipboard-prune-now',
+  clipboardWindowShow: 'ledge:clipboard-window:show',
   // ---- Notch dropout (replaces peek window) ----
   notchDropoutShow: 'ledge:notch-dropout:show',
   notchDropoutHide: 'ledge:notch-dropout:hide',
@@ -155,6 +156,7 @@ export interface ClipboardQuickPasteHint {
   hint: 'shown' | 'focus';
   index?: number;
   previousBundleId?: string;
+  previousAppName?: string;
 }
 
 export interface ClipboardPeekHint {
@@ -209,6 +211,7 @@ export interface LedgeAPI {
   clipboardEntryRemove(payload: { entryId: string }): Promise<void>;
   clipboardEntryClearAll(): Promise<void>;
   clipboardPruneNow(): Promise<void>;
+  clipboardWindowShow(): void;
   clipboardStartItemDrag(payload: { entryId: string }): boolean;
   clipboardQuickPasteShow(): void;
   clipboardQuickPasteHide(): void;
