@@ -36,6 +36,9 @@ export class PeekWindow {
         preload: resolvePreloadPath(),
         contextIsolation: true,
         sandbox: true,
+        // Hotkey surface: instant thumbnail render after idle must not
+        // wait for Chromium's backgrounded-renderer ramp.
+        backgroundThrottling: false,
       },
     });
 

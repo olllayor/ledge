@@ -17,11 +17,15 @@ interface TrayCallbacks {
 }
 
 export class TrayController {
-  private readonly tray: Tray
+  private tray: Tray
   private snapshot: AppState | null = null
 
   constructor(private readonly callbacks: TrayCallbacks) {
     this.tray = new Tray(createTrayImage())
+    this.attach()
+  }
+
+  private attach(): void {
     this.tray.setIgnoreDoubleClickEvents(true)
     this.tray.setToolTip('Ledge')
     this.tray.on('click', () => {
@@ -36,6 +40,16 @@ export class TrayController {
     this.tray.on('drop-text', (_event, text) => {
       this.callbacks.onDropText(text)
     })
+  }
+
+  /**
+   * macOS can drop status items across sleep/display reconfiguration.
+   * Cheap and idempotent: destroy + rebuild from the same icon path.
+   */
+  reassert(): void {
+    this.tray.destroy()
+    this.tray = new Tray(createTrayImage())
+    this.attach()
   }
 
   update(snapshot: AppState): void {

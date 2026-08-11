@@ -47,6 +47,9 @@ export class NotchDropoutWindow {
         preload: resolvePreloadPath(),
         contextIsolation: true,
         sandbox: true,
+        // Hover-triggered HUD; must be responsive the moment the cursor
+        // enters the notch hot zone, even after long idle.
+        backgroundThrottling: false,
       },
     });
 

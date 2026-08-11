@@ -35,6 +35,8 @@ export class QuickPasteWindow {
         preload: resolvePreloadPath(),
         contextIsolation: true,
         sandbox: true,
+        // Hotkey surface: must respond instantly even after hours hidden.
+        backgroundThrottling: false,
       },
     });
 

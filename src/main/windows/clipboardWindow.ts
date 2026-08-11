@@ -50,6 +50,9 @@ export class ClipboardWindow {
         preload: resolvePreloadPath(),
         contextIsolation: true,
         sandbox: true,
+        // Clipboard history refetches on show; throttling would delay the
+        // first paint after long idle.
+        backgroundThrottling: false,
       },
     });
     this.window.on('closed', () => {

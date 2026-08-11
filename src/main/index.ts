@@ -1,4 +1,4 @@
-import { app, Menu, net, protocol as protocolModule, screen, shell } from 'electron'
+import { app, Menu, net, powerMonitor, protocol as protocolModule, screen, shell } from 'electron'
 import { execFileSync } from 'node:child_process'
 import { extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -410,6 +410,14 @@ app.whenReady().then(async () => {
   preferencesSync.sync()
   await nativeAgent.configureGesture(stateStore.getPreferences())
   broadcastState()
+
+  powerMonitor.on('resume', () => {
+    // After wake, macOS may have recycled the status item and the Swift
+    // helper can be mid-respawn (it auto-restarts on unexpected exit);
+    // re-assert the tray cheaply and push fresh state to any open UI.
+    tray.reassert()
+    broadcastState()
+  })
 })
 
 app.on('window-all-closed', () => {

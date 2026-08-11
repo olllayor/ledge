@@ -35,6 +35,9 @@ export class ShelfWindow {
         preload: resolvePreloadPath(),
         contextIsolation: true,
         sandbox: true,
+        // Panels idle hidden for hours; Chromium would otherwise throttle
+        // timers/rAF and the first shake after a break feels dead.
+        backgroundThrottling: false,
       },
     });
 
