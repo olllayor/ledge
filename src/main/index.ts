@@ -28,6 +28,20 @@ import { SecureSessionStore } from './services/secureSessionStore'
 import { FEATURE_FLAGS } from './services/featureFlags'
 import { NotchDropoutWindow } from './windows/notchDropoutWindow'
 import { NotchHoverMonitor } from './services/notchHoverMonitor'
+import {
+  writeSecondInstanceMarker,
+  startSingleInstanceWatch,
+} from './services/singleInstance'
+
+// Menu-bar utility: exactly one instance ever runs. A second launch
+// (Finder, Spotlight, login-item racing a manual start) writes a
+// resurface signal for the primary and quits before touching state,
+// windows, or global shortcuts — `app.quit()` here is safe because
+// nothing has been registered yet.
+if (!app.requestSingleInstanceLock()) {
+  writeSecondInstanceMarker(app.getPath('userData'))
+  app.quit()
+}
 
 const PROJECT_URL = 'https://github.com/olllayor/ledge'
 const WHATS_NEW_URL = `${PROJECT_URL}/releases`
@@ -349,6 +363,20 @@ app.whenReady().then(async () => {
   })
   ipcRegistrar.registerAll()
 
+  startSingleInstanceWatch({
+    userDataDir: app.getPath('userData'),
+    onSignal: () => {
+      // A second launch means the user reached for Ledge while it was
+      // already running. Mid-work (a live shelf exists) we stay out of
+      // the way; otherwise surface Settings, mirroring `activate`.
+      if (stateStore.getLiveShelf()) {
+        console.log('[ledge] second instance launch ignored (live shelf)')
+        return
+      }
+      void preferencesWindow.show()
+    },
+  })
+
   // The Swift helper is the primary clipboard observer. The TS format-hash
   // poller runs only while the helper is down: running both double-captures
   // every copy (their formats vocabularies never hash-match) and the
@@ -382,6 +410,11 @@ app.whenReady().then(async () => {
   preferencesSync.sync()
   await nativeAgent.configureGesture(stateStore.getPreferences())
   broadcastState()
+})
+
+app.on('window-all-closed', () => {
+  // Menu-bar utility: closing every window must never quit the app.
+  // Tray Quit (and Cmd+Q) are the only exits.
 })
 
 app.on('activate', () => {
