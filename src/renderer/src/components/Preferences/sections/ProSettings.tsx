@@ -98,7 +98,6 @@ export function ProSettings({ state, showToast }: { state: AppState; showToast: 
           icon={<IconLock />}
           title="License key"
           copy="Only needed if you paid with a different email — paste the key from your Lemon Squeezy receipt."
-          trailing={<span />}
           fullWidth
         >
           <div className="settings-field" style={{ padding: '8px 0 6px' }}>
@@ -113,7 +112,6 @@ export function ProSettings({ state, showToast }: { state: AppState; showToast: 
         <SettingsRow
           title="Order ID"
           copy="Or paste a Lemon Squeezy order ID to refresh entitlements."
-          trailing={<span />}
           fullWidth
         >
           <div className="settings-field" style={{ padding: '6px 0 8px' }}>

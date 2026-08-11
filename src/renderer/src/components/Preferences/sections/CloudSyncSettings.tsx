@@ -3,6 +3,7 @@ import { formatBytes } from '../formatBytes';
 import { useState, useEffect } from 'react';
 import { useSync } from '../../../providers/SyncProvider';
 import { ProBadge } from '../../ProUpgradePrompt';
+import { OtpInput } from '../../OtpInput';
 import { SettingsGroup, SettingsRow, StatusPill, type ShowToast } from '../primitives';
 
 
@@ -57,12 +58,24 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
     }
   }
 
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+
+  // Two-step sign-out: first click arms the row ("Confirm sign out" in the
+  // danger color), second click within the interaction commits. Picked (A)
+  // over a native modal — the app already speaks this idiom in Teams'
+  // danger zone, and a modal over a vibrancy window forces a material
+  // mismatch. Reversible enough not to need (C)'s undo toast.
   async function handleSignOut() {
-    if (!window.confirm('Sign out of Cloud Sync? Your local shelves will remain.')) return;
+    if (!confirmingSignOut) {
+      setConfirmingSignOut(true);
+      return;
+    }
+    setConfirmingSignOut(false);
     try {
       await sync.signOut();
       showToast('Signed out');
     } catch (err) {
+      setConfirmingSignOut(false);
       showToast(err instanceof Error ? err.message : 'Failed to sign out', 'error');
     }
   }
@@ -87,7 +100,7 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
             title="Status"
             trailing={<StatusPill label={state.sync.status} variant="good" />}
           />
-          <SettingsRow title="Signed in as" copy={state.sync.signedInEmail} trailing={<span />} />
+          <SettingsRow title="Signed in as" copy={state.sync.signedInEmail} />
           <SettingsRow
             title={
               <span className="settings-row-title-row">
@@ -96,17 +109,14 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
               </span>
             }
             copy={overview ? `${overview.plan.toUpperCase()} · ${overview.syncedShelfCount} / ${overview.shelfLimit} shelves` : `${state.sync.plan.toUpperCase()}`}
-            trailing={<span />}
           />
           <SettingsRow
             title="Devices"
             copy={overview ? `${overview.deviceCount} / ${overview.deviceLimit} connected` : `${state.sync.deviceCount} connected`}
-            trailing={<span />}
           />
           {overview && overview.storageBytesLimit > 0 && (
             <SettingsRow
               title="Storage"
-              trailing={<span />}
               fullWidth
             >
               <div className="settings-field" style={{ padding: '8px 0 12px' }}>
@@ -126,7 +136,6 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
             <SettingsRow
               title="Session"
               copy={`Expires in ${sync.sessionDaysRemaining} day${sync.sessionDaysRemaining === 1 ? '' : 's'}`}
-              trailing={<span />}
             />
           )}
         </SettingsGroup>
@@ -136,8 +145,9 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
             className="settings-cta is-danger"
             type="button"
             onClick={() => void handleSignOut()}
+            onBlur={() => setConfirmingSignOut(false)}
           >
-            Sign Out
+            {confirmingSignOut ? 'Confirm sign out' : 'Sign Out'}
           </button>
         </SettingsGroup>
       </>
@@ -179,15 +189,11 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
       {(status === 'sent' || status === 'verifying') && (
         <SettingsGroup title="Verification">
           <div className="settings-field">
-            <input
-              className="pref-input code-input"
+            <OtpInput
               value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="000000"
-              inputMode="numeric"
-              maxLength={6}
+              onChange={setCode}
+              onComplete={() => void verifyCode()}
               disabled={status === 'verifying'}
-              onKeyDown={(e) => { if (e.key === 'Enter') void verifyCode(); }}
             />
             <p className="pref-help">Check your email for a 6-digit verification code.</p>
           </div>

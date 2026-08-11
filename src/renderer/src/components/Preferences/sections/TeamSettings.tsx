@@ -164,7 +164,6 @@ function TeamSettingsConfigured({
           <SettingsRow
             title="No teams yet"
             copy="Create a team to start sharing shelves."
-            trailing={<span />}
           />
         )}
 
@@ -229,7 +228,6 @@ function TeamSettingsConfigured({
           {/* Members */}
           <SettingsRow
             title={`Members (${teamDetail.members.length})`}
-            trailing={<span />}
             fullWidth
           >
             <div className="settings-field" style={{ padding: '8px 0 4px' }}>
@@ -257,7 +255,6 @@ function TeamSettingsConfigured({
             <SettingsRow
               title="Invite member"
               copy="Send an email invitation to join this team."
-              trailing={<span />}
               fullWidth
             >
               <div className="settings-field" style={{ padding: '8px 0 4px' }}>
@@ -291,7 +288,6 @@ function TeamSettingsConfigured({
           {isAdmin && pendingInvites && pendingInvites.length > 0 && (
             <SettingsRow
               title={`Pending invitations (${pendingInvites.length})`}
-              trailing={<span />}
               fullWidth
             >
               <div className="settings-field" style={{ padding: '8px 0 4px' }}>

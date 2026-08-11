@@ -1,0 +1,178 @@
+name: Release
+
+# Tag-driven releases: push a `vX.Y.Z` tag (normally via `pnpm release`)
+# and this workflow builds, packages, and publishes the GitHub Release.
+# `workflow_dispatch` is the manual escape hatch — it releases the version
+# currently in package.json, creating the tag if it doesn't exist yet.
+#
+# See docs/RELEASING.md for the full flow.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag to release (e.g. v0.2.0). Defaults to v<package.json version>.'
+        required: false
+        default: ''
+
+# Coalesce concurrent runs so two tag pushes within seconds don't both try
+# to publish a release.
+concurrency:
+  group: ledge-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-14
+    # Release builds compile Electron + native helper + sign + DMG; allow
+    # up to an hour so a slow Apple notarization doesn’t kill the job.
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve release tag
+        id: release-tag
+        env:
+          # Pass the dispatch input through the environment instead of
+          # splicing it into the shell via ${{ }} — templating it inline is
+          # the GitHub Actions script-injection anti-pattern (a crafted
+          # tag_name would run arbitrary shell in this contents:write job).
+          TAG_NAME_INPUT: ${{ github.event.inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+          elif [ -n "${TAG_NAME_INPUT}" ]; then
+            tag="${TAG_NAME_INPUT}"
+          else
+            tag="v${version}"
+          fi
+
+          # The tag must match package.json — a mismatch means the tag was
+          # pushed without the release commit (or onto the wrong ref) and
+          # would publish an artifact whose embedded version lies.
+          if [ "${tag}" != "v${version}" ]; then
+            echo "::error::Tag ${tag} does not match package.json version ${version}." \
+                 "Run 'pnpm release' so the version bump and tag stay in lockstep."
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            tag_exists=true
+          else
+            tag_exists=false
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "tag_exists=${tag_exists}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release tag (manual dispatch only)
+        if: github.ref_type != 'tag' && steps.release-tag.outputs.tag_exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.release-tag.outputs.tag }}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${{ steps.release-tag.outputs.tag }}"
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Configure code signing (optional)
+        # `secrets` is not usable in an `if:` expression, so gate here.
+        # electron-builder treats a *defined-but-empty* CSC_LINK as a real
+        # cert path and fails trying to resolve it — worse than leaving it
+        # unset, which correctly falls back to ad-hoc signing. So these are
+        # only exported into the job environment when the secrets actually
+        # have a value. Without an Apple account this step is a no-op and the
+        # build falls back to ad-hoc (unsigned) packaging.
+        run: |
+          if [ -n "${{ secrets.CSC_LINK }}" ] && [ -n "${{ secrets.CSC_KEY_PASSWORD }}" ]; then
+            echo "CSC_LINK=${{ secrets.CSC_LINK }}" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=${{ secrets.CSC_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "Code signing credentials found — configuring."
+          else
+            echo "No code signing credentials configured — building ad-hoc (unsigned)."
+          fi
+
+      - name: Build & Package
+        run: pnpm dist:release
+
+      - name: Notarize DMG
+        # `secrets` is not usable in an `if:` expression, so gate here.
+        # Without an Apple account (no notarization creds) this is a no-op:
+        # the DMG is published unsigned and the job still succeeds.
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_ID}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD}" ] || [ -z "${APPLE_TEAM_ID}" ]; then
+            echo "No Apple notarization credentials configured — skipping notarization."
+            exit 0
+          fi
+          dmg="$(ls dist/*.dmg | head -1)"
+          echo "Submitting ${dmg} for notarization…"
+          xcrun notarytool submit "${dmg}" \
+            --apple-id "${APPLE_ID}" \
+            --password "${APPLE_APP_SPECIFIC_PASSWORD}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --wait
+          xcrun stapler staple "${dmg}"
+
+      - name: List artifacts
+        run: ls -R dist/ | head -50
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          set -euo pipefail
+          node scripts/release-notes.mjs "${{ steps.release-tag.outputs.version }}" > release-notes.md
+          echo "--- Release notes ---"
+          cat release-notes.md
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ledge-dmg
+          path: dist/*.dmg
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-tag.outputs.tag }}
+          name: Ledge ${{ steps.release-tag.outputs.tag }}
+          body_path: release-notes.md
+          files: |
+            dist/*.dmg

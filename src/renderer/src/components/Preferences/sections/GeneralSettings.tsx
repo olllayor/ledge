@@ -57,8 +57,7 @@ export function GeneralSettings({ state, showToast }: { state: AppState; showToa
         <SettingsRow
           icon={<IconShake />}
           title="Excluded applications"
-          copy="Skip shake detection in these apps. Enter one bundle ID per line (e.g. com.apple.Safari)."
-          trailing={<span />}
+          copy="Skip shake detection in these apps. One bundle ID per line or comma-separated (e.g. com.apple.Safari)."
           fullWidth
         >
           <div className="settings-field" style={{ padding: '8px 0 12px' }}>
