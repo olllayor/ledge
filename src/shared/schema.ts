@@ -111,6 +111,11 @@ export const permissionStatusSchema = z.object({
   lastError: z.string().default(''),
   shortcutRegistered: z.boolean().default(false),
   shortcutError: z.string().default(''),
+  // OS-owned login-item truth, mirrored for the Settings UI. Always
+  // false in dev builds (read-back is packaged-only, matching sync()).
+  loginItemOpenAtLogin: z.boolean().default(false),
+  loginItemWasOpenedAtLogin: z.boolean().default(false),
+  loginItemWasOpenedAsHidden: z.boolean().default(false),
 });
 
 export const syncStatusSchema = z.enum([

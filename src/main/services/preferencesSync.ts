@@ -16,11 +16,27 @@ import { FEATURE_FLAGS } from './featureFlags'
  * store because none of this is persisted there — Electron and macOS
  * own the source of truth.
  */
+export interface LoginItemSettingsSnapshot {
+  openAtLogin: boolean
+  wasOpenedAtLogin: boolean
+  wasOpenedAsHidden: boolean
+}
+
+/** Injectable seam so tests can simulate approved/hidden matrices. */
+export type LoginItemSettingsPort = () => LoginItemSettingsSnapshot
+
+const LOGIN_ITEM_DEV_DEFAULTS: LoginItemSettingsSnapshot = {
+  openAtLogin: false,
+  wasOpenedAtLogin: false,
+  wasOpenedAsHidden: false,
+}
+
 export class PreferencesSyncService {
   private status: Pick<PermissionStatus, 'shortcutRegistered' | 'shortcutError'> = {
     shortcutRegistered: false,
     shortcutError: '',
   }
+  private loginItemStatus: LoginItemSettingsSnapshot = { ...LOGIN_ITEM_DEV_DEFAULTS }
 
   constructor(
     private readonly stateStore: StateStore,
@@ -30,6 +46,8 @@ export class PreferencesSyncService {
     private readonly clipboardMonitor: ClipboardMonitor,
     private readonly onCreateShelfFromShortcut: () => Promise<void>,
     private readonly notchDropoutWindow?: NotchDropoutWindow,
+    private readonly getLoginItemSettings: LoginItemSettingsPort = () =>
+      app.isPackaged ? app.getLoginItemSettings() : { ...LOGIN_ITEM_DEV_DEFAULTS },
   ) {}
 
   getStatus(): Pick<PermissionStatus, 'shortcutRegistered' | 'shortcutError'> {
@@ -40,7 +58,24 @@ export class PreferencesSyncService {
     return permissionStatusSchema.parse({
       ...this.nativeAgent.getStatus(),
       ...this.status,
+      loginItemOpenAtLogin: this.loginItemStatus.openAtLogin,
+      loginItemWasOpenedAtLogin: this.loginItemStatus.wasOpenedAtLogin,
+      loginItemWasOpenedAsHidden: this.loginItemStatus.wasOpenedAsHidden,
     })
+  }
+
+  /** Current OS-side login-item truth (zeros in dev builds). */
+  currentLoginItemStatus(): LoginItemSettingsSnapshot {
+    return { ...this.loginItemStatus }
+  }
+
+  private refreshLoginItemStatus(): void {
+    try {
+      this.loginItemStatus = this.getLoginItemSettings()
+    } catch (error) {
+      console.warn('[ledge] login-item status read-back failed:', error)
+      this.loginItemStatus = { ...LOGIN_ITEM_DEV_DEFAULTS }
+    }
   }
 
   /**
@@ -53,11 +88,15 @@ export class PreferencesSyncService {
       try {
         app.setLoginItemSettings({
           openAtLogin: preferences.launchAtLogin,
+          // Menu-bar utility: starting at login must never surface a
+          // window or steal focus — tray icon only.
+          openAsHidden: true,
         })
       } catch {
         // Some macOS environments can still reject login-item writes.
       }
     }
+    this.refreshLoginItemStatus()
     globalShortcut.unregisterAll()
     this.status = {
       shortcutRegistered: false,

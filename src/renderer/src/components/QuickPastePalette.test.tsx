@@ -45,7 +45,10 @@ function buildState(): AppState {
       shakeReady: true,
       lastError: '',
       shortcutRegistered: true,
-      shortcutError: ''
+      shortcutError: '',
+      loginItemOpenAtLogin: false,
+      loginItemWasOpenedAtLogin: false,
+      loginItemWasOpenedAsHidden: false
     },
     sync: {
       enabled: false,

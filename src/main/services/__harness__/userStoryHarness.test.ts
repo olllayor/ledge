@@ -258,6 +258,9 @@ function permissionStatus(): PermissionStatus {
     lastError: '',
     shortcutRegistered: true,
     shortcutError: '',
+    loginItemOpenAtLogin: false,
+    loginItemWasOpenedAtLogin: false,
+    loginItemWasOpenedAsHidden: false,
   }
 }
 
@@ -1166,6 +1169,9 @@ describe('§10 Native helper & permissions', () => {
       lastError: 'binary missing',
       shortcutRegistered: false,
       shortcutError: '',
+      loginItemOpenAtLogin: false,
+      loginItemWasOpenedAtLogin: false,
+      loginItemWasOpenedAsHidden: false,
     }
     expect(status.nativeHelperAvailable).toBe(false)
     expect(status.lastError).toBe('binary missing')

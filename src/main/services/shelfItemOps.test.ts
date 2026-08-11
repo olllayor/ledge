@@ -31,7 +31,10 @@ async function buildHarness(): Promise<{
     shakeReady: false,
     lastError: '',
     shortcutRegistered: false,
-    shortcutError: ''
+    shortcutError: '',
+    loginItemOpenAtLogin: false,
+    loginItemWasOpenedAtLogin: false,
+    loginItemWasOpenedAsHidden: false
   }))
   const tick = vi.fn()
   const ops = new ShelfItemOps(stateStore, {
