@@ -51,6 +51,26 @@ export function GeneralSettings({ state, showToast }: { state: AppState; showToa
             />
           }
         />
+        {preferences.launchAtLogin ? (
+          <SettingsRow
+            title="Login item status"
+            copy={
+              state.permissionStatus.loginItemOpenAtLogin
+                ? state.permissionStatus.loginItemWasOpenedAsHidden
+                  ? 'Ledge starts hidden in the background at login — tray icon only, no windows.'
+                  : 'Ledge will start at your next login.'
+                : 'macOS hasn’t confirmed the login item yet. Check System Settings › General › Login Items.'
+            }
+            trailing={
+              <StatusPill
+                label={
+                  state.permissionStatus.loginItemOpenAtLogin ? 'Starts hidden' : 'Check Login Items'
+                }
+                variant={state.permissionStatus.loginItemOpenAtLogin ? 'good' : 'warn'}
+              />
+            }
+          />
+        ) : null}
       </SettingsGroup>
 
       <SettingsGroup title="Shake Gesture">
