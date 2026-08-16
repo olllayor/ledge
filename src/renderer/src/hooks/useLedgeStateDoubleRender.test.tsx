@@ -16,6 +16,7 @@ interface FakeLedge {
 function makeState(): AppState {
   return {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: {} as AppState['preferences'],
     sync: {} as AppState['sync'],

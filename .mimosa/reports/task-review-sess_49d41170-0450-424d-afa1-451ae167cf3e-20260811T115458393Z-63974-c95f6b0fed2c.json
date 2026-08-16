@@ -1,0 +1,349 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260811T115458393Z-63974-c95f6b0fed2c",
+  "run_status": "completed",
+  "errors": [],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "complete",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": true,
+      "captured_files": 195,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 17
+    },
+    "change_tracking": {
+      "touched_observed": 17,
+      "touched_retained": 17,
+      "truncated": false,
+      "bash_mutation": false,
+      "bash_discovered": 0,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 17,
+      "selected_files": 17,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 17,
+      "scanned_files": 17,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {},
+    "reasons": [],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-08-11T11:54:58.393Z",
+  "session_id": "sess_49d41170-0450-424d-afa1-451ae167cf3e",
+  "target": ".",
+  "revision": "2959cf120e813409ab6e1944148f0658802ddd28",
+  "rules_version": "unavailable",
+  "diff_hash": "26e4cb2e2bf6f50ce00a01be37144cf50d17e0cedc7e1939c2106aed4bf2fd1f",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 17,
+    "changed_files": [
+      {
+        "file": "src/main/index.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 1
+          },
+          {
+            "start": 31,
+            "end": 44
+          },
+          {
+            "start": 366,
+            "end": 379
+          },
+          {
+            "start": 413,
+            "end": 425
+          }
+        ],
+        "before_hash": "83ccb297cd9d235553203fe24afa773480da5ed846d44000f18552d4d0531966",
+        "after_hash": "5cbeb8b2eda20bad002b83a8d615377f1a15448821ec7ccc881fee5f55dd19b9"
+      },
+      {
+        "file": "src/main/services/__harness__/userStoryHarness.test.ts",
+        "ranges": [
+          {
+            "start": 261,
+            "end": 263
+          },
+          {
+            "start": 1172,
+            "end": 1174
+          }
+        ],
+        "before_hash": "d0e25ab6ff4fa03d5de6e2a7cabee26a75c018dba0998287e9ae9cc97bea12d1",
+        "after_hash": "f80a17a281709ea697b1891309a0ac6f9e7c6f3817dcb59d054db2abc0757c2b"
+      },
+      {
+        "file": "src/main/services/preferencesSync.test.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 95
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "d0b452d0d3e42c0dd235ffeb3a3ccaad7ba29a031089acb05e7bf7200d2e1fc2"
+      },
+      {
+        "file": "src/main/services/preferencesSync.ts",
+        "ranges": [
+          {
+            "start": 19,
+            "end": 33
+          },
+          {
+            "start": 39,
+            "end": 39
+          },
+          {
+            "start": 49,
+            "end": 50
+          },
+          {
+            "start": 61,
+            "end": 63
+          },
+          {
+            "start": 67,
+            "end": 80
+          },
+          {
+            "start": 91,
+            "end": 93
+          },
+          {
+            "start": 99,
+            "end": 99
+          }
+        ],
+        "before_hash": "4edf302428030ce4a7fbf023e59ef1affce46eee12524305a6f4f86b6a437bef",
+        "after_hash": "668acc056dde6430fd8fdff1e43aca8ad01f53c3b87cae15226897b5f4a9adfe"
+      },
+      {
+        "file": "src/main/services/shelfItemOps.test.ts",
+        "ranges": [
+          {
+            "start": 34,
+            "end": 37
+          }
+        ],
+        "before_hash": "d7d9b11c78466aa8f2f9fb8e47e5cd0185bfc77c6cd29abe8e43b541623c9136",
+        "after_hash": "db1681dd273a412cf78ca410655c8de511d029d57759d77551c530197cbe0fd4"
+      },
+      {
+        "file": "src/main/services/singleInstance.test.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 83
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "292af7c16290c2cb56a0da2dce5574afdbf124db58ec036ff024c5c24e77a80b"
+      },
+      {
+        "file": "src/main/services/singleInstance.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 93
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "863e3424b2502335a28e2bdd7828c79624f42bd661b9ae62882958b955b843f4"
+      },
+      {
+        "file": "src/main/tray.ts",
+        "ranges": [
+          {
+            "start": 20,
+            "end": 20
+          },
+          {
+            "start": 25,
+            "end": 28
+          },
+          {
+            "start": 45,
+            "end": 54
+          }
+        ],
+        "before_hash": "918e0d63e5b2e125c53dc647997c2515435f0004f67d7adc5c6a41ae9df00799",
+        "after_hash": "fd00228ef54c3f39f6305b217e1474143b7cb64f599ac541c430851690d81a8a"
+      },
+      {
+        "file": "src/main/windows/clipboardWindow.ts",
+        "ranges": [
+          {
+            "start": 53,
+            "end": 55
+          }
+        ],
+        "before_hash": "bd266da8fc8b0b14f2bbc9c3c1f813ae8d9daf3f2298f50521e1a3057b882455",
+        "after_hash": "4e2b282ab505ee790655d10d2e7cc13c02c8a370922820a471b389e6becd5db1"
+      },
+      {
+        "file": "src/main/windows/notchDropoutWindow.ts",
+        "ranges": [
+          {
+            "start": 50,
+            "end": 52
+          }
+        ],
+        "before_hash": "4375f8e3752eeb3f5f4d1bf9dd9e96bb0253627e80104d7450ba2103d36b05d4",
+        "after_hash": "0df757bfeb4583092828485a5f3b4616ba3437c2f9b176e4da2361658ab0b0cd"
+      },
+      {
+        "file": "src/main/windows/peekWindow.ts",
+        "ranges": [
+          {
+            "start": 39,
+            "end": 41
+          }
+        ],
+        "before_hash": "9c729742d66c90d3b74b1e55766476e7c1903e8846f0988753cd6804648b6fb2",
+        "after_hash": "88e4d36e7dc8e7517bf7aea74c37c613928d460e1bd71bc5f6dbd39c473c1f5b"
+      },
+      {
+        "file": "src/main/windows/quickPasteWindow.ts",
+        "ranges": [
+          {
+            "start": 38,
+            "end": 39
+          }
+        ],
+        "before_hash": "f5ef6da039311c3f5249d702388b6820c2fa2f8b9a78eda8721606d5ccc5a5ef",
+        "after_hash": "7d64e612b6d9cf57cf138f253f4afd55ae8985a96f053efda366e630409fc0ac"
+      },
+      {
+        "file": "src/main/windows/shelfWindow.ts",
+        "ranges": [
+          {
+            "start": 38,
+            "end": 40
+          }
+        ],
+        "before_hash": "3535d0915763c30dfab3ed8ac11c5f21902e1fd94fcd608b37dd106caa69cdff",
+        "after_hash": "54166f73b20d9505139fd7ebfbb784125af2711d37958374a6e6f8fe1ff570dc"
+      },
+      {
+        "file": "src/renderer/src/components/OnboardingView.test.tsx",
+        "ranges": [
+          {
+            "start": 27,
+            "end": 30
+          }
+        ],
+        "before_hash": "e36065285cab8f80caf16ea2d88a8a20b96d68361cc83774fc9fba5fdda0ef0e",
+        "after_hash": "184206619b47c35a0912bbc0326c5f78ef8899658be8be81c7a05b06e5ede06e"
+      },
+      {
+        "file": "src/renderer/src/components/Preferences/sections/GeneralSettings.tsx",
+        "ranges": [
+          {
+            "start": 54,
+            "end": 73
+          }
+        ],
+        "before_hash": "40b78a87e2afc01f341b5b1b9e8e693b71b77c06b79d0bc47df852415ab877b5",
+        "after_hash": "5554aa8c0476a5bfe479749bd6f56be3049e06e5926ce28f80d47d544f146d3e"
+      },
+      {
+        "file": "src/renderer/src/components/QuickPastePalette.test.tsx",
+        "ranges": [
+          {
+            "start": 48,
+            "end": 51
+          }
+        ],
+        "before_hash": "c6544326f54b58c7ee8dfd1c78d0c46e795fcf526735b61a956f6eec28fcdde4",
+        "after_hash": "3771b506f642180df7aa4a993e9e4001e257a8c6de6d026bb80bdec3dc4e9c27"
+      },
+      {
+        "file": "src/shared/schema.ts",
+        "ranges": [
+          {
+            "start": 114,
+            "end": 118
+          }
+        ],
+        "before_hash": "649b2e5d8d2c3c1b4df1e2db7f9fd1f40b79938071378142505b76f6f29617a0",
+        "after_hash": "b9a096fcce26fd95650f57d8b5f97042e7b6289b5d5e3e8d15ba14de101fd3ed"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-08-11T11:54:57.533Z",
+    "completed_at": "2026-08-11T11:54:58.393Z",
+    "duration_ms": 860,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "complete",
+    "latencyMs": 860,
+    "peakMemoryBytes": 214859776,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 17,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_49d41170-0450-424d-afa1-451ae167cf3e-20260811T115458393Z-63974-c95f6b0fed2c.json",
+    "latest_report": ".mimosa/reports/task-review-sess_49d41170-0450-424d-afa1-451ae167cf3e.json",
+    "history_summary": ".mimosa/history/run-20260811T115458393Z-63974-c95f6b0fed2c.json"
+  }
+}

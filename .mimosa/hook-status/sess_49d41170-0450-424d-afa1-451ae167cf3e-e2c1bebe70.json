@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "mimosa-hook-status/v1",
+  "recordedAt": "2026-08-11T11:44:12.866Z",
+  "sessionId": "sess_49d41170-0450-424d-afa1-451ae167cf3e",
+  "event": "PostToolUse",
+  "toolName": "Edit",
+  "file": "/Users/ollayor/.zcode/cli/memories/projects/ledge-4dc48ba44d0790cd/memory/MEMORY.md",
+  "outcome": "clear",
+  "coverage": "complete",
+  "findingCount": 0,
+  "durationMs": 2,
+  "hostState": "hook_complete",
+  "reportHint": ".mimosa/reports/"
+}

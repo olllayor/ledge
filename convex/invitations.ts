@@ -1,5 +1,7 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { assertTeamPermission, requireUser, sessionArgs } from "./model";
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -30,6 +32,9 @@ export const inviteMember = mutation({
       (inv) => inv.email === args.email && inv.status === "pending",
     );
     if (existingPending) {
+      // Re-inviting is the admin's "resend" affordance: the row already
+      // exists, but the email may never have arrived.
+      await scheduleInviteEmail(ctx, existingPending.teamId, existingPending.email, userId);
       return existingPending._id;
     }
 
@@ -39,7 +44,7 @@ export const inviteMember = mutation({
     const token = randomToken();
     const now = Date.now();
 
-    return await ctx.db.insert("teamInvitations", {
+    const invitationId = await ctx.db.insert("teamInvitations", {
       teamId: args.teamId,
       email: args.email,
       invitedBy: userId,
@@ -49,8 +54,25 @@ export const inviteMember = mutation({
       expiresAt: now + INVITATION_TTL_MS,
       createdAt: now,
     });
+
+    await scheduleInviteEmail(ctx, args.teamId, args.email, userId);
+    return invitationId;
   },
 });
+
+async function scheduleInviteEmail(
+  ctx: MutationCtx,
+  teamId: Id<"teams">,
+  email: string,
+  inviterId: Id<"users">,
+): Promise<void> {
+  const [team, inviter] = await Promise.all([ctx.db.get(teamId), ctx.db.get(inviterId)]);
+  await ctx.scheduler.runAfter(0, internal.teamEmails.deliverTeamInviteEmail, {
+    email,
+    teamName: team?.name ?? "a team",
+    inviterEmail: inviter?.email ?? "a teammate",
+  });
+}
 
 export const acceptInvitation = mutation({
   args: {
@@ -182,11 +204,22 @@ export const listPendingForEmail = query({
     const user = await ctx.db.get(userId);
     if (!user) throw new ConvexError("User not found.");
 
-    return await ctx.db
+    const invitations = await ctx.db
       .query("teamInvitations")
       .withIndex("by_email_and_status", (q) =>
         q.eq("email", user.email).eq("status", "pending"),
       )
       .collect();
+
+    return await Promise.all(
+      invitations.map(async (inv) => {
+        const team = await ctx.db.get(inv.teamId);
+        return {
+          ...inv,
+          teamName: team?.name ?? "Unnamed Team",
+        };
+      }),
+    );
   },
 });
+

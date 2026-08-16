@@ -13,6 +13,7 @@ import {
   clipboardSettingsUpdateInputSchema,
   clipboardStartItemDragInputSchema,
   syncSessionSchema,
+  teamShelfItemsPatchSchema,
   toastPayloadSchema,
   type LedgeAPI,
   type StateListener,
@@ -277,6 +278,10 @@ const api: LedgeAPI = {
   async setTeamState(patch) {
     const parsed = teamStateSchema.partial().parse(patch);
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.setTeamState, parsed));
+  },
+  async applyTeamShelfItems(patch) {
+    const parsed = teamShelfItemsPatchSchema.parse(patch);
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.applyTeamShelfItems, parsed));
   },
   // ---- Secure cloud-sync session ----
   async getSyncSession() {

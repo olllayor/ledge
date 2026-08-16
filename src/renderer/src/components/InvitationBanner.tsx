@@ -32,16 +32,13 @@ export function InvitationBanner() {
   const invite = myPendingInvitations[0];
   if (!invite) return null;
 
+  const teamDisplayName = invite.teamName || `${invite.teamId.slice(0, 8)}…`;
   const remaining = myPendingInvitations.length - 1;
-  const label =
-    remaining > 0
-      ? `You have ${myPendingInvitations.length} pending team invitation${myPendingInvitations.length > 1 ? 's' : ''}`
-      : `You are invited to join a team`;
 
   return (
     <div className="invitation-banner">
       <div className="invitation-banner-text">
-        <strong>{invite.teamId.slice(0, 8)}…</strong> {label}
+        <strong>{teamDisplayName}</strong> {remaining > 0 ? `(+${remaining} other${remaining > 1 ? 's' : ''})` : `• Invitation to join team`}
       </div>
       <div className="invitation-banner-actions">
         <button
@@ -50,7 +47,7 @@ export function InvitationBanner() {
           disabled={loading !== null}
           onClick={() => void handleAccept(invite.token)}
         >
-          Accept
+          {loading === invite.token ? 'Joining…' : 'Accept'}
         </button>
         <button
           className="invitation-banner-action is-reject"

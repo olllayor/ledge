@@ -184,7 +184,13 @@ function migratePersistedState(parsed: unknown, _defaultState: PersistedState): 
 
     if (version === 4) {
       const envelope = persistedStateEnvelopeV4Schema.parse(parsed)
-      return { state: envelope, didMigrate: false }
+      return {
+        state: {
+          ...envelope,
+          teamLiveShelves: envelope.teamLiveShelves ?? {},
+        },
+        didMigrate: !('teamLiveShelves' in (parsed as object)),
+      }
     }
 
     if (version === 3) {
@@ -192,6 +198,7 @@ function migratePersistedState(parsed: unknown, _defaultState: PersistedState): 
       return {
         state: {
           liveShelf: envelope.liveShelf,
+          teamLiveShelves: {},
           recentShelves: envelope.recentShelves,
           preferences: envelope.preferences,
           sync: envelope.sync,
@@ -209,6 +216,7 @@ function migratePersistedState(parsed: unknown, _defaultState: PersistedState): 
       return {
         state: {
           liveShelf: envelope.liveShelf,
+          teamLiveShelves: {},
           recentShelves: envelope.recentShelves,
           preferences: envelope.preferences,
           sync: envelope.sync,
@@ -226,6 +234,7 @@ function migratePersistedState(parsed: unknown, _defaultState: PersistedState): 
       return {
         state: {
           liveShelf: envelope.liveShelf,
+          teamLiveShelves: {},
           recentShelves: envelope.recentShelves,
           preferences: envelope.preferences,
           sync: syncStateSchema.parse({}),
@@ -242,6 +251,7 @@ function migratePersistedState(parsed: unknown, _defaultState: PersistedState): 
   return {
     state: {
       ...persistedStateSchema.omit({ sync: true }).parse(parsed),
+      teamLiveShelves: {},
       sync: syncStateSchema.parse({}),
       team: { activeTeamId: null },
     },

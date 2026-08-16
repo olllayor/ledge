@@ -20,18 +20,30 @@ import {
  * `permissionStatus`") happen in one place.
  */
 
-export const selectShelfView = (state: AppState) => ({
-  liveShelfId: state.liveShelf?.id ?? null,
-  liveShelfItems: state.liveShelf?.items ?? [],
-  liveShelfUpdatedAt: state.liveShelf?.updatedAt ?? null,
-  autoCloseShelf: state.preferences.shelfInteraction.autoCloseShelf,
-  doubleClickAction: state.preferences.shelfInteraction.doubleClickAction,
-  shakeEnabled: state.preferences.shakeEnabled,
-  nativeHelperAvailable: state.permissionStatus.nativeHelperAvailable,
-  accessibilityTrusted: state.permissionStatus.accessibilityTrusted,
-  lastError: state.permissionStatus.lastError,
-  syncPlan: state.sync.plan,
-});
+// The shelf the user is currently working in: the active team's shelf
+// when a team is selected, otherwise the personal live shelf. Mutations
+// (append/rename/reorder/…) are routed by the main process through the
+// same rule, so what the panel shows is always what it edits.
+export const selectActiveShelf = (state: AppState) =>
+  state.team.activeTeamId
+    ? state.teamLiveShelves?.[state.team.activeTeamId] ?? null
+    : state.liveShelf
+
+export const selectShelfView = (state: AppState) => {
+  const activeShelf = selectActiveShelf(state)
+  return {
+    liveShelfId: activeShelf?.id ?? null,
+    liveShelfItems: activeShelf?.items ?? [],
+    liveShelfUpdatedAt: activeShelf?.updatedAt ?? null,
+    autoCloseShelf: state.preferences.shelfInteraction.autoCloseShelf,
+    doubleClickAction: state.preferences.shelfInteraction.doubleClickAction,
+    shakeEnabled: state.preferences.shakeEnabled,
+    nativeHelperAvailable: state.permissionStatus.nativeHelperAvailable,
+    accessibilityTrusted: state.permissionStatus.accessibilityTrusted,
+    lastError: state.permissionStatus.lastError,
+    syncPlan: state.sync.plan,
+  }
+};
 
 export const selectOnboarding = (state: AppState) => state.preferences.hasCompletedOnboarding;
 

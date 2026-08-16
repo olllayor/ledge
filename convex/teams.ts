@@ -46,7 +46,17 @@ export const getTeam = query({
       .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
       .collect();
 
-    return { team, members };
+    const membersWithEmail = await Promise.all(
+      members.map(async (m) => {
+        const u = await ctx.db.get(m.userId);
+        return {
+          ...m,
+          email: u?.email ?? "Unknown User",
+        };
+      }),
+    );
+
+    return { team, members: membersWithEmail };
   },
 });
 

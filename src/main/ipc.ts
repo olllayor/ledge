@@ -1,6 +1,6 @@
 import { ipcMain, screen } from 'electron'
 import { z } from 'zod'
-import { IPC_CHANNELS, type ToastPayload } from '@shared/ipc'
+import { IPC_CHANNELS, teamShelfItemsPatchSchema, type ToastPayload } from '@shared/ipc'
 import {
   createShelfInputSchema,
   preferencePatchSchema,
@@ -217,6 +217,11 @@ export class IpcRegistrar {
       this.deps.stateStore.setTeamState(teamStateSchema.partial().parse(patch))
       return this.deps.broadcastState()
     })
+    ipcMain.handle(IPC_CHANNELS.applyTeamShelfItems, async (_event, patch: unknown) => {
+      const parsed = teamShelfItemsPatchSchema.parse(patch)
+      this.deps.stateStore.applyTeamShelfItems(parsed.teamId, parsed.items)
+      return this.deps.broadcastState()
+    })
     ipcMain.handle(IPC_CHANNELS.syncSessionGet, async () => this.deps.secureSessionStore.get())
     ipcMain.handle(IPC_CHANNELS.syncSessionSet, async (_event, session: unknown) => {
       this.deps.secureSessionStore.set(syncSessionSchema.parse(session))
@@ -244,7 +249,9 @@ export class IpcRegistrar {
   }
 
   private findLocalShelf(id: string) {
-    const live = this.deps.stateStore.getLiveShelf()
+    // Personal slot only — whole-shelf cloud sync never touches team
+    // shelves, and `getLiveShelf()` is team-aware.
+    const live = this.deps.stateStore.getPersonalLiveShelf()
     if (live?.id === id) return live
     return this.deps.stateStore.getRecentShelves().find((shelf) => shelf.id === id) ?? null
   }

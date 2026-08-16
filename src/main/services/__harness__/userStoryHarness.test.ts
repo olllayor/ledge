@@ -593,7 +593,7 @@ describe('§3 Shelf item actions', () => {
   })
 
   it('3.12 startNativeDrag accepts existing paths', async () => {
-    const path = '/tmp/ledge-harness-marker.txt'
+    const path = join(tmpdir(), 'ledge-harness-marker.txt')
     await writeFile(path, 'ok')
     expect(pathsExist([path])).toBe(true)
     await rm(path, { force: true })

@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { useSync } from './SyncProvider';
+import { useLedgeState } from '../hooks/useLedgeState';
 
 export interface TeamMemberRecord {
   _id: string;
@@ -38,6 +39,7 @@ interface TeamsContextValue {
   myPendingInvitations: Array<{
     _id: string;
     teamId: string;
+    teamName?: string;
     email: string;
     invitedBy: string;
     role: 'admin' | 'member';
@@ -94,17 +96,35 @@ export function TeamsProvider({ children }: { children: ReactNode }) {
   const rejectInvitationMut = useMutation(api.invitations.rejectInvitation);
   const revokeInvitationMut = useMutation(api.invitations.revokeInvitation);
 
-  const [activeTeamId, setActiveTeamIdState] = useState<string | null>(null);
+  // Single source of truth is the persisted main-process team state —
+  // a local useState copy would reset to `null` on every app launch
+  // while the main process (and its shelf scoping) restores the last
+  // active team, desyncing the UI from what the shelf panel shows.
+  const { state: persistedActiveTeamId } = useLedgeState(
+    (s) => s.team?.activeTeamId ?? null,
+  );
+  const activeTeamId = persistedActiveTeamId ?? null;
 
   useEffect(() => {
-    if (!sessionToken) {
-      setActiveTeamIdState(null);
+    if (!sessionToken && activeTeamId !== null) {
+      void window.ledge.setTeamState({ activeTeamId: null });
     }
-  }, [sessionToken]);
+  }, [sessionToken, activeTeamId]);
+
+  // The persisted team can disappear (deleted, kicked, left from
+  // another device). Fall back to personal instead of scoping shelves
+  // to a team we're no longer in.
+  useEffect(() => {
+    if (!activeTeamId || !myTeamsData) {
+      return;
+    }
+    if (!myTeamsData.some((team) => team._id === activeTeamId)) {
+      void window.ledge.setTeamState({ activeTeamId: null });
+    }
+  }, [activeTeamId, myTeamsData]);
 
   const setActiveTeamId = useCallback(
     async (teamId: string | null) => {
-      setActiveTeamIdState(teamId);
       await window.ledge.setTeamState({ activeTeamId: teamId });
     },
     [],

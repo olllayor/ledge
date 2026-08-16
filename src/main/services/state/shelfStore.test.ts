@@ -41,6 +41,7 @@ async function buildShelfStore(): Promise<{
   const persister = new StatePersister({ statePath: layout.statePath })
   const state: PersistedState = {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: defaultPreferences(),
     sync: defaultSyncStateRecord(),
@@ -54,6 +55,109 @@ async function buildShelfStore(): Promise<{
 }
 
 describe('ShelfStore', () => {
+  it('isolates team live shelf from personal live shelf', async () => {
+    const { shelves, persister, state } = await buildShelfStore()
+
+    // Create personal shelf item
+    shelves.createShelf('manual')
+    shelves.appendItems([makeItem('personal-item-1', 0)])
+    await persister.whenIdle()
+    expect(shelves.getLiveShelf()?.items[0]?.id).toBe('personal-item-1')
+
+    // Switch to team 1
+    state.team.activeTeamId = 'team-alpha'
+    expect(shelves.getLiveShelf()).toBeNull()
+
+    // Create team shelf item
+    shelves.createShelf('manual')
+    shelves.appendItems([makeItem('team-item-1', 0)])
+    await persister.whenIdle()
+    expect(shelves.getLiveShelf()?.items[0]?.id).toBe('team-item-1')
+
+    // Switch back to personal
+    state.team.activeTeamId = null
+    expect(shelves.getLiveShelf()?.items[0]?.id).toBe('personal-item-1')
+
+    // Switch back to team 1
+    state.team.activeTeamId = 'team-alpha'
+    expect(shelves.getLiveShelf()?.items[0]?.id).toBe('team-item-1')
+  })
+
+  it('closeShelf in team context drops the team shelf without touching personal state', async () => {
+    const { shelves, persister, state } = await buildShelfStore()
+
+    const personal = shelves.createShelf('manual')
+    shelves.appendItems([makeItem('personal-a', 0)])
+
+    state.team.activeTeamId = 'team-alpha'
+    shelves.createShelf('manual')
+    shelves.appendItems([makeItem('team-a', 0)])
+
+    shelves.closeShelf()
+    await persister.whenIdle()
+
+    expect(shelves.getLiveShelf()).toBeNull()
+    expect(state.teamLiveShelves['team-alpha']).toBeUndefined()
+    // Personal shelf stays live and nothing leaks into personal recents.
+    state.team.activeTeamId = null
+    expect(shelves.getLiveShelf()?.id).toBe(personal.id)
+    expect(shelves.getRecentShelves()).toHaveLength(0)
+  })
+
+  it('getAllShelves excludes team shelves so personal sync backfill stays clean', async () => {
+    const { shelves, state } = await buildShelfStore()
+
+    const personal = shelves.createShelf('manual')
+    shelves.appendItems([makeItem('personal-a', 0)])
+    shelves.closeShelf() // archives into recents
+
+    state.team.activeTeamId = 'team-alpha'
+    shelves.createShelf('manual')
+    shelves.appendItems([makeItem('team-a', 0)])
+
+    state.team.activeTeamId = null
+    const all = shelves.getAllShelves()
+    expect(all.map((shelf) => shelf.id)).toEqual([personal.id])
+  })
+
+  it('getPersonalLiveShelf ignores team context', async () => {
+    const { shelves, state } = await buildShelfStore()
+
+    const personal = shelves.createShelf('manual')
+    state.team.activeTeamId = 'team-alpha'
+    shelves.createShelf('manual')
+
+    expect(shelves.getPersonalLiveShelf()?.id).toBe(personal.id)
+
+    shelves.replacePersonalLiveShelf({ ...personal, name: 'renamed' })
+    expect(state.liveShelf?.name).toBe('renamed')
+    expect(Object.keys(state.teamLiveShelves)).toEqual(['team-alpha'])
+  })
+
+  it('applyTeamShelfItems mirrors items into the team shelf without touching personal state', async () => {
+    const { shelves, persister, state } = await buildShelfStore()
+
+    const personal = shelves.createShelf('manual')
+    shelves.appendItems([makeItem('personal-a', 0)])
+
+    const mirrored = shelves.applyTeamShelfItems('team-alpha', [
+      makeItem('team-a', 0),
+      makeItem('team-b', 1),
+    ])
+    await persister.whenIdle()
+
+    expect(mirrored.items.map((i) => i.id)).toEqual(['team-a', 'team-b'])
+    expect(state.teamLiveShelves['team-alpha']?.items).toHaveLength(2)
+    // Personal slot and recents are untouched by team mirror writes.
+    expect(state.liveShelf?.id).toBe(personal.id)
+    expect(shelves.getRecentShelves()).toHaveLength(0)
+
+    // A second mirror replaces items in place, keeping shelf identity.
+    const again = shelves.applyTeamShelfItems('team-alpha', [makeItem('team-c', 0)])
+    expect(again.id).toBe(mirrored.id)
+    expect(state.teamLiveShelves['team-alpha']?.items.map((i) => i.id)).toEqual(['team-c'])
+  })
+
   it('archives non-empty live shelves into recents on close', async () => {
     const { shelves, persister } = await buildShelfStore()
 

@@ -27,6 +27,7 @@ async function buildStore(): Promise<{
   const persister = new StatePersister({ statePath: layout.statePath })
   const state: PersistedState = {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: defaultPreferences(),
     sync: defaultSyncStateRecord(),
@@ -186,6 +187,7 @@ describe('ClipboardStore.prune (regression: BUG-001)', () => {
     const reloaded = new StatePersister({ statePath: layout.statePath })
     const { state: onDisk } = reloaded.load({
       liveShelf: null,
+      teamLiveShelves: {},
       recentShelves: [],
       preferences: defaultPreferences(),
       sync: defaultSyncStateRecord(),
@@ -204,6 +206,7 @@ describe('ClipboardStore.prune (regression: BUG-001)', () => {
     const persister = new StatePersister({ statePath: layout.statePath })
     const state: PersistedState = {
       liveShelf: null,
+      teamLiveShelves: {},
       recentShelves: [],
       preferences: defaultPreferences(),
       sync: defaultSyncStateRecord(),

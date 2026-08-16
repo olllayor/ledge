@@ -841,3 +841,111 @@ test("upsertShelf: rejects an unparseable localUpdatedAt", async () => {
     }),
   ).rejects.toThrow(/not a valid timestamp/);
 });
+
+// ---- Team shelf items (getTeamShelfItems / per-item team permission) ----
+
+interface TeamFixture {
+  teamId: Id<"teams">;
+  owner: TestUser;
+  outsider: TestUser;
+}
+
+async function setupTeamWithItems(t: TestConvex<typeof schema>): Promise<TeamFixture> {
+  const owner = await setupUser(t, "team-owner@example.com");
+  const outsider = await setupUser(t, "team-outsider@example.com");
+
+  const teamId = await t.run(async (ctx) => {
+    const id = await ctx.db.insert("teams", {
+      name: "Design Team",
+      createdBy: owner.userId,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    await ctx.db.insert("teamMembers", {
+      teamId: id,
+      userId: owner.userId,
+      role: "admin",
+      joinedAt: Date.now(),
+    });
+
+    const baseItem = {
+      shelfId: "shelf-1",
+      teamId: id,
+      createdBy: owner.userId,
+      kind: "text" as const,
+      title: "item",
+      subtitle: "",
+      preview: { summary: "", detail: "" },
+      version: 1,
+      serverUpdatedAt: Date.now(),
+    };
+    await ctx.db.insert("shelfItems", {
+      ...baseItem,
+      itemId: "item-b",
+      order: "b",
+    });
+    await ctx.db.insert("shelfItems", {
+      ...baseItem,
+      itemId: "item-a",
+      order: "a",
+    });
+    await ctx.db.insert("shelfItems", {
+      ...baseItem,
+      itemId: "item-deleted",
+      order: "c",
+      deletedAt: Date.now(),
+    });
+    return id;
+  });
+
+  return { teamId, owner, outsider };
+}
+
+test("getTeamShelfItems: member sees active items ordered by rank with creator email", async () => {
+  const t = convexTest(schema, modules);
+  const { teamId, owner } = await setupTeamWithItems(t);
+
+  const items = await t.query(api.sync.getTeamShelfItems, {
+    sessionToken: owner.sessionToken,
+    teamId,
+    shelfId: "shelf-1",
+  });
+
+  expect(items.map((item) => item.itemId)).toEqual(["item-a", "item-b"]);
+  expect(items[0]).toMatchObject({ createdByUser: { email: owner.email } });
+  expect(items.every((item) => item.deletedAt === undefined)).toBe(true);
+});
+
+test("getTeamShelfItems: non-members are rejected", async () => {
+  const t = convexTest(schema, modules);
+  const { teamId, outsider } = await setupTeamWithItems(t);
+
+  await expect(
+    t.query(api.sync.getTeamShelfItems, {
+      sessionToken: outsider.sessionToken,
+      teamId,
+      shelfId: "shelf-1",
+    }),
+  ).rejects.toThrow("You are not a member of this team.");
+});
+
+test("upsertShelfItem: writing to a team shelf requires membership", async () => {
+  const t = convexTest(schema, modules);
+  const { teamId, outsider } = await setupTeamWithItems(t);
+
+  await expect(
+    t.mutation(api.sync.upsertShelfItem, {
+      sessionToken: outsider.sessionToken,
+      teamId,
+      shelfId: "shelf-1",
+      itemId: "intruder",
+      kind: "text",
+      title: "intruder",
+      subtitle: "",
+      preview: { summary: "", detail: "" },
+      order: "z",
+      version: 1,
+      serverUpdatedAt: Date.now(),
+    }),
+  ).rejects.toThrow("You are not a member of this team.");
+});

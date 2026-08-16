@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { mutation, query, internalMutation } from "./_generated/server";
 import {
+  assertTeamPermission,
   currentPlan,
   deviceLimitForPlan,
   PRO_IMAGE_STORAGE_LIMIT_BYTES,
@@ -11,6 +12,7 @@ import {
   shelfLimitForPlan,
   storageBytesUsed,
 } from "./model";
+import type { Id } from "./_generated/dataModel";
 import { shelfItemSchema, preferencesValues } from "./sharedSchemas";
 
 const PERSONAL = "";
@@ -594,6 +596,9 @@ export const upsertShelfItem = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx, args.sessionToken);
+    if (args.teamId !== PERSONAL) {
+      await assertTeamPermission(ctx, args.teamId as Id<"teams">, userId);
+    }
 
     const existing = await ctx.db
       .query("shelfItems")
@@ -675,6 +680,9 @@ export const deleteShelfItem = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUser(ctx, args.sessionToken);
+    if (args.teamId !== PERSONAL) {
+      await assertTeamPermission(ctx, args.teamId as Id<"teams">, userId);
+    }
 
     const existing = await ctx.db
       .query("shelfItems")
@@ -705,6 +713,45 @@ export const deleteShelfItem = mutation({
   },
 });
 
+// Reactive query: get all active items on a team shelf with creator user email.
+export const getTeamShelfItems = query({
+  args: {
+    ...sessionArgs,
+    teamId: v.id("teams"),
+    shelfId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUser(ctx, args.sessionToken);
+    await assertTeamPermission(ctx, args.teamId, userId);
+
+    const shelfId = args.shelfId ?? "default";
+    const rawItems = await ctx.db
+      .query("shelfItems")
+      .withIndex("by_team_shelf", (q) =>
+        q.eq("teamId", args.teamId).eq("shelfId", shelfId),
+      )
+      .take(500);
+
+    const activeItems = rawItems
+      .filter((i) => !i.deletedAt)
+      // Plain code-unit comparison, not localeCompare: `order` holds
+      // lexorank strings, whose ordering is defined by byte-wise string
+      // comparison and can differ from locale collation.
+      .sort((a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0));
+
+    return await Promise.all(
+      activeItems.map(async (item) => {
+        const creator = await ctx.db.get(item.createdBy);
+        // Omit the key entirely when the creator is gone — `undefined`
+        // is not a valid Convex value.
+        return creator
+          ? { ...item, createdByUser: { email: creator.email } }
+          : { ...item };
+      }),
+    );
+  },
+});
+
 // List shelf items with cursor-based pagination. Returns:
 // - items: active (non-deleted) items
 // - tombstones: deleted item metadata so the client can remove local copies
@@ -718,7 +765,10 @@ export const listShelfItems = query({
     since: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireUser(ctx, args.sessionToken);
+    const userId = await requireUser(ctx, args.sessionToken);
+    if (args.teamId !== PERSONAL) {
+      await assertTeamPermission(ctx, args.teamId as Id<"teams">, userId);
+    }
 
     const result = await ctx.db
       .query("shelfItems")

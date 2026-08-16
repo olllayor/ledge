@@ -644,6 +644,11 @@ function ItemSheet({ items, sheetRef, doubleClickAction, onClose }: ItemSheetPro
             </div>
             <p className="item-grid-title">{item.title}</p>
             <p className="item-grid-subtitle">{item.preview.summary || item.subtitle || 'File'}</p>
+            {item.createdByUser?.email && (
+              <p className="item-grid-creator" title={`Added by ${item.createdByUser.email}`}>
+                by {item.createdByUser.email.split('@')[0]}
+              </p>
+            )}
           </div>
         ))}
         {items.length > 0 && (

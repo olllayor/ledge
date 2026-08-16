@@ -22,18 +22,60 @@ export class ShelfStore {
   ) {}
 
   getLiveShelf(): ShelfRecord | null {
-    return this.getState().liveShelf
+    return this.getActiveLiveShelf(this.getState())
   }
 
   getRecentShelves(): ShelfRecord[] {
     return [...this.getState().recentShelves]
   }
 
+  // Personal shelves only. The only consumer is the personal-cloud
+  // sync backfill (`getSyncBackfillCandidates`); team shelves are
+  // local-only until per-item team sync ships and must never be pushed
+  // into the user's personal cloud store.
   getAllShelves(): ShelfRecord[] {
     const state = this.getState()
     return [state.liveShelf, ...state.recentShelves].filter(
       (shelf): shelf is ShelfRecord => Boolean(shelf),
     )
+  }
+
+  // Explicitly personal-scoped reads/writes for the whole-shelf cloud
+  // sync path, which must ignore team context even when a team is
+  // active (`applyRemoteShelfSnapshot`, `findLocalShelf`).
+  getPersonalLiveShelf(): ShelfRecord | null {
+    return this.getState().liveShelf
+  }
+
+  replacePersonalLiveShelf(shelf: ShelfRecord): void {
+    const state = this.getState()
+    state.liveShelf = shelf
+    this.persister.save(state)
+  }
+
+  /**
+   * Mirror write for team shelf sync: replace the given team's local
+   * shelf items with a server snapshot. The shelf record is created on
+   * first write so switching to a team always has a container. Never
+   * touches the personal slot or recents.
+   */
+  applyTeamShelfItems(teamId: string, items: ShelfItemRecord[]): ShelfRecord {
+    const state = this.getState()
+    const existing = state.teamLiveShelves[teamId]
+    const shelf: ShelfRecord = existing
+      ? { ...existing, items, updatedAt: new Date().toISOString() }
+      : {
+          id: randomUUID(),
+          name: defaultShelfName(),
+          color: nextShelfColor(0, state.sync.plan),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          origin: 'manual',
+          items,
+        }
+    state.teamLiveShelves[teamId] = shelf
+    this.persister.save(state)
+    return shelf
   }
 
   currentPlan(): BillingPlan {
@@ -43,7 +85,7 @@ export class ShelfStore {
   createShelf(origin: ShelfOrigin): ShelfRecord {
     this.archiveLiveShelf()
     const state = this.getState()
-    state.liveShelf = {
+    const newShelf: ShelfRecord = {
       id: randomUUID(),
       name: defaultShelfName(),
       color: nextShelfColor(state.recentShelves.length, state.sync.plan),
@@ -52,18 +94,19 @@ export class ShelfStore {
       origin,
       items: []
     }
+    this.setActiveLiveShelf(state, newShelf)
     this.persister.save(state)
-    return state.liveShelf
+    return newShelf
   }
 
   ensureLiveShelf(origin: ShelfOrigin): ShelfRecord {
     const state = this.getState()
-    return state.liveShelf ?? this.createShelf(origin)
+    return this.getActiveLiveShelf(state) ?? this.createShelf(origin)
   }
 
   appendItems(items: ShelfItemRecord[]): ShelfRecord {
     const state = this.getState()
-    const liveShelf = state.liveShelf ?? this.createShelf('manual')
+    const liveShelf = this.getActiveLiveShelf(state) ?? this.createShelf('manual')
     const nextOrder = liveShelf.items.length
     liveShelf.items.push(
       ...items.map((item, index) => ({
@@ -78,45 +121,48 @@ export class ShelfStore {
 
   renameLiveShelf(name: string): ShelfRecord | null {
     const state = this.getState()
-    if (!state.liveShelf) {
+    const liveShelf = this.getActiveLiveShelf(state)
+    if (!liveShelf) {
       return null
     }
 
-    state.liveShelf.name = name.trim() || defaultShelfName()
-    state.liveShelf.updatedAt = new Date().toISOString()
+    liveShelf.name = name.trim() || defaultShelfName()
+    liveShelf.updatedAt = new Date().toISOString()
     this.persister.save(state)
-    return state.liveShelf
+    return liveShelf
   }
 
   removeItem(itemId: string): ShelfRecord | null {
     const state = this.getState()
-    if (!state.liveShelf) {
+    const liveShelf = this.getActiveLiveShelf(state)
+    if (!liveShelf) {
       return null
     }
 
-    state.liveShelf.items = state.liveShelf.items
+    liveShelf.items = liveShelf.items
       .filter((item) => item.id !== itemId)
       .map((item, index) => ({ ...item, order: index }))
-    state.liveShelf.updatedAt = new Date().toISOString()
+    liveShelf.updatedAt = new Date().toISOString()
     this.persister.save(state)
-    return state.liveShelf
+    return liveShelf
   }
 
   clearLiveShelf(): ShelfRecord | null {
     const state = this.getState()
-    if (!state.liveShelf) {
+    const liveShelf = this.getActiveLiveShelf(state)
+    if (!liveShelf) {
       return null
     }
 
-    state.liveShelf.items = []
-    state.liveShelf.updatedAt = new Date().toISOString()
+    liveShelf.items = []
+    liveShelf.updatedAt = new Date().toISOString()
     this.persister.save(state)
-    return state.liveShelf
+    return liveShelf
   }
 
   reorderItems(itemIds: string[]): ShelfRecord | null {
     const state = this.getState()
-    const liveShelf = state.liveShelf
+    const liveShelf = this.getActiveLiveShelf(state)
     if (!liveShelf) {
       return null
     }
@@ -138,7 +184,7 @@ export class ShelfStore {
 
   replaceLiveShelf(shelf: ShelfRecord | null): void {
     const state = this.getState()
-    state.liveShelf = shelf
+    this.setActiveLiveShelf(state, shelf)
     this.persister.save(state)
   }
 
@@ -153,8 +199,18 @@ export class ShelfStore {
   }
 
   closeShelf(): void {
+    const state = this.getState()
+    const teamId = state.team.activeTeamId
+    if (teamId) {
+      // Closing a team shelf discards the local copy — team content is
+      // server-backed via per-item sync and must not leak into the
+      // personal recents list (which the personal cloud syncs).
+      delete state.teamLiveShelves[teamId]
+      this.persister.save(state)
+      return
+    }
     this.archiveLiveShelf()
-    this.persister.save(this.getState())
+    this.persister.save(state)
   }
 
   restoreShelf(id: string): ShelfRecord | null {
@@ -166,13 +222,14 @@ export class ShelfStore {
 
     this.archiveLiveShelf()
     state.recentShelves = state.recentShelves.filter((entry) => entry.id !== id)
-    state.liveShelf = {
+    const restored: ShelfRecord = {
       ...shelf,
       origin: 'restore',
       updatedAt: new Date().toISOString()
     }
+    this.setActiveLiveShelf(state, restored)
     this.persister.save(state)
-    return state.liveShelf
+    return restored
   }
 
   relinkFileBackedItem(
@@ -180,7 +237,7 @@ export class ShelfStore {
     fileRef: Pick<FileRef, 'originalPath' | 'bookmarkBase64' | 'resolvedPath'>,
   ): ShelfRecord | null {
     const state = this.getState()
-    const liveShelf = state.liveShelf
+    const liveShelf = this.getActiveLiveShelf(state)
     if (!liveShelf) {
       return null
     }
@@ -223,8 +280,32 @@ export class ShelfStore {
     }
   }
 
+  private getActiveLiveShelf(state: PersistedState): ShelfRecord | null {
+    const teamId = state.team.activeTeamId
+    if (!teamId) {
+      return state.liveShelf
+    }
+    return state.teamLiveShelves[teamId] ?? null
+  }
+
+  private setActiveLiveShelf(state: PersistedState, shelf: ShelfRecord | null): void {
+    const teamId = state.team.activeTeamId
+    if (!teamId) {
+      state.liveShelf = shelf
+    } else if (shelf) {
+      state.teamLiveShelves[teamId] = shelf
+    } else {
+      delete state.teamLiveShelves[teamId]
+    }
+  }
+
   private archiveLiveShelf(): void {
     const state = this.getState()
+    const teamId = state.team.activeTeamId
+    if (teamId) {
+      return
+    }
+
     const liveShelf = state.liveShelf
     if (!liveShelf) {
       return

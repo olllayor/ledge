@@ -231,10 +231,28 @@ function TeamSettingsConfigured({
             fullWidth
           >
             <div className="settings-field" style={{ padding: '8px 0 4px' }}>
-              {teamDetail.members.map((m: Doc<'teamMembers'>) => (
+              {teamDetail.members.map((m: Doc<'teamMembers'> & { email?: string }) => (
                 <div key={m._id} className="team-member-row">
-                  <span className="team-member-email">{m.userId}</span>
-                  <span className={`team-member-role-badge is-${m.role}`}>{m.role}</span>
+                  <span className="team-member-email">{m.email ?? m.userId}</span>
+                  {isAdmin && m.userId !== teamDetail.team.createdBy ? (
+                    <select
+                      className="team-member-role-select"
+                      value={m.role}
+                      onChange={async (e) => {
+                        try {
+                          await teams.updateMemberRole(selectedTeam._id, m.userId, e.target.value as 'admin' | 'member');
+                          showToast(`Role updated to ${e.target.value}`);
+                        } catch (err) {
+                          showToast(err instanceof Error ? err.message : 'Failed to update role', 'error');
+                        }
+                      }}
+                    >
+                      <option value="member">member</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  ) : (
+                    <span className={`team-member-role-badge is-${m.role}`}>{m.role}</span>
+                  )}
                   {isAdmin && m.userId !== teamDetail.team.createdBy && (
                     <button
                       className="settings-link-btn"

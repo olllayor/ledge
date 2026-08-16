@@ -3840,6 +3840,31 @@ textarea.pref-input {
   color: var(--ink-faint);
 }
 
+.team-member-role-select {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.team-member-role-select:focus {
+  border-color: var(--accent);
+}
+
+.item-grid-creator {
+  font-size: 0.65rem;
+  color: var(--accent);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .team-member-joined {
   font-size: 0.68rem;
   color: var(--ink-faint);

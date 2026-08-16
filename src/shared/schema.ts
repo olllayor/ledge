@@ -204,6 +204,7 @@ export type TeamState = z.infer<typeof teamStateSchema>;
 
 export const appStateSchema = z.object({
   liveShelf: shelfRecordSchema.nullable(),
+  teamLiveShelves: z.record(z.string(), shelfRecordSchema).default({}),
   recentShelves: z.array(shelfRecordSchema).max(10).default([]),
   preferences: preferencesRecordSchema,
   permissionStatus: permissionStatusSchema,

@@ -28,6 +28,7 @@ function buildEntry(overrides: Partial<ClipboardEntry> = {}): ClipboardEntry {
 function buildState(): AppState {
   return {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: {
       launchAtLogin: false,

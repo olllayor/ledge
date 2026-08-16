@@ -203,16 +203,18 @@ export class ShelfController {
    * sanitizes and writes.
    */
   applyRemoteShelfSnapshot(remoteShelf: ShelfRecord): void {
-    // Routing:
-    //   1. Live shelf id matches remote (or there is no live shelf) -> the
-    //      live shelf is the destination.
+    // Personal-slot routing only: whole-shelf cloud sync has no team
+    // concept, so a team shelf being open must not redirect (or
+    // clobber) remote personal shelves.
+    //   1. Personal live shelf id matches remote (or there is no personal
+    //      live shelf) -> the personal live shelf is the destination.
     //   2. A recent shelf id matches remote -> that recent entry is the
     //      destination.
     //   3. Neither -> drop. The user has a different shelf open locally and
     //      no history of this one; silently adopting it would clobber the
     //      user's work.
     const sanitized = sanitizeRemoteFileRefs(remoteShelf)
-    const liveShelf = this.deps.stateStore.getLiveShelf()
+    const liveShelf = this.deps.stateStore.getPersonalLiveShelf()
     const recentShelf =
       liveShelf?.id === remoteShelf.id
         ? null
@@ -220,10 +222,10 @@ export class ShelfController {
     const local = liveShelf?.id === remoteShelf.id ? liveShelf : recentShelf
 
     if (local === liveShelf || (!local && !liveShelf)) {
-      // No live shelf, or the live shelf's id matches the remote. In both
-      // cases the live shelf is the destination — including the
+      // No personal live shelf, or its id matches the remote. In both
+      // cases the personal live shelf is the destination — including the
       // first-contact case where the device has never seen this shelf.
-      this.deps.stateStore.replaceLiveShelf(sanitized)
+      this.deps.stateStore.replacePersonalLiveShelf(sanitized)
     } else {
       this.deps.stateStore.replaceRecentShelf(sanitized)
     }

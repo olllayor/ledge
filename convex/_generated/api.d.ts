@@ -18,6 +18,7 @@ import type * as migrations from "../migrations.js";
 import type * as model from "../model.js";
 import type * as sharedSchemas from "../sharedSchemas.js";
 import type * as sync from "../sync.js";
+import type * as teamEmails from "../teamEmails.js";
 import type * as teams from "../teams.js";
 
 import type {
@@ -37,6 +38,7 @@ declare const fullApi: ApiFromModules<{
   model: typeof model;
   sharedSchemas: typeof sharedSchemas;
   sync: typeof sync;
+  teamEmails: typeof teamEmails;
   teams: typeof teams;
 }>;
 

@@ -13,7 +13,7 @@ import type {
   ClipboardEntry,
   ClipboardSettings,
 } from './schema';
-import { clipboardSettingsSchema } from './schema';
+import { clipboardSettingsSchema, shelfItemSchema } from './schema';
 
 export const IPC_CHANNELS = {
   getState: 'ledge:get-state',
@@ -78,6 +78,7 @@ export const IPC_CHANNELS = {
   notchDropoutDragState: 'ledge:notch-dropout:drag-state',
   // ---- Team sharing ----
   setTeamState: 'ledge:set-team-state',
+  applyTeamShelfItems: 'ledge:apply-team-shelf-items',
   // ---- Secure cloud-sync session (OS-keychain backed, main process) ----
   syncSessionGet: 'ledge:sync-session:get',
   syncSessionSet: 'ledge:sync-session:set',
@@ -89,6 +90,15 @@ export const syncSessionSchema = z.object({
   email: z.string(),
 });
 export type SyncSession = z.infer<typeof syncSessionSchema>;
+
+// Mirror write for team shelf sync: the renderer has pulled a fresh
+// snapshot from `api.sync.getTeamShelfItems` and wants the local team
+// shelf (offline cache + UI source) to reflect it.
+export const teamShelfItemsPatchSchema = z.object({
+  teamId: z.string().min(1),
+  items: z.array(shelfItemSchema).max(1000),
+});
+export type TeamShelfItemsPatch = z.infer<typeof teamShelfItemsPatchSchema>;
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -175,6 +185,7 @@ export interface LedgeAPI {
   setSyncState(patch: SyncStatePatch): Promise<AppState>;
   getSyncBackfillCandidates(): Promise<ShelfRecord[]>;
   applyRemoteShelf(shelf: ShelfRecord): Promise<AppState>;
+  applyTeamShelfItems(patch: TeamShelfItemsPatch): Promise<AppState>;
   relinkItem(itemId: string): Promise<AppState>;
   getRecentShelves(): Promise<ShelfRecord[]>;
   getPermissionStatus(): Promise<PermissionStatus>;

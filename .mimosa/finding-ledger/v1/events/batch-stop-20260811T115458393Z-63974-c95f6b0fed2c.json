@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260811T115458393Z-63974-c95f6b0fed2c",
+  "runId": "20260811T115458393Z-63974-c95f6b0fed2c",
+  "runStatus": "completed",
+  "coverage": {
+    "status": "complete",
+    "reasons": []
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "2959cf120e813409ab6e1944148f0658802ddd28",
+  "diffHash": "26e4cb2e2bf6f50ce00a01be37144cf50d17e0cedc7e1939c2106aed4bf2fd1f",
+  "rulesVersion": "unavailable",
+  "sessionHash": "e2c1bebe701b6813f198bc2a97a67dc9de73720189dba01f7e08747e33d5dc13",
+  "reportRef": ".mimosa/reports/task-review-sess_49d41170-0450-424d-afa1-451ae167cf3e-20260811T115458393Z-63974-c95f6b0fed2c.json",
+  "events": [],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "src/main/services/singleInstance.test.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/services/singleInstance.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/index.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/services/preferencesSync.test.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/shared/schema.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/services/preferencesSync.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/renderer/src/components/OnboardingView.test.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/renderer/src/components/QuickPastePalette.test.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/services/shelfItemOps.test.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/services/__harness__/userStoryHarness.test.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/renderer/src/components/Preferences/sections/GeneralSettings.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/windows/shelfWindow.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/windows/clipboardWindow.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/windows/notchDropoutWindow.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/windows/quickPasteWindow.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/windows/peekWindow.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main/tray.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-08-11T11:54:58.648Z"
+}

@@ -7,6 +7,7 @@ import type { AppState } from '@shared/schema';
 function buildState(): AppState {
   return {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: {
       launchAtLogin: false,
