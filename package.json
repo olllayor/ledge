@@ -46,7 +46,7 @@
     "@vitejs/plugin-react": "5.2.0",
     "convex-test": "^0.0.53",
     "electron": "41.2.0",
-    "electron-builder": "26.9.0",
+    "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "happy-dom": "^20.10.3",
     "react": "19.2.4",
