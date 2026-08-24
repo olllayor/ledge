@@ -276,7 +276,7 @@ test("upsertShelf: free user is capped at FREE_SYNC_SHELF_LIMIT", async () => {
   ).rejects.toThrow("Cloud shelf limit reached");
 });
 
-test("deleteShelf: removes the cloud row and frees the shelf cap", async () => {
+test("deleteShelf: tombstones the row, frees the active-shelf cap", async () => {
   const t = convexTest(schema, modules);
   const { sessionToken } = await setupUser(t, "delete-shelf@example.com", "free");
 
@@ -310,13 +310,16 @@ test("deleteShelf: removes the cloud row and frees the shelf cap", async () => {
     }),
   ).rejects.toThrow("Cloud shelf limit reached");
 
-  // Delete one, then the new shelf fits.
+  // Delete one: the row stays as a tombstone (other devices must learn
+  // about the deletion), but it no longer counts toward the cap.
   const result = await t.mutation(api.sync.deleteShelf, { sessionToken, shelfId: "shelf-0" });
   expect(result.deleted).toBe(true);
 
   const shelves = await t.query(api.sync.listShelves, { sessionToken });
-  expect(shelves.some((s) => s.shelfId === "shelf-0")).toBe(false);
-  expect(shelves.length).toBe(FREE_SYNC_SHELF_LIMIT - 1);
+  const tombstone = shelves.find((s) => s.shelfId === "shelf-0");
+  expect(tombstone).toBeDefined();
+  expect(tombstone?.deletedAt).toBeGreaterThan(0);
+  expect(shelves.filter((s) => !s.deletedAt)).toHaveLength(FREE_SYNC_SHELF_LIMIT - 1);
 
   await t.mutation(api.sync.upsertShelf, {
     sessionToken,
@@ -329,6 +332,87 @@ test("deleteShelf: removes the cloud row and frees the shelf cap", async () => {
     localUpdatedAt: new Date().toISOString(),
     imageStorageBytes: 0,
   });
+});
+
+test("upsertShelf: a stale push does not resurrect a tombstoned shelf", async () => {
+  const t = convexTest(schema, modules);
+  const { sessionToken } = await setupUser(t, "resurrect@example.com");
+
+  const before = new Date(Date.now() - 60_000).toISOString();
+  await t.mutation(api.sync.upsertShelf, {
+    sessionToken,
+    shelfId: "gone",
+    name: "Before",
+    color: "ember",
+    origin: "manual",
+    items: [],
+    localCreatedAt: before,
+    localUpdatedAt: before,
+    imageStorageBytes: 0,
+  });
+  await t.mutation(api.sync.deleteShelf, { sessionToken, shelfId: "gone" });
+
+  // A device that missed the deletion replays its older snapshot.
+  await t.mutation(api.sync.upsertShelf, {
+    sessionToken,
+    shelfId: "gone",
+    name: "Resurrected",
+    color: "wave",
+    origin: "manual",
+    items: [],
+    localCreatedAt: before,
+    localUpdatedAt: before,
+    imageStorageBytes: 0,
+  });
+
+  const stored = await t.run(async (ctx) => {
+    const user = await ctx.db.query("users").first();
+    return await ctx.db
+      .query("shelves")
+      .withIndex("by_user_and_shelf", (q) => q.eq("userId", user!._id))
+      .collect();
+  });
+  const row = stored.find((s) => s.shelfId === "gone");
+  expect(row?.deletedAt).toBeGreaterThan(0);
+  expect(row?.name).toBe("Before");
+});
+
+test("upsertShelf: an edit newer than the deletion revives the shelf", async () => {
+  const t = convexTest(schema, modules);
+  const { sessionToken } = await setupUser(t, "revive@example.com");
+
+  const old = new Date(Date.now() - 60_000).toISOString();
+  await t.mutation(api.sync.upsertShelf, {
+    sessionToken,
+    shelfId: "revive-me",
+    name: "Old",
+    color: "ember",
+    origin: "manual",
+    items: [],
+    localCreatedAt: old,
+    localUpdatedAt: old,
+    imageStorageBytes: 0,
+  });
+  await t.mutation(api.sync.deleteShelf, { sessionToken, shelfId: "revive-me" });
+
+  // The owner deliberately recreates the shelf after deleting it.
+  const nowIso = new Date(Date.now() + 5_000).toISOString();
+  await t.mutation(api.sync.upsertShelf, {
+    sessionToken,
+    shelfId: "revive-me",
+    name: "Revived",
+    color: "forest",
+    origin: "manual",
+    items: [],
+    localCreatedAt: old,
+    localUpdatedAt: nowIso,
+    imageStorageBytes: 0,
+  });
+
+  const shelves = await t.query(api.sync.listShelves, { sessionToken });
+  const row = shelves.find((s) => s.shelfId === "revive-me");
+  expect(row?.deletedAt).toBeUndefined();
+  expect(row?.name).toBe("Revived");
 });
 
 test("deleteShelf: deleting a non-existent shelf is a no-op", async () => {
@@ -905,7 +989,7 @@ test("getTeamShelfItems: member sees active items ordered by rank with creator e
   const t = convexTest(schema, modules);
   const { teamId, owner } = await setupTeamWithItems(t);
 
-  const items = await t.query(api.sync.getTeamShelfItems, {
+  const { items, truncated } = await t.query(api.sync.getTeamShelfItems, {
     sessionToken: owner.sessionToken,
     teamId,
     shelfId: "shelf-1",
@@ -914,6 +998,40 @@ test("getTeamShelfItems: member sees active items ordered by rank with creator e
   expect(items.map((item) => item.itemId)).toEqual(["item-a", "item-b"]);
   expect(items[0]).toMatchObject({ createdByUser: { email: owner.email } });
   expect(items.every((item) => item.deletedAt === undefined)).toBe(true);
+  expect(truncated).toBe(false);
+});
+
+test("getTeamShelfItems: flags truncation when the shelf exceeds the read cap", async () => {
+  const t = convexTest(schema, modules);
+  const { teamId, owner } = await setupTeamWithItems(t);
+
+  await t.run(async (ctx) => {
+    for (let i = 0; i < 501; i++) {
+      await ctx.db.insert("shelfItems", {
+        teamId,
+        shelfId: "shelf-1",
+        itemId: `bulk-${i}`,
+        createdBy: owner.userId,
+        updatedBy: owner.userId,
+        kind: "text",
+        title: `t${i}`,
+        subtitle: "",
+        preview: { summary: "", detail: "" },
+        order: String(i).padStart(6, "0"),
+        version: 1,
+        serverUpdatedAt: Date.now(),
+      });
+    }
+  });
+
+  const { items, truncated } = await t.query(api.sync.getTeamShelfItems, {
+    sessionToken: owner.sessionToken,
+    teamId,
+    shelfId: "shelf-1",
+  });
+
+  expect(truncated).toBe(true);
+  expect(items.length).toBeLessThanOrEqual(500);
 });
 
 test("getTeamShelfItems: non-members are rejected", async () => {
@@ -948,4 +1066,95 @@ test("upsertShelfItem: writing to a team shelf requires membership", async () =>
       serverUpdatedAt: Date.now(),
     }),
   ).rejects.toThrow("You are not a member of this team.");
+});
+
+// ---- Personal shelf item ownership (IDOR regression) ----
+
+async function setupPersonalShelf(
+  t: TestConvex<typeof schema>,
+  owner: TestUser,
+): Promise<void> {
+  await t.mutation(api.sync.upsertShelf, {
+    sessionToken: owner.sessionToken,
+    shelfId: "personal-1",
+    name: "mine",
+    color: "ember",
+    origin: "manual",
+    items: [],
+    localCreatedAt: new Date().toISOString(),
+    localUpdatedAt: new Date().toISOString(),
+    imageStorageBytes: 0,
+  });
+}
+
+test("upsertShelfItem: personal shelves require ownership", async () => {
+  const t = convexTest(schema, modules);
+  const owner = await setupUser(t, "owner@example.com");
+  const attacker = await setupUser(t, "attacker@example.com");
+  await setupPersonalShelf(t, owner);
+
+  await expect(
+    t.mutation(api.sync.upsertShelfItem, {
+      sessionToken: attacker.sessionToken,
+      teamId: "",
+      shelfId: "personal-1",
+      itemId: "intruder",
+      kind: "text",
+      title: "intruder",
+      subtitle: "",
+      preview: { summary: "", detail: "" },
+      order: "a",
+      version: 1,
+      serverUpdatedAt: Date.now(),
+    }),
+  ).rejects.toThrow("Shelf not found.");
+});
+
+test("deleteShelfItem: personal shelves require ownership", async () => {
+  const t = convexTest(schema, modules);
+  const owner = await setupUser(t, "owner@example.com");
+  const attacker = await setupUser(t, "attacker@example.com");
+  await setupPersonalShelf(t, owner);
+
+  // Owner plants an item.
+  await t.mutation(api.sync.upsertShelfItem, {
+    sessionToken: owner.sessionToken,
+    teamId: "",
+    shelfId: "personal-1",
+    itemId: "victim-item",
+    kind: "text",
+    title: "victim",
+    subtitle: "",
+    preview: { summary: "", detail: "" },
+    order: "a",
+    version: 1,
+    serverUpdatedAt: Date.now(),
+  });
+
+  await expect(
+    t.mutation(api.sync.deleteShelfItem, {
+      sessionToken: attacker.sessionToken,
+      teamId: "",
+      shelfId: "personal-1",
+      itemId: "victim-item",
+      version: 2,
+      serverUpdatedAt: Date.now(),
+    }),
+  ).rejects.toThrow("Shelf not found.");
+});
+
+test("listShelfItems: personal shelves require ownership", async () => {
+  const t = convexTest(schema, modules);
+  const owner = await setupUser(t, "owner@example.com");
+  const attacker = await setupUser(t, "attacker@example.com");
+  await setupPersonalShelf(t, owner);
+
+  await expect(
+    t.query(api.sync.listShelfItems, {
+      sessionToken: attacker.sessionToken,
+      teamId: "",
+      shelfId: "personal-1",
+      paginationOpts: { numItems: 10, cursor: null },
+    }),
+  ).rejects.toThrow("Shelf not found.");
 });

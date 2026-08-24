@@ -153,6 +153,122 @@ describe('ClipboardStore', () => {
 
     await persister.whenIdle()
   })
+
+  it('dedup keeps the original id and category tags when content is re-copied', async () => {
+    const { clipboard, persister } = await buildStore()
+
+    const category = clipboard.createCategory('Work', 'wave')
+    const first = clipboard.appendEntry({
+      capturedAt: new Date().toISOString(),
+      sourceBundleId: 'app.a',
+      sourceAppName: 'A',
+      item: makeTextItem('same')
+    })
+    clipboard.assignEntryToCategory(first.id, category.id)
+
+    // Re-copy the same text later from another app.
+    const second = clipboard.appendEntry({
+      capturedAt: new Date(Date.now() + 5_000).toISOString(),
+      sourceBundleId: 'app.b',
+      sourceAppName: 'B',
+      item: makeTextItem('same')
+    })
+
+    expect(second.id).toBe(first.id)
+    expect(second.categoryIds).toEqual([category.id])
+    expect(clipboard.getEntries()).toHaveLength(1)
+    expect(clipboard.getEntries()[0]?.sourceBundleId).toBe('app.b')
+
+    await persister.whenIdle()
+  })
+
+  it('image entries with the same content hash dedup even when asset paths differ', async () => {
+    const { clipboard, persister } = await buildStore()
+
+    const mkImage = (path: string) => ({
+      kind: 'imageAsset' as const,
+      id: `img-${Math.random()}`,
+      createdAt: new Date().toISOString(),
+      order: 0,
+      title: 'Screenshot',
+      subtitle: '',
+      preview: { summary: 'Screenshot', detail: '' },
+      mimeType: 'image/png',
+      file: { originalPath: path, resolvedPath: path, bookmarkBase64: '', isStale: false, isMissing: false },
+    })
+
+    const first = clipboard.appendEntry({
+      capturedAt: new Date().toISOString(),
+      sourceBundleId: '',
+      sourceAppName: '',
+      item: mkImage('/assets/aaa.png'),
+      thumbnailDataUri: 'data:image/png;base64,old',
+      imageSha256: 'abc123'
+    })
+    // Same bytes re-copied → payloadToItems wrote a fresh uuid-named file,
+    // so paths differ and path-based dedup would never match.
+    const second = clipboard.appendEntry({
+      capturedAt: new Date(Date.now() + 1_000).toISOString(),
+      sourceBundleId: '',
+      sourceAppName: '',
+      item: mkImage('/assets/bbb.png'),
+      imageSha256: 'abc123'
+    })
+
+    expect(second.id).toBe(first.id)
+    expect(clipboard.getEntries()).toHaveLength(1)
+    // Original item (and its asset file) survives the merge.
+    expect(clipboard.getEntries()[0]?.item).toMatchObject({ file: { resolvedPath: '/assets/aaa.png' } })
+    expect(clipboard.getEntries()[0]?.thumbnailDataUri).toBe('data:image/png;base64,old')
+
+    await persister.whenIdle()
+  })
+
+  it('restoreHistory prunes restored entries past the limit and cutoff', async () => {
+    const { clipboard, persister, state } = await buildStore()
+    state.clipboardSettings.historyLimit = 2
+
+    const now = Date.now()
+    clipboard.restoreHistory([
+      {
+        id: 'fresh-1',
+        capturedAt: new Date(now).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem('f1'),
+        categoryIds: []
+      },
+      {
+        id: 'fresh-2',
+        capturedAt: new Date(now - 60_000).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem('f2'),
+        categoryIds: []
+      },
+      {
+        id: 'over-limit',
+        capturedAt: new Date(now - 120_000).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem('old-but-in-range'),
+        categoryIds: []
+      },
+      {
+        id: 'ancient',
+        capturedAt: new Date(now - 40 * 24 * 60 * 60 * 1000).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem('ancient'),
+        categoryIds: []
+      }
+    ])
+
+    const entries = clipboard.getEntries()
+    expect(entries.map((e) => e.id)).toEqual(['fresh-1', 'fresh-2'])
+
+    await persister.whenIdle()
+  })
 })
 
 describe('ClipboardStore.prune (regression: BUG-001)', () => {

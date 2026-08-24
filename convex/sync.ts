@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { mutation, query, internalMutation } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
   assertTeamPermission,
   currentPlan,
@@ -16,6 +17,10 @@ import type { Id } from "./_generated/dataModel";
 import { shelfItemSchema, preferencesValues } from "./sharedSchemas";
 
 const PERSONAL = "";
+
+// Read cap for the reactive team-shelf query. Beyond this the snapshot
+// is flagged truncated and clients must not reconcile against it.
+const TEAM_ITEMS_READ_CAP = 500;
 
 const shelfPayload = {
   shelfId: v.string(),
@@ -103,7 +108,8 @@ export const overview = query({
       plan,
       deviceCount: devices.length,
       deviceLimit: deviceLimitForPlan(plan),
-      syncedShelfCount: shelves.length,
+      // Tombstoned shelves are pending deletions, not held storage.
+      syncedShelfCount: shelves.filter((shelf) => !shelf.deletedAt).length,
       shelfLimit: shelfLimitForPlan(plan),
       storageBytesUsed: storage,
       storageBytesLimit: plan === "pro" ? PRO_IMAGE_STORAGE_LIMIT_BYTES : 0,
@@ -147,12 +153,13 @@ export const registerDevice = mutation({
       return existing._id;
     }
 
-    const devices = await ctx.db
+    const limit = deviceLimitForPlan(plan);
+    const devicesProbe = await ctx.db
       .query("devices")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .collect();
+      .take(limit + 1);
 
-    if (devices.length >= deviceLimitForPlan(plan)) {
+    if (devicesProbe.length >= limit) {
       throw new ConvexError("Device sync limit reached for this plan.");
     }
 
@@ -181,11 +188,22 @@ export const upsertShelf = mutation({
       .unique();
 
     if (!existing) {
-      const shelves = await ctx.db
+      const limit = shelfLimitForPlan(plan);
+      // Tombstoned shelves do not count toward the cap — they are pending
+      // deletions, not storage the user still holds. Bounded async
+      // iteration: stop once `limit` active rows have been seen.
+      let activeShelfCount = 0;
+      for await (const row of ctx.db
         .query("shelves")
-        .withIndex("by_user", (q) => q.eq("userId", userId))
-        .collect();
-      if (shelves.length >= shelfLimitForPlan(plan)) {
+        .withIndex("by_user", (q) => q.eq("userId", userId))) {
+        if (!row.deletedAt) {
+          activeShelfCount += 1;
+          if (activeShelfCount >= limit) {
+            break;
+          }
+        }
+      }
+      if (activeShelfCount >= limit) {
         throw new ConvexError("Cloud shelf limit reached for this plan.");
       }
     }
@@ -218,6 +236,19 @@ export const upsertShelf = mutation({
     };
 
     if (existing) {
+      // Tombstone guard: a device that has not yet seen the deletion must
+      // not resurrect the shelf with its next blind push. Only an edit
+      // stamped AFTER the deletion (the owner deliberately recreating it)
+      // clears the tombstone. Stale pushes get a silent no-op (same shape
+      // as the LWW-reject path below); the pushing device learns about the
+      // deletion from `listShelves` and drops its local copy.
+      if (existing.deletedAt) {
+        const incomingMs = Date.parse(args.localUpdatedAt);
+        if (!Number.isFinite(incomingMs) || incomingMs <= existing.deletedAt) {
+          return existing._id;
+        }
+        await ctx.db.patch(existing._id, { deletedAt: undefined });
+      }
       // Last-write-wins by `localUpdatedAt`. The previous version of
       // this check trusted the client timestamp absolutely, so a
       // device that pushed a `9999-12-31...` timestamp would pin its
@@ -236,14 +267,16 @@ export const upsertShelf = mutation({
       // insert items that don't already have a row (existing items already
       // tracked via per-item mutations). Phase 2 will remove the items array
       // and switch reads exclusively to shelfItems.
+      // Batched: one collect + inserts for missing items instead of N unique queries.
+      const existingItems = await ctx.db
+        .query("shelfItems")
+        .withIndex("by_team_shelf", (q) =>
+          q.eq("teamId", PERSONAL).eq("shelfId", args.shelfId),
+        )
+        .collect();
+      const existingItemIds = new Set(existingItems.map((row) => row.itemId));
       for (const item of args.items) {
-        const existingItem = await ctx.db
-          .query("shelfItems")
-          .withIndex("by_team_shelf_item", (q) =>
-            q.eq("teamId", PERSONAL).eq("shelfId", args.shelfId).eq("itemId", item.id),
-          )
-          .unique();
-        if (!existingItem) {
+        if (!existingItemIds.has(item.id)) {
           await ctx.db.insert("shelfItems", itemToShelfItemRow(item, {
             shelfId: args.shelfId,
             teamId: PERSONAL,
@@ -265,14 +298,13 @@ export const upsertShelf = mutation({
     });
 
     // Dual-write all items to shelfItems (new shelf, all items are fresh).
-    const serverNowDedup = serverNow;
     for (const item of args.items) {
       await ctx.db.insert("shelfItems", itemToShelfItemRow(item, {
         shelfId: args.shelfId,
         teamId: PERSONAL,
         userId,
         version: 1,
-        serverUpdatedAt: serverNowDedup,
+        serverUpdatedAt: serverNow,
       }) as any);
     }
 
@@ -301,8 +333,12 @@ export const deleteShelf = mutation({
       .query("shelves")
       .withIndex("by_user_and_shelf", (q) => q.eq("userId", userId).eq("shelfId", args.shelfId))
       .unique();
-    if (shelf) {
-      await ctx.db.delete(shelf._id);
+    if (shelf && !shelf.deletedAt) {
+      // Soft delete: the tombstone row stays so other devices see the
+      // deletion via `listShelves` and drop their local copies. A hard
+      // delete here let a device that still held the shelf resurrect it
+      // with its next blind `upsertShelf`.
+      await ctx.db.patch(shelf._id, { deletedAt: Date.now(), updatedAt: Date.now() });
     }
 
     // Delete image assets and their underlying _storage blobs so the
@@ -395,21 +431,24 @@ export const authorizeImageUpload = mutation({
     }
 
     // Sum the bytes from upload events the client still has "in flight".
-    // An event is in-flight until the client either calls
-    // `recordImageAsset` (success) or `abandonImageUpload` (failure /
-    // give up). Without that distinction, a flaky client that uploads
-    // bytes but never resolves them used to be blocked for the full
-    // hour; with it, the client can fail fast and free the slot.
+    // Use by_user_and_status to avoid full hour scan, then filter by
+    // time. Bounded take(500) keeps TX cheap; at avg 3MB per event 500
+    // already covers the 1.5GB cap.
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    const recent = await ctx.db
+    const inFlightCandidates = await ctx.db
       .query("imageUploadEvents")
-      .withIndex("by_user_and_created", (q) =>
-        q.eq("userId", userId).gt("createdAt", oneHourAgo),
-      )
-      .collect();
-    const inFlight = recent
-      .filter((event) => event.status === "in_flight")
+      .withIndex("by_user_and_status", (q) => q.eq("userId", userId).eq("status", "in_flight"))
+      .take(500);
+    const inFlight = inFlightCandidates
+      .filter((event) => event.createdAt > oneHourAgo)
       .reduce((sum, event) => sum + event.bytes, 0);
+    // If we hit the take limit, we may have underestimated; treat as over-cap
+    // to prevent slow-loris bypass that stays under per-request scan.
+    if (inFlightCandidates.length >= 500 && inFlight + args.bytes > MAX_INFLIGHT_UPLOAD_BYTES_PER_HOUR * 0.8) {
+      throw new ConvexError(
+        "Too many images uploading at once. Please wait for previous uploads to finish.",
+      );
+    }
     if (inFlight + args.bytes > MAX_INFLIGHT_UPLOAD_BYTES_PER_HOUR) {
       throw new ConvexError(
         "Too many images uploading at once. Please wait for previous uploads to finish.",
@@ -569,6 +608,25 @@ const shelfItemCommonArgs = {
   order: v.string(),
 };
 
+// Personal shelves are owned via the `shelves` table (userId + shelfId).
+// The `shelfItems` index is keyed by teamId+shelfId+itemId with no userId,
+// so every per-item entry point MUST verify the caller owns the personal
+// shelf row before touching its items. Without this, any authenticated
+// user could read/write/delete another user's items given a shelfId.
+async function assertPersonalShelfOwnership(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+  shelfId: string,
+): Promise<void> {
+  const shelf = await ctx.db
+    .query("shelves")
+    .withIndex("by_user_and_shelf", (q) => q.eq("userId", userId).eq("shelfId", shelfId))
+    .unique();
+  if (!shelf) {
+    throw new ConvexError("Shelf not found.");
+  }
+}
+
 // Upsert a single shelf item with version-based LWW.
 // - version + serverUpdatedAt is the source of truth (not localUpdatedAt)
 // - teamId sentinel "" for personal shelves
@@ -598,6 +656,8 @@ export const upsertShelfItem = mutation({
     const userId = await requireUser(ctx, args.sessionToken);
     if (args.teamId !== PERSONAL) {
       await assertTeamPermission(ctx, args.teamId as Id<"teams">, userId);
+    } else {
+      await assertPersonalShelfOwnership(ctx, userId, args.shelfId);
     }
 
     const existing = await ctx.db
@@ -682,6 +742,8 @@ export const deleteShelfItem = mutation({
     const userId = await requireUser(ctx, args.sessionToken);
     if (args.teamId !== PERSONAL) {
       await assertTeamPermission(ctx, args.teamId as Id<"teams">, userId);
+    } else {
+      await assertPersonalShelfOwnership(ctx, userId, args.shelfId);
     }
 
     const existing = await ctx.db
@@ -714,6 +776,15 @@ export const deleteShelfItem = mutation({
 });
 
 // Reactive query: get all active items on a team shelf with creator user email.
+//
+// Returns `{ items, truncated }`. `truncated` is true when the shelf holds
+// more rows than the read cap. A partial snapshot is NOT safe for the
+// client's reconcile step: mirroring it down would silently drop tail
+// items, and deriving deletes from bookkeeping built on it could delete
+// live server rows. Callers MUST treat a truncated snapshot as
+// untrustworthy (see TeamShelfSyncProvider) instead of paging to
+// completion here — looping cursors inside one query risks the
+// transaction read limits, and huge arrays risk the response size cap.
 export const getTeamShelfItems = query({
   args: {
     ...sessionArgs,
@@ -730,16 +801,18 @@ export const getTeamShelfItems = query({
       .withIndex("by_team_shelf", (q) =>
         q.eq("teamId", args.teamId).eq("shelfId", shelfId),
       )
-      .take(500);
+      .take(TEAM_ITEMS_READ_CAP + 1);
+    const truncated = rawItems.length > TEAM_ITEMS_READ_CAP;
+    const capped = truncated ? rawItems.slice(0, TEAM_ITEMS_READ_CAP) : rawItems;
 
-    const activeItems = rawItems
+    const activeItems = capped
       .filter((i) => !i.deletedAt)
       // Plain code-unit comparison, not localeCompare: `order` holds
       // lexorank strings, whose ordering is defined by byte-wise string
       // comparison and can differ from locale collation.
       .sort((a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0));
 
-    return await Promise.all(
+    const items = await Promise.all(
       activeItems.map(async (item) => {
         const creator = await ctx.db.get(item.createdBy);
         // Omit the key entirely when the creator is gone — `undefined`
@@ -749,6 +822,8 @@ export const getTeamShelfItems = query({
           : { ...item };
       }),
     );
+
+    return { items, truncated };
   },
 });
 
@@ -768,6 +843,8 @@ export const listShelfItems = query({
     const userId = await requireUser(ctx, args.sessionToken);
     if (args.teamId !== PERSONAL) {
       await assertTeamPermission(ctx, args.teamId as Id<"teams">, userId);
+    } else {
+      await assertPersonalShelfOwnership(ctx, userId, args.shelfId);
     }
 
     const result = await ctx.db
@@ -801,14 +878,15 @@ export const migrateOneShelf = internalMutation({
   },
   handler: async (ctx, args) => {
     const serverNow = Date.now();
+    const existingItems = await ctx.db
+      .query("shelfItems")
+      .withIndex("by_team_shelf", (q) =>
+        q.eq("teamId", PERSONAL).eq("shelfId", args.shelfId),
+      )
+      .collect();
+    const existingIds = new Set(existingItems.map((row) => row.itemId));
     for (const item of args.items) {
-      const existing = await ctx.db
-        .query("shelfItems")
-        .withIndex("by_team_shelf_item", (q) =>
-          q.eq("teamId", PERSONAL).eq("shelfId", args.shelfId).eq("itemId", item.id),
-        )
-        .unique();
-      if (!existing) {
+      if (!existingIds.has(item.id)) {
         await ctx.db.insert("shelfItems", itemToShelfItemRow(item, {
           shelfId: args.shelfId,
           teamId: PERSONAL,

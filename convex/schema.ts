@@ -91,6 +91,10 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
     itemsMigratedAt: v.optional(v.number()),
+    // Tombstone for cross-device deletion propagation. A soft-deleted row
+    // stays so other devices learn the shelf is gone; a stale device's
+    // blind re-upsert must not resurrect it (see `upsertShelf`).
+    deletedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_user_and_shelf", ["userId", "shelfId"])
@@ -124,7 +128,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_user", ["userId"])
-    .index("by_user_and_shelf", ["userId", "shelfId"]),
+    .index("by_user_and_shelf", ["userId", "shelfId"])
+    .index("by_storage", ["storageId"]),
 
   syncEvents: defineTable({
     userId: v.id("users"),

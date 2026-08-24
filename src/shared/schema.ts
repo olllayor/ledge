@@ -166,6 +166,10 @@ export const clipboardEntrySchema = z.object({
   // 64x64 PNG data URI generated at capture for image items; lets
   // ClipboardView render thumbnails without re-decoding the full payload.
   thumbnailDataUri: z.string().optional(),
+  // SHA-256 of the captured PNG bytes (image entries only). Every capture
+  // writes a fresh uuid-named asset file, so path-based dedup can never
+  // match; content hashes make re-copied screenshots dedupable.
+  imageSha256: z.string().optional(),
   categoryIds: z.array(z.string()).default([]),
 });
 
@@ -177,7 +181,7 @@ export const clipboardCategorySchema = z.object({
 });
 
 export const clipboardSettingsSchema = z.object({
-  enabled: z.boolean().default(true),
+  enabled: z.boolean().default(false),
   historyLimit: z.number().int().positive().max(2000).default(200),
   ignoreConcealedItems: z.boolean().default(true),
   ignoreBundleIds: z.array(z.string()).default([]),

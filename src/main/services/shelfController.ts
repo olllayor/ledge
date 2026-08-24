@@ -185,9 +185,33 @@ export class ShelfController {
       }),
     )
 
+    // Re-read the live shelf before replacing: payloads added while the
+    // bookmark refresh was in flight (drop onto the already-visible
+    // window, tray drop) live in stateStore's live shelf, and writing
+    // back the stale pre-await snapshot would silently drop them.
+    const currentLive = this.deps.stateStore.getPersonalLiveShelf()
+    const addedDuringRefresh = currentLive?.id === shelf.id ? currentLive.items : []
+    const snapshotById = new Map(shelf.items.map((item) => [item.id, item]))
+    const refreshedById = new Map(refreshedItems.map((item) => [item.id, item]))
+
+    // Refreshed bookmark data wins for untouched items; locally-changed
+    // items and brand-new additions keep their live versions.
+    const mergedItems = refreshedItems.map((refreshed) => {
+      const liveItem = addedDuringRefresh.find((candidate) => candidate.id === refreshed.id)
+      const snapshotItem = snapshotById.get(refreshed.id)
+      return liveItem && JSON.stringify(liveItem) !== JSON.stringify(snapshotItem)
+        ? liveItem
+        : refreshed
+    })
+    for (const liveItem of addedDuringRefresh) {
+      if (!refreshedById.has(liveItem.id)) {
+        mergedItems.push(liveItem)
+      }
+    }
+
     this.deps.stateStore.replaceLiveShelf({
       ...shelf,
-      items: refreshedItems,
+      items: mergedItems,
     })
 
     this.deps.shelfWindow.resetPosition()
@@ -236,6 +260,22 @@ export class ShelfController {
     this.deps.shelfWindow.resetPosition()
     this.deps.shelfWindow.hide()
     this.deps.onInactivityTick()
+  }
+
+  /**
+   * Drop every local copy of a shelf that the cloud reports as deleted
+   * (tombstoned on another device). If it is the shelf currently open,
+   * closing it is part of honoring the deletion — the user deleted it
+   * themselves on another device.
+   */
+  removeSyncedShelfLocally(shelfId: string): void {
+    if (this.deps.stateStore.getPersonalLiveShelf()?.id === shelfId) {
+      this.deps.stateStore.replaceLiveShelf(null)
+      this.deps.shelfWindow.resetPosition()
+      this.deps.shelfWindow.hide()
+      this.deps.onInactivityTick()
+    }
+    this.deps.stateStore.removeRecentShelf(shelfId)
   }
 }
 

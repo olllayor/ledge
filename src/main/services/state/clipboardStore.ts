@@ -6,6 +6,7 @@ import type {
   ShelfColor,
   ShelfItemRecord,
 } from '@shared/schema'
+import { getFileBackedPath } from '@shared/fileUtils'
 import type { PersisterBinding, PersistedState } from './types'
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
@@ -16,6 +17,7 @@ export interface ClipboardEntryInput {
   sourceAppName: string
   item: ShelfItemRecord
   thumbnailDataUri?: string
+  imageSha256?: string
   categoryIds?: string[]
 }
 
@@ -44,17 +46,47 @@ export class ClipboardStore {
 
   appendEntry(input: ClipboardEntryInput): ClipboardEntry {
     const state = this.getState()
-    const entry: ClipboardEntry = {
-      id: randomUUID(),
-      capturedAt: input.capturedAt,
-      sourceBundleId: input.sourceBundleId,
-      sourceAppName: input.sourceAppName,
-      item: input.item,
-      thumbnailDataUri: input.thumbnailDataUri,
-      categoryIds: input.categoryIds ?? []
+    // Dedup: if the same content already exists (common when user hits Cmd+C
+    // repeatedly), drop the older copy and keep the newest at the top instead
+    // of growing the history with identical entries. Image entries dedup by
+    // PNG content hash — each capture writes a fresh uuid-named asset file,
+    // so path comparison can never match.
+    const dupIdx = state.clipboardHistory.findIndex((e) =>
+      input.imageSha256 && e.imageSha256
+        ? e.imageSha256 === input.imageSha256
+        : isSameItem(e.item, input.item),
+    )
+    let entry: ClipboardEntry
+    if (dupIdx !== -1) {
+      // Re-copy of existing content: keep the original entry id (and its
+      // asset file + thumbnail) so selected cards and in-flight undo
+      // snapshots stay valid, and merge the user's category assignments
+      // instead of silently stripping them.
+      const dup = state.clipboardHistory[dupIdx]!
+      state.clipboardHistory.splice(dupIdx, 1)
+      entry = {
+        ...dup,
+        capturedAt: input.capturedAt,
+        sourceBundleId: input.sourceBundleId,
+        sourceAppName: input.sourceAppName,
+        thumbnailDataUri: input.thumbnailDataUri ?? dup.thumbnailDataUri,
+        imageSha256: dup.imageSha256 ?? input.imageSha256,
+        categoryIds: [...new Set([...dup.categoryIds, ...(input.categoryIds ?? [])])]
+      }
+    } else {
+      entry = {
+        id: randomUUID(),
+        capturedAt: input.capturedAt,
+        sourceBundleId: input.sourceBundleId,
+        sourceAppName: input.sourceAppName,
+        item: input.item,
+        thumbnailDataUri: input.thumbnailDataUri,
+        imageSha256: input.imageSha256,
+        categoryIds: input.categoryIds ?? []
+      }
     }
     state.clipboardHistory.unshift(entry)
-    this.prune()
+    this.applyPrune()
     this.persister.save(state)
     return entry
   }
@@ -72,7 +104,24 @@ export class ClipboardStore {
     this.persister.save(state)
   }
 
+  restoreHistory(entries: ClipboardEntry[]): void {
+    const state = this.getState()
+    // Defensive clone — callers may mutate the array after.
+    state.clipboardHistory = [...entries]
+    // Enforce the limit and the 30-day cutoff; a restored set can
+    // otherwise exceed both indefinitely (prune otherwise only runs on
+    // append, settings change, or manual prune).
+    this.applyPrune()
+    this.persister.save(state)
+  }
+
   prune(): void {
+    if (this.applyPrune()) {
+      this.persister.save(this.getState())
+    }
+  }
+
+  private applyPrune(): boolean {
     const state = this.getState()
     const limit = Math.max(1, state.clipboardSettings.historyLimit)
     const cutoff = Date.now() - THIRTY_DAYS_MS
@@ -85,15 +134,7 @@ export class ClipboardStore {
       })
       .slice(0, limit)
 
-    // Persist when the prune actually changed the set. Other call sites
-    // (appendEntry, updateSettings) save immediately after invoking
-    // `prune`, so this is a redundant but cheap no-op for them — the
-    // persister coalesces a burst of save() calls into a single write.
-    // The IPC `clipboardPruneNow` handler relies on this branch to
-    // actually flush a user-initiated prune to disk.
-    if (state.clipboardHistory.length !== previousLength) {
-      this.persister.save(state)
-    }
+    return state.clipboardHistory.length !== previousLength
   }
 
   createCategory(name: string, color: ShelfColor): ClipboardCategory {
@@ -158,8 +199,31 @@ export class ClipboardStore {
       ...patch
     }
     // Re-enforce limits after a patch (e.g. user lowered historyLimit).
-    this.prune()
+    this.applyPrune()
     this.persister.save(state)
     return state.clipboardSettings
+  }
+}
+
+function isSameItem(a: ShelfItemRecord, b: ShelfItemRecord): boolean {
+  if (a.kind !== b.kind) return false
+  switch (a.kind) {
+    case 'text':
+      return a.text === (b as typeof a).text
+    case 'code':
+      return a.text === (b as typeof a).text
+    case 'url':
+      return a.url === (b as typeof a).url
+    case 'color':
+      return a.hex.toLowerCase() === (b as typeof a).hex.toLowerCase()
+    case 'file':
+    case 'folder':
+    case 'imageAsset': {
+      const pa = getFileBackedPath(a)
+      const pb = getFileBackedPath(b as typeof a)
+      return !!pa && pa === pb
+    }
+    default:
+      return false
   }
 }

@@ -164,6 +164,10 @@ export class StateStore {
     return this.shelves.replaceRecentShelf(shelf)
   }
 
+  removeRecentShelf(id: string) {
+    return this.shelves.removeRecentShelf(id)
+  }
+
   closeShelf() {
     return this.shelves.closeShelf()
   }
@@ -246,6 +250,10 @@ export class StateStore {
 
   clearClipboardHistory() {
     return this.clipboard.clearHistory()
+  }
+
+  restoreClipboardHistory(entries: Parameters<ClipboardStore['restoreHistory']>[0]) {
+    return this.clipboard.restoreHistory(entries)
   }
 
   pruneClipboardHistory() {

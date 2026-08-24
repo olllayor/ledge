@@ -127,6 +127,42 @@ export const cleanupOldUploadEvents = internalMutation({
   },
 });
 
+// Reclaim storage blobs whose upload never completed. A client crash
+// between "generate upload URL" and `recordImageAsset` leaves a billed
+// blob in `_storage` with no imageAssets row pointing at it — deleted
+// rows never, leaking bytes forever. Blobs younger than the grace
+// period may still be mid-upload and are skipped.
+const ORPHAN_BLOB_GRACE_MS = 24 * 60 * 60 * 1000;
+
+export const cleanupOrphanedStorageBlobs = internalMutation({
+  handler: async (ctx) => {
+    const cutoff = Date.now() - ORPHAN_BLOB_GRACE_MS;
+    let orphaned = 0;
+    let scanned = 0;
+
+    for await (const blob of ctx.db.system.query("_storage")) {
+      if (scanned >= BATCH_SIZE) break;
+      scanned += 1;
+      if (blob._creationTime >= cutoff) continue;
+
+      const claimed = await ctx.db
+        .query("imageAssets")
+        .withIndex("by_storage", (q) => q.eq("storageId", blob._id))
+        .first();
+      if (!claimed) {
+        await ctx.storage.delete(blob._id);
+        orphaned += 1;
+      }
+    }
+
+    // Reschedule when we filled the scan window; there may be more.
+    if (scanned === BATCH_SIZE) {
+      await ctx.scheduler.runAfter(0, internal.crons.cleanupOrphanedStorageBlobs);
+    }
+    void orphaned;
+  },
+});
+
 const crons = cronJobs();
 
 crons.interval(
@@ -145,6 +181,12 @@ crons.interval(
   "cleanup old upload events",
   { hours: 1 },
   internal.crons.cleanupOldUploadEvents,
+);
+
+crons.interval(
+  "delete orphaned storage blobs",
+  { hours: 6 },
+  internal.crons.cleanupOrphanedStorageBlobs,
 );
 
 crons.interval(

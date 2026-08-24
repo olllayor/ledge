@@ -58,10 +58,14 @@ export async function currentPlan(ctx: QueryCtx | MutationCtx, userId: Id<"users
 }
 
 export async function storageBytesUsed(ctx: QueryCtx | MutationCtx, userId: Id<"users">): Promise<number> {
+  // Legacy imageAssets only. Per-item shelfItems rows carry no byte
+  // fields yet (nothing writes them), so any shelfItems-based accounting
+  // here would be a global table scan returning zero. Revisit when the
+  // rows gain real byte counts plus a by_createdBy index.
   const assets = await ctx.db
     .query("imageAssets")
     .withIndex("by_user", (q) => q.eq("userId", userId))
-    .collect();
+    .take(1000);
 
   return assets.reduce((total, asset) => total + asset.bytes, 0);
 }

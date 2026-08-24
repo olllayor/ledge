@@ -198,6 +198,16 @@ export class ShelfStore {
     this.persister.save(state)
   }
 
+  removeRecentShelf(id: string): void {
+    const state = this.getState()
+    const next = state.recentShelves.filter((entry) => entry.id !== id)
+    if (next.length === state.recentShelves.length) {
+      return
+    }
+    state.recentShelves = next
+    this.persister.save(state)
+  }
+
   closeShelf(): void {
     const state = this.getState()
     const teamId = state.team.activeTeamId

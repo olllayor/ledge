@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, promises as fs } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
 import {
@@ -14,12 +14,6 @@ import type {
 import type { PersistedState } from './types'
 
 const persistedStateSchema = appStateSchema.omit({ permissionStatus: true })
-const persistedStateEnvelopeV1Schema = appStateSchema
-  .omit({ permissionStatus: true, sync: true })
-  .extend({ version: z.literal(1) })
-const persistedStateEnvelopeV2Schema = persistedStateSchema.extend({ version: z.literal(2) })
-const persistedStateEnvelopeV3Schema = persistedStateSchema.extend({ version: z.literal(3) })
-const persistedStateEnvelopeV4Schema = persistedStateSchema.extend({ version: z.literal(4) })
 
 export const PERSISTED_STATE_VERSION = 4
 
@@ -139,9 +133,27 @@ export class StatePersister {
           this.pendingSerialized = null
 
           try {
-            const tempPath = `${this.statePath}.tmp-${process.pid}`
+            const tempPath = `${this.statePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
             await fs.writeFile(tempPath, serialized, 'utf8')
+            // Ensure data hits disk before rename; crash during write
+            // without fsync could leave temp truncated and rename moot.
+            try {
+              const handle = await fs.open(tempPath, 'r')
+              await handle.sync()
+              await handle.close()
+            } catch {
+              // Best-effort fsync; rename still provides atomicity.
+            }
             await fs.rename(tempPath, this.statePath)
+            // Best-effort fsync of directory for durability on macOS.
+            try {
+              const dir = this.statePath.slice(0, this.statePath.lastIndexOf('/')) || '.'
+              const dirHandle = await fs.open(dir, 'r')
+              await dirHandle.sync()
+              await dirHandle.close()
+            } catch {
+              // Non-critical on platforms that don't support dir fsync.
+            }
           } catch (error) {
             const err = error instanceof Error ? error : new Error(String(error))
             console.error('Failed to persist Ledge state.', err)
@@ -174,88 +186,92 @@ export class StatePersister {
       return
     }
     console.error(`Ledge state file was unreadable (${cause.message}); moved to ${backupPath}`)
+    // Prune old corrupt backups to avoid disk fill; keep last 3.
+    try {
+      const dir = this.statePath.slice(0, this.statePath.lastIndexOf('/')) || '.'
+      const prefix = this.statePath.slice(dir.length + 1) + '.corrupt-'
+      const corruptFiles = readdirSync(dir)
+        .filter((name: string) => name.startsWith(prefix))
+        .sort()
+      for (const old of corruptFiles.slice(0, Math.max(0, corruptFiles.length - 3))) {
+        try {
+          unlinkSync(join(dir, old))
+        } catch {
+          // Best-effort cleanup.
+        }
+      }
+    } catch {
+      // Pruning is best-effort.
+    }
     this.onCorruptionDetected?.({ backupPath, cause })
   }
 }
 
-function migratePersistedState(parsed: unknown, _defaultState: PersistedState): LoadResult {
-  if (parsed && typeof parsed === 'object' && 'version' in parsed) {
-    const version = (parsed as { version: number }).version
+function migratePersistedState(parsed: unknown, defaultState: PersistedState): LoadResult {
+  const version =
+    parsed && typeof parsed === 'object' && 'version' in parsed
+      ? (parsed as { version: unknown }).version
+      : null
 
-    if (version === 4) {
-      const envelope = persistedStateEnvelopeV4Schema.parse(parsed)
-      return {
-        state: {
-          ...envelope,
-          teamLiveShelves: envelope.teamLiveShelves ?? {},
-        },
-        didMigrate: !('teamLiveShelves' in (parsed as object)),
-      }
-    }
+  // Per-slice parsing with fallback-to-default. The historical envelopes
+  // used to be validated against the *current* field shapes, so any shape
+  // drift since that version threw and quarantined a perfectly good file,
+  // resetting shelves AND clipboard history. Parsing each slice
+  // independently confines damage to the slice that actually changed;
+  // everything else survives the upgrade.
+  const raw = (parsed ?? {}) as Record<string, unknown>
+  const shapes = persistedStateSchema.shape
+  let salvaged = false
 
-    if (version === 3) {
-      const envelope = persistedStateEnvelopeV3Schema.parse(parsed)
-      return {
-        state: {
-          liveShelf: envelope.liveShelf,
-          teamLiveShelves: {},
-          recentShelves: envelope.recentShelves,
-          preferences: envelope.preferences,
-          sync: envelope.sync,
-          team: { activeTeamId: null },
-          clipboardHistory: envelope.clipboardHistory,
-          clipboardCategories: envelope.clipboardCategories,
-          clipboardSettings: envelope.clipboardSettings
-        },
-        didMigrate: true
-      }
+  const slice = <T>(schema: z.ZodType<T>, key: keyof typeof shapes & string): T | null => {
+    const result = schema.safeParse(raw[key])
+    if (result.success) {
+      return result.data
     }
-
-    if (version === 2) {
-      const envelope = persistedStateEnvelopeV2Schema.parse(parsed)
-      return {
-        state: {
-          liveShelf: envelope.liveShelf,
-          teamLiveShelves: {},
-          recentShelves: envelope.recentShelves,
-          preferences: envelope.preferences,
-          sync: envelope.sync,
-          team: { activeTeamId: null },
-          clipboardHistory: envelope.clipboardHistory,
-          clipboardCategories: envelope.clipboardCategories,
-          clipboardSettings: envelope.clipboardSettings
-        },
-        didMigrate: true
-      }
-    }
-
-    if (version === 1) {
-      const envelope = persistedStateEnvelopeV1Schema.parse(parsed)
-      return {
-        state: {
-          liveShelf: envelope.liveShelf,
-          teamLiveShelves: {},
-          recentShelves: envelope.recentShelves,
-          preferences: envelope.preferences,
-          sync: syncStateSchema.parse({}),
-          team: { activeTeamId: null },
-          clipboardHistory: envelope.clipboardHistory,
-          clipboardCategories: envelope.clipboardCategories,
-          clipboardSettings: envelope.clipboardSettings
-        },
-        didMigrate: true
-      }
-    }
+    salvaged = true
+    console.warn(`Ledge state slice "${key}" failed validation and was reset to defaults.`)
+    return null
   }
+
+  const liveShelf = slice(shapes.liveShelf, 'liveShelf')
+  const recentShelves = slice(shapes.recentShelves, 'recentShelves')
+  const preferences = slice(shapes.preferences, 'preferences') ?? defaultState.preferences
+  const clipboardHistory = slice(shapes.clipboardHistory, 'clipboardHistory')
+  const clipboardCategories = slice(shapes.clipboardCategories, 'clipboardCategories')
+  const clipboardSettings = slice(shapes.clipboardSettings, 'clipboardSettings')
+
+  // Sync arrived in v2; v1 files predate it entirely.
+  const hasSyncSlice = version === null || (typeof version === 'number' && version >= 2)
+  const sync = hasSyncSlice
+    ? (slice(shapes.sync, 'sync') ?? defaultSyncStateRecord())
+    : defaultSyncStateRecord()
+
+  // Team live shelves arrived in v4.
+  const hasTeamSlices = typeof version === 'number' && version >= 4 && version <= PERSISTED_STATE_VERSION
+  const teamLiveShelves =
+    hasTeamSlices ?
+      (slice(shapes.teamLiveShelves, 'teamLiveShelves') ?? {})
+    : {}
+  const team =
+    hasTeamSlices ?
+      (slice(shapes.team, 'team') ?? { activeTeamId: null })
+    : { activeTeamId: null }
 
   return {
     state: {
-      ...persistedStateSchema.omit({ sync: true }).parse(parsed),
-      teamLiveShelves: {},
-      sync: syncStateSchema.parse({}),
-      team: { activeTeamId: null },
+      liveShelf: liveShelf ?? defaultState.liveShelf,
+      recentShelves: recentShelves ?? defaultState.recentShelves,
+      teamLiveShelves,
+      preferences,
+      sync,
+      team,
+      clipboardHistory: clipboardHistory ?? defaultState.clipboardHistory,
+      clipboardCategories: clipboardCategories ?? defaultState.clipboardCategories,
+      clipboardSettings: clipboardSettings ?? defaultState.clipboardSettings,
     },
-    didMigrate: true
+    // Any salvage (or a legacy envelope missing newer slices) means the
+    // on-disk layout differs from the canonical snapshot; re-save it.
+    didMigrate: salvaged || version !== PERSISTED_STATE_VERSION,
   }
 }
 
