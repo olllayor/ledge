@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { clipboard, nativeImage } from 'electron'
 import type { ShelfItemRecord } from '@shared/schema'
 import { getFileBackedPath, isFileBackedItem } from '@shared/fileUtils'
@@ -74,7 +75,10 @@ function writeFileBackedToClipboard(item: ShelfItemRecord, writer: ClipboardWrit
   if (!path) return false
   writer.clear()
   writer.writeText(path)
-  writer.writeBuffer('public.file-url', Buffer.from(`file://${path}`, 'utf8'))
+  // pathToFileURL percent-encodes spaces, #, %, and non-ASCII; a raw
+  // `file://${path}` is an invalid URL for any such path and Finder
+  // silently refuses the paste.
+  writer.writeBuffer('public.file-url', Buffer.from(pathToFileURL(path).href, 'utf8'))
   return true
 }
 
@@ -84,6 +88,7 @@ function writeFileBackedToClipboard(item: ShelfItemRecord, writer: ClipboardWrit
  * Generate a 64x64 PNG data URI for an image-asset shelf item, suitable
  * for the clipboard history card grid. Returns `undefined` when the
  * image file is missing or the resize fails.
+ * Sync version — runs on main thread, keep fast (64px resize).
  */
 export function makeImageThumbnail(item: ShelfItemRecord): string | undefined {
   if (item.kind !== 'imageAsset') return undefined
@@ -99,4 +104,16 @@ export function makeImageThumbnail(item: ShelfItemRecord): string | undefined {
   const resized = image.resize({ width: 64, quality: 'good' })
   if (resized.isEmpty()) return undefined
   return resized.toDataURL()
+}
+
+/**
+ * Async thumbnail to avoid blocking the capture hot path.
+ * Yields to event loop before the synchronous resize so clipboard
+ * double-capture logic isn't delayed.
+ */
+export async function makeImageThumbnailAsync(item: ShelfItemRecord): Promise<string | undefined> {
+  if (item.kind !== 'imageAsset') return undefined
+  // Yield one tick so the capture loop can finish state writes.
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  return makeImageThumbnail(item)
 }

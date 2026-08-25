@@ -17,6 +17,8 @@ import {
   makeColorItem,
   pathsFromFileUrlBuffer,
 } from './clipboard/payloads'
+import { looksSensitive } from './clipboard/sensitiveText'
+import { MAX_CLIPBOARD_TEXT_CHARS } from '@shared/shelfLimits'
 import { createElectronPasteboardReader, type PasteboardReader } from './clipboard/pasteboardReader'
 import { makeImageThumbnailAsync } from './clipboard/writer'
 
@@ -42,6 +44,14 @@ export interface ClipboardHistoryServiceDeps {
  */
 export class ClipboardHistoryService {
   private readonly reader: PasteboardReader
+  /** Serializes captures so two interleaved reads can't double-append. */
+  private captureQueue: Promise<void> = Promise.resolve()
+  /**
+   * Bumped whenever captured work becomes stale (a newer capture started,
+   * or the user cleared history mid-capture). In-flight captures compare
+   * their ticket against this before every state mutation.
+   */
+  private captureSeq = 0
 
   constructor(private readonly deps: ClipboardHistoryServiceDeps) {
     this.reader = deps.pasteboardReader ?? createElectronPasteboardReader(clipboard)
@@ -50,10 +60,33 @@ export class ClipboardHistoryService {
   /**
    * Capture a clipboard snapshot from the `ClipboardMonitor`. The
    * monitor already debounces; this is the storage-side decision tree.
+   *
+   * Captures are serialized: each awaits the previous one. Without the
+   * queue, two captures of the same image can both pass the content-hash
+   * dedupe probe before either appends, producing duplicate entries.
    */
-  async capture(snapshot: ClipboardChangeSnapshot): Promise<void> {
+  capture(snapshot: ClipboardChangeSnapshot): Promise<void> {
+    const seq = ++this.captureSeq
+    const run = this.captureQueue.then(() => this.captureInner(snapshot, seq))
+    // The chain must stay resolved even when a capture fails, or every
+    // subsequent capture would inherit the rejection.
+    this.captureQueue = run.catch(() => {})
+    return run
+  }
+
+  /**
+   * Invalidate any in-flight capture. Called when history is cleared so a
+   * capture that started before the clear cannot append ghost entries
+   * afterwards.
+   */
+  invalidatePendingCaptures(): void {
+    this.captureSeq++
+  }
+
+  private async captureInner(snapshot: ClipboardChangeSnapshot, seq: number): Promise<void> {
+    const stale = () => seq !== this.captureSeq
     const settings = this.deps.stateStore.getClipboardSettings()
-    if (!settings.enabled) return
+    if (!settings.enabled || stale()) return
     if (this.shouldSkip(snapshot, settings)) return
 
     // Read image bytes up front (when the pasteboard shape is an image)
@@ -72,7 +105,7 @@ export class ClipboardHistoryService {
       const existing = this.deps.stateStore
         .getClipboardEntries()
         .find((entry) => entry.imageSha256 === imageHash)
-      if (existing) {
+      if (existing && !stale()) {
         // Same bytes as a known entry: bump recency, keep the original
         // asset file and thumbnail. No new file is written.
         this.deps.stateStore.appendClipboardEntry({
@@ -89,10 +122,11 @@ export class ClipboardHistoryService {
       }
     }
 
-    const items = await this.readPasteboardToShelfItems(snapshot.formats, pngBuffer ?? undefined)
-    if (items.length === 0) return
+    const items = await this.readPasteboardToShelfItems(snapshot.formats, settings, pngBuffer ?? undefined)
+    if (items.length === 0 || stale()) return
 
     for (const item of items) {
+      if (stale()) return
       if (item.kind === 'imageAsset' && getFileBackedPath(item)) {
         const imagePath = getFileBackedPath(item) as string
         try {
@@ -124,6 +158,8 @@ export class ClipboardHistoryService {
       // Thumbnail is offloaded async to avoid blocking main during capture.
       const thumbnailDataUri = item.kind === 'imageAsset' ? await makeImageThumbnailAsync(item) : undefined
 
+      if (stale()) return
+
       this.deps.stateStore.appendClipboardEntry({
         capturedAt: new Date().toISOString(),
         sourceBundleId: snapshot.sourceBundleId,
@@ -154,6 +190,7 @@ export class ClipboardHistoryService {
    */
   private async readPasteboardToShelfItems(
     formats: string[],
+    settings: ReturnType<StateStore['getClipboardSettings']>,
     preloadedPng?: Buffer,
   ): Promise<ShelfItemRecord[]> {
     const context = this.payloadContext()
@@ -192,6 +229,24 @@ export class ClipboardHistoryService {
 
     const text = this.reader.readText().trim()
     if (!text) return []
+
+    // Pathological pasteboard payload guard: a single capture beyond
+    // the char cap is refused rather than persisted forever.
+    if (text.length > MAX_CLIPBOARD_TEXT_CHARS) {
+      broadcastToast(
+        `Skipped oversized clipboard text (${Math.round(text.length / 1000)}k characters).`,
+        'info',
+      )
+      return []
+    }
+
+    // Secret-shape guard: password managers that never mark the
+    // pasteboard as concealed still get skipped when the text itself
+    // looks like a credential (see clipboard/sensitiveText.ts).
+    if (settings.skipSensitiveText && looksSensitive(text)) {
+      return []
+    }
+
     return this.buildTextItem(text)
   }
 

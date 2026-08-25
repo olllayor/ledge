@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClipboardEntry, ShelfItemRecord, AppState } from '@shared/schema';
+import { isSafeImageDataUri } from '@shared/fileUtils';
 import { useLedgeState } from '../hooks/useLedgeState';
 
 const MAX_ENTRIES = 9;
@@ -13,10 +14,22 @@ function filePathOf(item: Item): string {
   return '';
 }
 
+function formatRelativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return '';
+  const diff = Date.now() - then;
+  if (diff < 60_000) return 'now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+  return `${Math.floor(diff / 86_400_000)}d`;
+}
+
 function entryLabel(entry: ClipboardEntry): string {
   const item = entry.item;
   if (item.kind === 'text' || item.kind === 'code') {
-    return item.text.split('\n', 1)[0]?.slice(0, 80) ?? item.title;
+    const raw = item.text.split('\n', 1)[0] ?? item.title;
+    const sliced = raw.slice(0, 80);
+    return raw.length > 80 ? `${sliced}…` : sliced;
   }
   if (item.kind === 'url') {
     return item.title || item.url;
@@ -53,6 +66,8 @@ function entrySubtitle(entry: ClipboardEntry): string {
     default:
       parts.push('Text');
   }
+  const rel = formatRelativeTime(entry.capturedAt);
+  if (rel) parts.push(rel);
   return parts.join(' · ');
 }
 
@@ -61,8 +76,12 @@ function entrySwatch(entry: ClipboardEntry): { background: string; letter: strin
   if (item.kind === 'color') {
     return { background: item.hex, letter: '' };
   }
-  if (item.kind === 'imageAsset' && entry.thumbnailDataUri) {
-    return { background: `url(${entry.thumbnailDataUri}) center/cover no-repeat`, letter: '' };
+  if (
+    item.kind === 'imageAsset' &&
+    entry.thumbnailDataUri &&
+    isSafeImageDataUri(entry.thumbnailDataUri)
+  ) {
+    return { background: `url("${entry.thumbnailDataUri}") center/cover no-repeat`, letter: '' };
   }
   const fallbackLetter: Record<Item['kind'], string> = {
     imageAsset: '🖼',
@@ -85,8 +104,15 @@ const selectQuickPasteEntries = (state: AppState) => state.clipboardHistory.slic
 export function QuickPastePalette() {
   const { state } = useLedgeState(selectQuickPasteEntries);
   const entries = state || [];
+  const { state: clipboardSettings } = useLedgeState((s) => s.clipboardSettings);
+  const syntheticEnabled = clipboardSettings?.syntheticPasteEnabled ?? false;
   const [focusIndex, setFocusIndex] = useState(0);
   const [previousAppName, setPreviousAppName] = useState('');
+  // The main-process guards (paste-into-self, ignoreBundleIds) compare
+  // reverse-DNS bundle ids. Keep the raw id separate from the display
+  // name so the guards actually match; sending the app name here made
+  // both checks dead code.
+  const [previousBundleId, setPreviousBundleId] = useState('');
   const listRef = useRef<HTMLUListElement | null>(null);
 
   useEffect(() => {
@@ -97,6 +123,7 @@ export function QuickPastePalette() {
       if (hint.hint === 'shown') {
         setFocusIndex(0);
         setPreviousAppName(hint.previousAppName || hint.previousBundleId || '');
+        setPreviousBundleId(hint.previousBundleId || '');
       } else if (hint.hint === 'focus' && typeof hint.index === 'number') {
         setFocusIndex(hint.index);
       }
@@ -110,13 +137,16 @@ export function QuickPastePalette() {
   const triggerPaste = useCallback(
     (entry: ClipboardEntry) => {
       if (!window.ledge) return;
+      // Hide first so the previous app regains focus before the
+      // synthetic ⌘V is dispatched. Paste is best-effort; the
+      // clipboard is already written, so we show a hint regardless.
+      window.ledge.clipboardQuickPasteHide();
       void window.ledge.clipboardQuickPastePaste({
         entryId: entry.id,
-        previousBundleId: previousAppName,
+        previousBundleId,
       });
-      window.ledge.clipboardQuickPasteHide();
     },
-    [previousAppName],
+    [previousBundleId],
   );
 
   useEffect(() => {
@@ -162,15 +192,18 @@ export function QuickPastePalette() {
 
   const visibleEntries = entries.slice(0, MAX_ENTRIES);
 
+  const headerTarget = (() => {
+    if (previousAppName) {
+      return syntheticEnabled ? `Pasting to ${previousAppName}` : `Copy for ${previousAppName} — press ⌘V`;
+    }
+    return syntheticEnabled ? 'Auto-paste enabled — press ⌘V if blocked' : 'Press ⌘V to paste';
+  })();
+
   return (
     <main className="quick-paste" aria-label="Quick paste palette">
       <header className="quick-paste-header">
         <span className="quick-paste-eyebrow">Quick paste</span>
-        {previousAppName ? (
-          <span className="quick-paste-target">Pasting to {previousAppName}</span>
-        ) : (
-          <span className="quick-paste-target">Press ⌘V if needed</span>
-        )}
+        <span className="quick-paste-target">{headerTarget}</span>
       </header>
       {visibleEntries.length === 0 ? (
         <p className="quick-paste-empty">No recent items — copy something to get started.</p>

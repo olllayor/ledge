@@ -67,8 +67,8 @@ export const requestOtp = action({
       draw = crypto.getRandomValues(new Uint32Array(1))[0]!;
     } while (draw >= MAX_UNBIASED);
     const code = String(1_000_000 + (draw % 1_000_000)).slice(1);
-    await sendOtpEmail(email, code);
-
+    // Rate-limit FIRST, send email second. Sending before the verdict
+    // let rejected requests burn Resend sends — an unbounded cost lever.
     const stored = await ctx.runMutation(internal.auth.tryStoreOtp, {
       email,
       codeHash: await sha256(`${email}:${code}`),
@@ -82,6 +82,7 @@ export const requestOtp = action({
         "Too many sign-in codes requested. Please wait for one to expire and try again.",
       );
     }
+    await sendOtpEmail(email, code);
 
     return { ok: true };
   },

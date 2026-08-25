@@ -7,6 +7,7 @@ import type {
   ShelfRecord,
 } from '@shared/schema'
 import { defaultShelfName, nextShelfColor } from './shelfNaming'
+import { MAX_ITEMS_PER_SHELF, ShelfCapacityError } from '@shared/shelfLimits'
 import type { PersisterBinding, PersistedState, ShelfOrigin } from './types'
 
 /**
@@ -107,6 +108,11 @@ export class ShelfStore {
   appendItems(items: ShelfItemRecord[]): ShelfRecord {
     const state = this.getState()
     const liveShelf = this.getActiveLiveShelf(state) ?? this.createShelf('manual')
+    if (liveShelf.items.length + items.length > MAX_ITEMS_PER_SHELF) {
+      // Ingest door for the item ceiling: every append flows through
+      // here, so overflow is rejected before touching persisted state.
+      throw new ShelfCapacityError(liveShelf.items.length, items.length, MAX_ITEMS_PER_SHELF)
+    }
     const nextOrder = liveShelf.items.length
     liveShelf.items.push(
       ...items.map((item, index) => ({

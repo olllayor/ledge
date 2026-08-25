@@ -100,7 +100,7 @@ export class ClipboardMonitor extends EventEmitter {
   notifyFromNative(snapshot: ClipboardChangeSnapshot): void {
     if (snapshot.changeCount === this.lastNativeChangeCount) return;
     this.lastNativeChangeCount = snapshot.changeCount;
-    this.lastFormatsHash = snapshot.formats.join('|');
+    this.lastFormatsHash = [...snapshot.formats].sort().join('|');
     this.lastSnapshot = snapshot;
     this.emit('change', snapshot);
     this.onChange(snapshot);
@@ -112,13 +112,24 @@ export class ClipboardMonitor extends EventEmitter {
    * palette (avoiding the RPC round-trip race).
    */
   getLastFrontmostApp(): { bundleId: string; name: string } | null {
-    if (!this.lastSnapshot) return null;
-    return { bundleId: this.lastSnapshot.sourceBundleId, name: this.lastSnapshot.sourceAppName };
+    if (this.lastSnapshot) {
+      return { bundleId: this.lastSnapshot.sourceBundleId, name: this.lastSnapshot.sourceAppName };
+    }
+    // Fallback when helper is down and poll hasn't primed (e.g. hotkey right
+    // after launch). Synchronously read frontmost so QuickPaste still knows
+    // the target app and the `previousBundleId === ledgeBundleId` guard works.
+    try {
+      const front = this.readFrontmostApp();
+      if (front.bundleId || front.name) return front;
+    } catch {
+      // best-effort
+    }
+    return null;
   }
 
   private pollOnce(): void {
     const formats = this.readAvailableFormats();
-    const hash = formats.join('|');
+    const hash = [...formats].sort().join('|');
     // First observation with no baseline (native or polled) only primes the
     // hash: whatever sat on the pasteboard before the app launched is not a
     // new copy, and re-capturing it on every launch would duplicate it.

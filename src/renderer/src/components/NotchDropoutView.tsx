@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ClipboardEntry, AppState } from '@shared/schema';
 import { useLedgeState } from '../hooks/useLedgeState';
+import { isSafeImageDataUri } from '@shared/fileUtils';
 import { IconClose, IconCopy } from './Icons';
 
 const MAX_ENTRIES = 20;
@@ -39,16 +40,18 @@ export function NotchDropoutView() {
   const handleDragStart = useCallback((entry: ClipboardEntry) => {
     if (!window.ledge) return;
     // Keep the panel alive for the duration of the native drag session.
-    // clipboardStartItemDrag is a sync call that returns when the drag
-    // ends, so the suppression is released in the same tick.
+    // Main owns releasing the suppression (startDrag returns before the
+    // drop, so "release right after" here would hide mid-drag). We only
+    // send the release ourselves when the drag never started.
     window.ledge.notchDropoutDragState(true);
     let ok = false;
     try {
       ok = window.ledge.clipboardStartItemDrag({ entryId: entry.id });
-    } finally {
-      window.ledge.notchDropoutDragState(false);
+    } catch {
+      ok = false;
     }
     if (!ok) {
+      window.ledge.notchDropoutDragState(false);
       window.ledge.showToast('This item type does not support drag-out', 'info');
     }
   }, []);
@@ -128,7 +131,7 @@ export function NotchDropoutView() {
 
 function NotchThumbContent({ entry }: { entry: ClipboardEntry }) {
   const item = entry.item;
-  if (item.kind === 'imageAsset' && entry.thumbnailDataUri) {
+  if (item.kind === 'imageAsset' && entry.thumbnailDataUri && isSafeImageDataUri(entry.thumbnailDataUri)) {
     return <img src={entry.thumbnailDataUri} alt="" draggable={false} />;
   }
   if (item.kind === 'color') {

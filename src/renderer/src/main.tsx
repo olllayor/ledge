@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './fonts.css'
 import './styles.css'
 
@@ -37,13 +38,19 @@ const ConvexApp = lazy(async (): Promise<{ default: () => ReactElement }> => {
   const client = new ConvexReactClient(convexUrl)
   const ConvexAppImpl = () => (
     <ConvexProvider client={client}>
-      <SyncProvider>
-        <TeamsProvider>
-          <TeamShelfSyncProvider>
-            <App />
-          </TeamShelfSyncProvider>
-        </TeamsProvider>
-      </SyncProvider>
+      {/* A rejected session token (or any other query failure) throws
+          during render inside the providers, which sit above every
+          view-level ErrorBoundary — without this wrapper a single
+          failing query blanks the window permanently. */}
+      <ErrorBoundary>
+        <SyncProvider>
+          <TeamsProvider>
+            <TeamShelfSyncProvider>
+              <App />
+            </TeamShelfSyncProvider>
+          </TeamsProvider>
+        </SyncProvider>
+      </ErrorBoundary>
     </ConvexProvider>
   )
   return { default: ConvexAppImpl }

@@ -51,6 +51,13 @@ export function ShortcutRecorder({
         return;
       }
 
+      // A bare key with no modifier would be captured system-wide once
+      // registered as a global shortcut. Keep recording so the user can
+      // add a modifier; the main-process validator enforces the same rule.
+      if (modifiers.length === 0) {
+        return;
+      }
+
       const shortcut = [...modifiers, key].join('+');
       setIsRecording(false);
       onChange(shortcut);
@@ -114,6 +121,11 @@ export function ShortcutRecorder({
 
 function displayKey(key: string): string {
   const map: Record<string, string> = {
+    // `CommandOrControl`/`CmdOrCtrl` are Electron accelerator aliases
+    // used by the schema defaults; the app is macOS-only, so both
+    // resolve to Command.
+    CommandOrControl: '⌘',
+    CmdOrCtrl: '⌘',
     Command: '⌘',
     Control: '⌃',
     Option: '⌥',
@@ -135,4 +147,10 @@ function displayKey(key: string): string {
     End: 'End',
   };
   return map[key] ?? key;
+}
+
+/** Compact, native-style rendering of an Electron accelerator
+ *  ("CommandOrControl+Shift+Space" → "⌘⇧Space"). */
+export function displayShortcut(accelerator: string): string {
+  return accelerator.split('+').map(displayKey).join('');
 }

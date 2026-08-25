@@ -116,13 +116,28 @@ function classify(subject) {
 
 function buildSection(commits) {
   const groups = { Added: [], Fixed: [], Performance: [], Changed: [] };
+  let unprefixed = 0
   for (const c of commits) {
     const meta = classify(c.subject);
-    const label = USER_FACING_SECTIONS[meta.type];
-    if (!label) continue;
+    let label = USER_FACING_SECTIONS[meta.type];
+    let rest = meta.rest
+    if (!label) {
+      if (meta.type === 'other') {
+        // Keep unprefixed work visible but flag it — the new commitlint
+        // gate will prevent future drift.
+        label = 'Changed'
+        rest = c.subject
+        unprefixed++
+      } else {
+        continue
+      }
+    }
     const scopePrefix = meta.scope ? `**${meta.scope}**: ` : '';
     const bang = meta.bang ? ' ⚠️ BREAKING' : '';
-    groups[label].push(`- ${scopePrefix}${meta.rest}${bang} (\`${c.sha.slice(0, 7)}\`)`);
+    groups[label].push(`- ${scopePrefix}${rest}${bang} (\`${c.sha.slice(0, 7)}\`)`);
+  }
+  if (unprefixed > 0) {
+    console.warn(`build-changelog: ${unprefixed} commit(s) without conventional prefix were bucketed as Changed — run pnpm commitlint to enforce prefixes.`)
   }
   const out = [];
   for (const [label, items] of Object.entries(groups)) {

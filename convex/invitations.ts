@@ -12,6 +12,14 @@ function randomToken(): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function normalizeEmail(email: string): string {
+  const normalized = email.trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized)) {
+    throw new ConvexError("Enter a valid email address.");
+  }
+  return normalized;
+}
+
 export const inviteMember = mutation({
   args: {
     ...sessionArgs,
@@ -23,13 +31,18 @@ export const inviteMember = mutation({
     const userId = await requireUser(ctx, args.sessionToken);
     await assertTeamPermission(ctx, args.teamId, userId, "admin");
 
+    // Normalize on write. `listPendingForEmail` matches against the
+    // normalized user email; a raw-cased invite row would never match
+    // and the invitee would never see it.
+    const email = normalizeEmail(args.email);
+
     const pending = await ctx.db
       .query("teamInvitations")
       .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
       .collect();
 
     const existingPending = pending.find(
-      (inv) => inv.email === args.email && inv.status === "pending",
+      (inv) => inv.email === email && inv.status === "pending",
     );
     if (existingPending) {
       // Re-inviting is the admin's "resend" affordance: the row already
@@ -46,7 +59,7 @@ export const inviteMember = mutation({
 
     const invitationId = await ctx.db.insert("teamInvitations", {
       teamId: args.teamId,
-      email: args.email,
+      email,
       invitedBy: userId,
       role: args.role,
       token,
@@ -55,7 +68,7 @@ export const inviteMember = mutation({
       createdAt: now,
     });
 
-    await scheduleInviteEmail(ctx, args.teamId, args.email, userId);
+    await scheduleInviteEmail(ctx, args.teamId, email, userId);
     return invitationId;
   },
 });

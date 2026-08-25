@@ -67,8 +67,32 @@ describe('PeekWindowView (user stories 8.1-8.7)', () => {
     expect(() => hintListeners.forEach((cb) => cb({ hint: 'hidden' }))).not.toThrow();
   });
 
-  it('8.5/8.6 shows up to 12 thumbnails; drag starts clipboardStartItemDrag', async () => {
-    const history = Array.from({ length: 15 }, (_, i) => buildEntry(`e${i}`));
+  it('8.5/8.6 shows up to 12 thumbnails; drag starts clipboardStartItemDrag for file-backed entries', async () => {
+    const fileEntry = (id: string): ClipboardEntry => ({
+      id,
+      capturedAt: '2026-06-22T00:00:00.000Z',
+      sourceBundleId: 'com.test',
+      sourceAppName: 'Test',
+      item: {
+        id: `i-${id}`,
+        kind: 'file',
+        createdAt: '2026-06-22T00:00:00.000Z',
+        order: 0,
+        title: id,
+        subtitle: '',
+        preview: { summary: id, detail: '' },
+        file: {
+          originalPath: `/tmp/${id}.pdf`,
+          resolvedPath: `/tmp/${id}.pdf`,
+          bookmarkBase64: '',
+          isStale: false,
+          isMissing: false,
+        },
+        mimeType: 'application/pdf',
+      } as unknown as ClipboardEntry['item'],
+      categoryIds: [],
+    });
+    const history = Array.from({ length: 15 }, (_, i) => fileEntry(`e${i}`));
     setupLedgeBridge(history);
     const { container } = render(<PeekWindowView />);
     stateListeners.forEach((cb) => cb({
@@ -78,6 +102,7 @@ describe('PeekWindowView (user stories 8.1-8.7)', () => {
       expect(container.querySelectorAll('.peek-thumb').length).toBe(12);
     });
     const firstThumb = container.querySelector('.peek-thumb') as HTMLElement;
+    expect(firstThumb.getAttribute('draggable')).toBe('true');
     const dragEvent = new Event('dragstart', { bubbles: true, cancelable: true });
     firstThumb.dispatchEvent(dragEvent);
     const bridge = (window as unknown as { ledge: { clipboardStartItemDrag: ReturnType<typeof vi.fn> } }).ledge;
@@ -89,23 +114,31 @@ describe('PeekWindowView (user stories 8.1-8.7)', () => {
     expect(container.textContent).toContain('Empty');
   });
 
-  it('8.6 drag-out for non-file item returns false and triggers toast', () => {
+  it('8.6 non-file item is not draggable and click copies instead', async () => {
     setupLedgeBridge([buildEntry('e1')]);
     const { container } = render(<PeekWindowView />);
+    // Provide clipboardCopy mock for click path
+    (window as unknown as { ledge: Record<string, ReturnType<typeof vi.fn>> }).ledge.clipboardCopy = vi.fn(async () => true);
     stateListeners.forEach((cb) => cb({
       clipboardHistory: [buildEntry('e1')],
     } as unknown as AppState));
-    return waitFor(() => {
+    await waitFor(() => {
       expect(container.querySelectorAll('.peek-thumb').length).toBe(1);
-    }).then(() => {
-      // Override the mock to return false (simulating a non-file entry that can't be dragged)
-      (window as unknown as { ledge: { clipboardStartItemDrag: ReturnType<typeof vi.fn> } }).ledge.clipboardStartItemDrag =
-        vi.fn(() => false);
-      const firstThumb = container.querySelector('.peek-thumb') as HTMLElement;
-      const dragEvent = new Event('dragstart', { bubbles: true, cancelable: true });
-      firstThumb.dispatchEvent(dragEvent);
-      const bridge = (window as unknown as { ledge: { showToast: ReturnType<typeof vi.fn> } }).ledge;
-      expect(bridge.showToast).toHaveBeenCalledWith('This item type does not support drag-out', 'info');
+    });
+    const firstThumb = container.querySelector('.peek-thumb') as HTMLElement;
+    // Text entries should not be draggable — prevents the confusing
+    // "drag then toast" path; click copies instead.
+    expect(firstThumb.getAttribute('draggable')).toBe('false');
+    // Drag should not trigger the bridge
+    const dragEvent = new Event('dragstart', { bubbles: true, cancelable: true });
+    firstThumb.dispatchEvent(dragEvent);
+    const bridge = (window as unknown as { ledge: { clipboardStartItemDrag: ReturnType<typeof vi.fn> } }).ledge;
+    expect(bridge.clipboardStartItemDrag).not.toHaveBeenCalled();
+    // Click should trigger copy
+    firstThumb.click();
+    await waitFor(() => {
+      const b = (window as unknown as { ledge: { clipboardCopy: ReturnType<typeof vi.fn> } }).ledge;
+      expect(b.clipboardCopy).toHaveBeenCalledWith({ entryId: 'e1' });
     });
   });
 });

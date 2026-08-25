@@ -248,6 +248,10 @@ export class StateStore {
     return this.clipboard.removeEntry(id)
   }
 
+  toggleClipboardEntryPin(id: string) {
+    return this.clipboard.togglePin(id)
+  }
+
   clearClipboardHistory() {
     return this.clipboard.clearHistory()
   }

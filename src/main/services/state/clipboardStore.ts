@@ -7,9 +7,18 @@ import type {
   ShelfItemRecord,
 } from '@shared/schema'
 import { getFileBackedPath } from '@shared/fileUtils'
+import { MAX_CLIPBOARD_HISTORY_BYTES } from '@shared/shelfLimits'
 import type { PersisterBinding, PersistedState } from './types'
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+
+function estimateEntryBytes(entry: ClipboardEntry): number {
+  const item = entry.item
+  if (item.kind === 'text' || item.kind === 'code') {
+    return Buffer.byteLength(item.text, 'utf8')
+  }
+  return 0
+}
 
 export interface ClipboardEntryInput {
   capturedAt: string
@@ -97,6 +106,16 @@ export class ClipboardStore {
     this.persister.save(state)
   }
 
+  togglePin(id: string): boolean {
+    const state = this.getState()
+    const entry = state.clipboardHistory.find((e) => e.id === id)
+    if (!entry) return false
+    entry.pinnedAt = entry.pinnedAt ? undefined : new Date().toISOString()
+    if (!entry.pinnedAt) delete entry.pinnedAt
+    this.persister.save(state)
+    return Boolean(entry.pinnedAt)
+  }
+
   clearHistory(): void {
     const state = this.getState()
     state.clipboardHistory = []
@@ -127,12 +146,31 @@ export class ClipboardStore {
     const cutoff = Date.now() - THIRTY_DAYS_MS
     const previousLength = state.clipboardHistory.length
 
-    state.clipboardHistory = state.clipboardHistory
-      .filter((entry) => {
-        const t = Date.parse(entry.capturedAt)
-        return Number.isFinite(t) && t >= cutoff
-      })
-      .slice(0, limit)
+    // Pinned entries are exempt from the age cutoff and the count
+    // limit; only unpinned entries fill and overflow the limit.
+    let unpinnedKept = 0
+    state.clipboardHistory = state.clipboardHistory.filter((entry) => {
+      if (entry.pinnedAt) return true
+
+      const t = Date.parse(entry.capturedAt)
+      if (!Number.isFinite(t) || t < cutoff) return false
+      if (unpinnedKept >= limit) return false
+      unpinnedKept += 1
+      return true
+    })
+
+    // Total-text byte budget: one huge capture must not bloat the
+    // state file forever, regardless of count limits. Newest-first
+    // walk (index order), oldest entries dropped first.
+    let remainingBytes = MAX_CLIPBOARD_HISTORY_BYTES
+    const withinBudget: ClipboardEntry[] = []
+    for (const entry of state.clipboardHistory) {
+      const bytes = estimateEntryBytes(entry)
+      if (bytes > remainingBytes) continue
+      remainingBytes -= bytes
+      withinBudget.push(entry)
+    }
+    state.clipboardHistory = withinBudget
 
     return state.clipboardHistory.length !== previousLength
   }

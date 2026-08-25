@@ -1,5 +1,6 @@
 import type { AppState } from '@shared/schema';
 import { useState, useEffect, useCallback } from 'react';
+import { normalizeExcludedBundleIds } from '@shared/preferences';
 import { IconClipboard } from '../../PreferencesIcons';
 import { SettingsGroup, SettingsRow, Toggle, Picker, type ShowToast } from '../primitives';
 import { ShortcutRecorder } from '../shortcutRecorder';
@@ -26,12 +27,23 @@ export function ClipboardSettings({ state, showToast }: { state: AppState; showT
   );
 
   const submitIgnoredApps = useCallback(() => {
-    const list = ignoredApps
-      .split(/[\n,]/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    void updateSettings({ ignoreBundleIds: list });
-  }, [ignoredApps, updateSettings]);
+    const raw = ignoredApps.split(/[\n,]/).map((entry) => entry.trim()).filter(Boolean);
+    const { normalized, invalid } = normalizeExcludedBundleIds(raw);
+    if (invalid.length > 0) {
+      showToast(
+        invalid.length === 1
+          ? `Invalid bundle ID: ${invalid[0]}`
+          : `Invalid bundle IDs: ${invalid.join(', ')}`,
+        'error',
+      );
+      return;
+    }
+    // Only persist if the normalized set actually changed — avoids
+    // no-op writes when the user blurs without editing.
+    const current = settings.ignoreBundleIds;
+    if (normalized.length === current.length && normalized.every((v, i) => v === current[i])) return;
+    void updateSettings({ ignoreBundleIds: normalized });
+  }, [ignoredApps, settings.ignoreBundleIds, showToast, updateSettings]);
 
   return (
     <>
@@ -70,6 +82,17 @@ export function ClipboardSettings({ state, showToast }: { state: AppState; showT
             <Toggle
               checked={settings.ignoreConcealedItems}
               onChange={(checked) => void updateSettings({ ignoreConcealedItems: checked })}
+              disabled={!settings.enabled}
+            />
+          }
+        />
+        <SettingsRow
+          title="Skip secret-looking text"
+          copy="Also skip plain text that looks like a credential (password/token words or an unbroken mixed-character string). Links are never skipped."
+          trailing={
+            <Toggle
+              checked={settings.skipSensitiveText}
+              onChange={(checked) => void updateSettings({ skipSensitiveText: checked })}
               disabled={!settings.enabled}
             />
           }

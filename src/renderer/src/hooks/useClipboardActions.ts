@@ -17,6 +17,7 @@ import type { ClipboardEntry, ShelfColor } from '@shared/schema'
 export interface ClipboardActions {
   copyEntry(entry: ClipboardEntry): Promise<boolean>
   removeEntry(entry: ClipboardEntry): Promise<void>
+  togglePin(entry: ClipboardEntry): Promise<void>
   assignEntry(entry: ClipboardEntry, categoryId: string): Promise<void>
   unassignEntry(entry: ClipboardEntry, categoryId: string): Promise<void>
   startItemDrag(entry: ClipboardEntry): boolean
@@ -24,6 +25,7 @@ export interface ClipboardActions {
   renameCategory(id: string, name: string): Promise<void>
   removeCategory(id: string): Promise<void>
   clearAllEntries(): Promise<void>
+  restoreHistory(entries: ClipboardEntry[]): Promise<void>
   pruneNow(): Promise<void>
 }
 
@@ -39,6 +41,10 @@ export function useClipboardActions(): ClipboardActions {
 
   const removeEntry = useCallback(async (entry: ClipboardEntry) => {
     await window.ledge?.clipboardEntryRemove({ entryId: entry.id })
+  }, [])
+
+  const togglePin = useCallback(async (entry: ClipboardEntry) => {
+    await window.ledge?.clipboardEntryTogglePin({ entryId: entry.id })
   }, [])
 
   const assignEntry = useCallback(async (entry: ClipboardEntry, categoryId: string) => {
@@ -69,6 +75,10 @@ export function useClipboardActions(): ClipboardActions {
     await window.ledge?.clipboardEntryClearAll()
   }, [])
 
+  const restoreHistory = useCallback(async (entries: ClipboardEntry[]) => {
+    await window.ledge?.clipboardHistoryRestore(entries)
+  }, [])
+
   const pruneNow = useCallback(async () => {
     await window.ledge?.clipboardPruneNow()
   }, [])
@@ -80,6 +90,7 @@ export function useClipboardActions(): ClipboardActions {
     () => ({
       copyEntry,
       removeEntry,
+      togglePin,
       assignEntry,
       unassignEntry,
       startItemDrag,
@@ -87,11 +98,13 @@ export function useClipboardActions(): ClipboardActions {
       renameCategory,
       removeCategory,
       clearAllEntries,
+      restoreHistory,
       pruneNow,
     }),
     [
       copyEntry,
       removeEntry,
+      togglePin,
       assignEntry,
       unassignEntry,
       startItemDrag,
@@ -99,6 +112,7 @@ export function useClipboardActions(): ClipboardActions {
       renameCategory,
       removeCategory,
       clearAllEntries,
+      restoreHistory,
       pruneNow,
     ],
   )

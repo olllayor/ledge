@@ -22,11 +22,13 @@ export const IPC_CHANNELS = {
   addPayload: 'ledge:add-payload',
   addPayloads: 'ledge:add-payloads',
   closeShelf: 'ledge:close-shelf',
+  toggleShelfPin: 'ledge:toggle-shelf-pin',
   getPreferences: 'ledge:get-preferences',
   setPreferences: 'ledge:set-preferences',
   setSyncState: 'ledge:set-sync-state',
   getSyncBackfillCandidates: 'ledge:get-sync-backfill-candidates',
   applyRemoteShelf: 'ledge:apply-remote-shelf',
+  removeSyncedShelf: 'ledge:remove-synced-shelf',
   relinkItem: 'ledge:relink-item',
   getRecentShelves: 'ledge:get-recent-shelves',
   getPermissionStatus: 'ledge:get-permission-status',
@@ -68,7 +70,9 @@ export const IPC_CHANNELS = {
   clipboardEntryAssign: 'ledge:clipboard-entry:assign',
   clipboardEntryUnassign: 'ledge:clipboard-entry:unassign',
   clipboardEntryRemove: 'ledge:clipboard-entry:remove',
+  clipboardEntryTogglePin: 'ledge:clipboard-entry:toggle-pin',
   clipboardEntryClearAll: 'ledge:clipboard-entry:clear-all',
+  clipboardHistoryRestore: 'ledge:clipboard-history:restore',
   clipboardPruneNow: 'ledge:clipboard-prune-now',
   clipboardWindowShow: 'ledge:clipboard-window:show',
   // ---- Notch dropout (replaces peek window) ----
@@ -157,6 +161,14 @@ export const clipboardEntryRemoveInputSchema = z.object({
   entryId: z.string(),
 });
 
+export const clipboardEntryTogglePinInputSchema = z.object({
+  entryId: z.string(),
+});
+
+// Canonical restore schema lives in ipcSchemas.ts (bounded); this file's
+// earlier inline copy drifted (no .max(2000)) and had no importers.
+export { clipboardHistoryRestoreInputSchema } from './ipcSchemas';
+
 export const clipboardSettingsUpdateInputSchema = clipboardSettingsSchema.partial();
 export type ClipboardSettingsUpdatePayload = z.infer<typeof clipboardSettingsUpdateInputSchema>;
 
@@ -180,11 +192,13 @@ export interface LedgeAPI {
   addPayload(payload: IngestPayload): Promise<AppState>;
   addPayloads(payloads: IngestPayload[]): Promise<AppState>;
   closeShelf(): Promise<AppState>;
+  toggleShelfPin(): Promise<AppState>;
   getPreferences(): Promise<PreferencesRecord>;
   setPreferences(patch: PreferencePatch): Promise<PreferencesRecord>;
   setSyncState(patch: SyncStatePatch): Promise<AppState>;
   getSyncBackfillCandidates(): Promise<ShelfRecord[]>;
   applyRemoteShelf(shelf: ShelfRecord): Promise<AppState>;
+  removeSyncedShelf(shelfId: string): Promise<AppState>;
   applyTeamShelfItems(patch: TeamShelfItemsPatch): Promise<AppState>;
   relinkItem(itemId: string): Promise<AppState>;
   getRecentShelves(): Promise<ShelfRecord[]>;
@@ -220,7 +234,10 @@ export interface LedgeAPI {
   clipboardEntryAssign(payload: { entryId: string; categoryId: string }): Promise<void>;
   clipboardEntryUnassign(payload: { entryId: string; categoryId: string }): Promise<void>;
   clipboardEntryRemove(payload: { entryId: string }): Promise<void>;
+  /** Toggles the pin; resolves with the resulting pinned state. */
+  clipboardEntryTogglePin(payload: { entryId: string }): Promise<boolean>;
   clipboardEntryClearAll(): Promise<void>;
+  clipboardHistoryRestore(entries: ClipboardEntry[]): Promise<void>;
   clipboardPruneNow(): Promise<void>;
   clipboardWindowShow(): void;
   clipboardStartItemDrag(payload: { entryId: string }): boolean;

@@ -8,6 +8,7 @@ import {
   clipboardCopyInputSchema,
   clipboardEntryAssignInputSchema,
   clipboardEntryRemoveInputSchema,
+  clipboardEntryTogglePinInputSchema,
   clipboardEntryUnassignInputSchema,
   clipboardQuickPastePasteInputSchema,
   clipboardSettingsUpdateInputSchema,
@@ -19,6 +20,7 @@ import {
   type StateListener,
   type ToastKind,
 } from '@shared/ipc';
+import { clipboardHistoryRestoreInputSchema } from '@shared/ipcSchemas';
 import {
   appStateSchema,
   createShelfInputSchema,
@@ -56,6 +58,9 @@ const api: LedgeAPI = {
   async closeShelf() {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.closeShelf));
   },
+  async toggleShelfPin() {
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.toggleShelfPin));
+  },
   async getPreferences() {
     return preferencesRecordSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.getPreferences));
   },
@@ -74,6 +79,9 @@ const api: LedgeAPI = {
   },
   async applyRemoteShelf(shelf) {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.applyRemoteShelf, shelfRecordSchema.parse(shelf)));
+  },
+  async removeSyncedShelf(shelfId) {
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.removeSyncedShelf, shelfId));
   },
   async relinkItem(itemId) {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.relinkItem, itemId));
@@ -209,8 +217,19 @@ const api: LedgeAPI = {
     const parsed = clipboardEntryRemoveInputSchema.parse(payload);
     await ipcRenderer.invoke(IPC_CHANNELS.clipboardEntryRemove, parsed);
   },
+  async clipboardEntryTogglePin(payload) {
+    const parsed = clipboardEntryTogglePinInputSchema.parse(payload);
+    return ipcRenderer.invoke(IPC_CHANNELS.clipboardEntryTogglePin, parsed);
+  },
   async clipboardEntryClearAll() {
     await ipcRenderer.invoke(IPC_CHANNELS.clipboardEntryClearAll);
+  },
+  async clipboardHistoryRestore(entries) {
+    // Canonical bounded schema (array cap + thumbnail size cap). The
+    // unbounded base schema let the renderer serialize multi-hundred-MB
+    // restore payloads before main's stricter parse rejected them.
+    const parsed = clipboardHistoryRestoreInputSchema.parse(entries);
+    await ipcRenderer.invoke(IPC_CHANNELS.clipboardHistoryRestore, parsed);
   },
   async clipboardPruneNow() {
     await ipcRenderer.invoke(IPC_CHANNELS.clipboardPruneNow);

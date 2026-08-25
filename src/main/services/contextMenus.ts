@@ -76,6 +76,16 @@ export class ShelfContextMenus {
     template.push(
       { label: 'Share All', enabled: items.length > 0, click: () => void this.deps.shelfActions.shareItems() },
       { type: 'separator' },
+      {
+        label: 'Pinned',
+        type: 'checkbox',
+        checked: this.deps.shelfController.isPinned,
+        // Pin beats auto-dismiss (docs/vorssaint-shelf-plan.md Phase 4).
+        click: () => {
+          this.deps.shelfController.togglePinned()
+          this.deps.broadcastState()
+        },
+      },
       { label: 'Clear Shelf', enabled: items.length > 0, click: () => this.deps.shelfOps.clear() },
       {
         label: 'Close Shelf',

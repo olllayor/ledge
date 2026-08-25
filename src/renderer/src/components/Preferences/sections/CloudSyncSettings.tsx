@@ -98,7 +98,7 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
         <SettingsGroup title="Account">
           <SettingsRow
             title="Status"
-            trailing={<StatusPill label={state.sync.status} variant="good" />}
+            trailing={<StatusPill label={state.sync.status} variant={state.sync.status === 'synced' ? 'good' : state.sync.status === 'error' || state.sync.status === 'quotaReached' ? 'warn' : 'neutral'} />}
           />
           <SettingsRow title="Signed in as" copy={state.sync.signedInEmail} />
           <SettingsRow

@@ -97,6 +97,12 @@ export function validateGlobalShortcut(shortcut: string): string {
     return 'Shortcut needs a non-modifier key.'
   }
 
+  // A global shortcut with no modifier (e.g. plain "A") would hijack that
+  // keystroke system-wide, in every app. Require at least one modifier.
+  if (modifiers.size === 0) {
+    return 'Shortcut must include at least one modifier key (Cmd, Ctrl, Option, or Shift).'
+  }
+
   return ''
 }
 

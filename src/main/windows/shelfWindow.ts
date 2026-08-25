@@ -69,9 +69,18 @@ export class ShelfWindow {
     const window = await this.ensure();
     const width = sizeOverride?.width ?? window.getBounds().width;
     const height = sizeOverride?.height ?? window.getBounds().height;
-    const bounds = this.manualBounds ?? computeBounds(point, width, height);
+    // A saved manual position can be off-screen after the display it was
+    // parked on was unplugged (a hidden window emits no `move` events to
+    // correct it). Clamp it against the current displays; fall back to
+    // the cursor-anchored bounds when nothing is visible. The shake
+    // gesture's sizeOverride also wins over the remembered size — a
+    // 240x296 summon should never silently grow back.
+    const bounds =
+      this.manualBounds && sizeOverride === undefined
+        ? clampToDisplays(this.manualBounds)
+        : null;
     this.withProgrammaticMove(() => {
-      window.setBounds(bounds, false);
+      window.setBounds(bounds ?? computeBounds(point, width, height), false);
     });
     this.showWindow(window, inactive);
   }
@@ -145,4 +154,28 @@ function computeBounds(point: { x: number; y: number }, width: number, height: n
     width,
     height,
   };
+}
+
+/** Nearest visible position for saved bounds across all current displays. */
+function clampToDisplays(bounds: Rectangle): Rectangle | null {
+  let bestDisplay: ReturnType<typeof screen.getDisplayMatching> | null = null;
+  let bestOverlap = 0;
+  for (const display of screen.getAllDisplays()) {
+    const area = display.workArea;
+    const overlapX = Math.min(bounds.x + bounds.width, area.x + area.width) - Math.max(bounds.x, area.x);
+    const overlapY = Math.min(bounds.y + bounds.height, area.y + area.height) - Math.max(bounds.y, area.y);
+    const overlap = Math.max(0, overlapX) * Math.max(0, overlapY);
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap;
+      bestDisplay = display;
+    }
+  }
+  if (!bestDisplay || bestOverlap <= 0) {
+    return null;
+  }
+
+  const area = bestDisplay.workArea;
+  const x = Math.min(Math.max(area.x, bounds.x), area.x + area.width - bounds.width);
+  const y = Math.min(Math.max(area.y, bounds.y), area.y + area.height - bounds.height);
+  return { x: Math.round(x), y: Math.round(y), width: bounds.width, height: bounds.height };
 }

@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { action, internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { requireUser, sessionArgs } from "./model";
+import { requireUser, sessionArgs, proVariantIds } from "./model";
 
 export const entitlement = query({
   args: sessionArgs,
@@ -36,7 +36,15 @@ export const refreshEntitlements = action({
     // Verify the license belongs to the signed-in user. Without this
     // check, any user could paste an arbitrary license key and promote
     // themselves to Pro using someone else's purchase.
-    if (result.userEmail && userEmail && result.userEmail.toLowerCase() !== userEmail.toLowerCase()) {
+    //
+    // Fail closed: if Lemon Squeezy omits the purchaser email we cannot
+    // prove ownership, so activation is refused instead of skipped.
+    if (!result.userEmail || !userEmail) {
+      throw new ConvexError(
+        "Lemon Squeezy did not return an email for this purchase, so ownership cannot be verified.",
+      );
+    }
+    if (result.userEmail.toLowerCase() !== userEmail.toLowerCase()) {
       throw new ConvexError(
         "This license key is registered to a different account. Sign in with the matching email to use it.",
       );
@@ -172,6 +180,11 @@ export const grantProByEmail = internalMutation({
   },
 });
 
+// Variant ids that grant Pro: see `proVariantIds` in model.ts (shared with
+// the webhook). Order-based activation fails closed when unset: without an
+// allowlist, ANY non-refunded order id on the store would promote the
+// caller to Pro.
+
 async function fetchLemonSqueezyEntitlement(
   apiKey: string,
   licenseKey?: string,
@@ -197,14 +210,33 @@ async function fetchLemonSqueezyEntitlement(
       body: JSON.stringify({ license_key: licenseKey }),
     });
     const json = await response.json();
+    // Mirror the order path's gating: the key must be valid, in the
+    // `active` state (not expired/disabled), and belong to a configured
+    // Pro variant. Without the variant check any valid license key for
+    // ANY product on the store would promote the caller to Pro.
+    const keyStatus = typeof json.license_key?.status === "string" ? json.license_key.status : "";
+    const variantId =
+      json.meta?.variant_id != null ? String(json.meta.variant_id) : undefined;
+    const allowedVariants = proVariantIds();
+    const active =
+      Boolean(json.valid) &&
+      keyStatus === "active" &&
+      allowedVariants.length > 0 &&
+      variantId !== undefined &&
+      allowedVariants.includes(variantId);
     return {
-      active: Boolean(json.valid),
+      active,
       customerId: json.meta?.customer_id ? String(json.meta.customer_id) : undefined,
       subscriptionId: json.meta?.subscription_id ? String(json.meta.subscription_id) : undefined,
       userEmail: json.license_key?.user_email ? String(json.license_key.user_email) : undefined,
     };
   }
 
+  // Order ids are interpolated into the API path — accept digits only so a
+  // crafted string can't reach an adjacent endpoint.
+  if (!/^\d+$/.test(orderId ?? "")) {
+    throw new ConvexError("Provide a valid Lemon Squeezy order ID.");
+  }
   const response = await fetch(`https://api.lemonsqueezy.com/v1/orders/${orderId}`, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -212,9 +244,23 @@ async function fetchLemonSqueezyEntitlement(
     },
   });
   const json = await response.json();
+  // Only paid orders count, and only when the purchased variant is in the
+  // configured Pro allowlist. `status !== "refunded"` previously accepted
+  // pending and failed orders too.
+  const attrs = json.data?.attributes ?? {};
+  const status = typeof attrs.status === "string" ? attrs.status : "";
+  const variantId =
+    attrs.first_order_item?.variant_id != null ? String(attrs.first_order_item.variant_id) : undefined;
+  const allowedVariants = proVariantIds();
+  if (allowedVariants.length === 0) {
+    throw new ConvexError(
+      "Order-based activation is not configured. Set LEMON_SQUEEZY_PRO_VARIANT_IDS or activate with a license key.",
+    );
+  }
+  const active = response.ok && status === "paid" && variantId !== undefined && allowedVariants.includes(variantId);
   return {
-    active: response.ok && json.data?.attributes?.status !== "refunded",
-    customerId: json.data?.attributes?.customer_id ? String(json.data.attributes.customer_id) : undefined,
-    userEmail: json.data?.attributes?.user_email ? String(json.data.attributes.user_email) : undefined,
+    active,
+    customerId: attrs.customer_id ? String(attrs.customer_id) : undefined,
+    userEmail: attrs.user_email ? String(attrs.user_email) : undefined,
   };
 }

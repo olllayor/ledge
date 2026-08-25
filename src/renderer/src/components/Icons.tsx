@@ -28,6 +28,23 @@ export function IconClose() {
   );
 }
 
+/** Pushpin for clipboard-history pinning. */
+export function IconPin({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 4h6M10 4v5.5L6.5 14h11L14 9.5V4M12 14v6" />
+    </svg>
+  );
+}
+
 /**
  * ··· — shelf menu button.
  * Uses fill (not stroke) to match the macOS system ellipsis glyph.

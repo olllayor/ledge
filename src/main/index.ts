@@ -1,8 +1,22 @@
 import { app, Menu, net, powerMonitor, protocol as protocolModule, screen, shell } from 'electron'
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { appStateSchema, type AppState } from '@shared/schema'
+
+function sipsToPngBuffer(icnsPath: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'sips',
+      ['-s', 'format', 'png', '--out', '/dev/stdout', icnsPath],
+      { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 } as never,
+      (error, stdout) => {
+        if (error) reject(error)
+        else resolve(stdout as unknown as Buffer)
+      },
+    )
+  })
+}
 import { NativeAgentClient, type ShakeDetectedEvent } from './native/nativeAgent'
 import { detectPayloadFromText } from './services/payloads'
 import { StateStore } from './services/stateStore'
@@ -19,6 +33,7 @@ import { ShelfActions } from './services/shelfActions'
 import { ShelfItemOps } from './services/shelfItemOps'
 import { ShelfContextMenus } from './services/contextMenus'
 import { ClipboardHistoryService } from './services/clipboardHistory'
+import { ShelfHealer, createNodeHealerDeps } from './services/shelfHealer'
 import { PreferencesSyncService } from './services/preferencesSync'
 import { resolveAllowedAssetPath } from './services/assetPathResolver'
 import { broadcastToast, createThrottledToast } from './services/toastBroadcaster'
@@ -36,9 +51,9 @@ import {
 // Menu-bar utility: exactly one instance ever runs. A second launch
 // (Finder, Spotlight, login-item racing a manual start) writes a
 // resurface signal for the primary and quits before touching state,
-// windows, or global shortcuts — `app.quit()` here is safe because
-// nothing has been registered yet.
-if (!app.requestSingleInstanceLock()) {
+// windows, or global shortcuts.
+let gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
   writeSecondInstanceMarker(app.getPath('userData'))
   app.quit()
 }
@@ -113,10 +128,12 @@ protocolModule.registerSchemesAsPrivileged([
     },
   },
 ])
-
 function tickInactivity(): void {
+  // A pinned shelf opts out of auto-retract entirely.
   const shouldArm =
-    stateStore.getPreferences().shelfInteraction.autoRetract && shelfWindow.isVisible()
+    !shelfController?.isPinned &&
+    stateStore.getPreferences().shelfInteraction.autoRetract &&
+    shelfWindow.isVisible()
   if (shouldArm) {
     inactivityTimer.reset()
   } else {
@@ -125,17 +142,18 @@ function tickInactivity(): void {
 }
 
 function broadcastState(): AppState {
-  // The state is already validated when it is written to disk. We re-parse
-  // on broadcast as a defense-in-depth check, but a parse failure must not
-  // be able to crash the IPC handler or wedge the renderer; in that case
-  // we fall back to the raw snapshot so the UI still receives an update.
+  // StateStore.snapshot() already returns a validated AppState (parse on
+  // read + persister load). Re-parsing the whole graph (clipboardHistory
+  // up to 200 items, shelves) on every broadcast was hot-path waste.
+  // Keep a dev-only assert so corruption still surfaces in development
+  // without paying zod cost in production.
   const snapshot = stateStore.snapshot(preferencesSync.currentPermissionStatus())
-  let state: AppState
-  try {
-    state = appStateSchema.parse(snapshot)
-  } catch (error) {
-    console.error('[ledge] broadcastState: state validation failed; broadcasting raw snapshot.', error)
-    state = snapshot as AppState
+  const state: AppState = { ...snapshot, shelfPinned: shelfController?.isPinned ?? false }
+  if (process.env.NODE_ENV !== 'production') {
+    const parsed = appStateSchema.safeParse(state)
+    if (!parsed.success) {
+      console.error('[ledge] broadcastState: state validation failed; broadcasting raw snapshot.', parsed.error)
+    }
   }
   tray.update(state)
   shelfWindow.sendState(state)
@@ -148,6 +166,13 @@ function broadcastState(): AppState {
 }
 
 app.whenReady().then(async () => {
+  // Losing the race: `app.quit()` was requested above but whenReady can
+  // still resolve first. Bail before any state store, native helper,
+  // window, or global shortcut wiring happens.
+  if (!gotSingleInstanceLock) {
+    return
+  }
+
   if (process.platform === 'darwin' && app.dock) {
     app.dock.hide()
   }
@@ -173,8 +198,8 @@ app.whenReady().then(async () => {
 
     if (extname(allowedPath).toLowerCase() === '.icns') {
       try {
-        const pngBuffer = execFileSync('sips', ['-s', 'format', 'png', '--out', '/dev/stdout', allowedPath])
-        return new Response(pngBuffer, {
+        const pngBuffer = await sipsToPngBuffer(allowedPath)
+        return new Response(pngBuffer as unknown as BodyInit, {
           headers: { 'Content-Type': 'image/png' },
         })
       } catch (err) {
@@ -248,6 +273,7 @@ app.whenReady().then(async () => {
   })
   inactivityTimer = new InactivityTimer(() => {
     if (
+      !shelfController?.isPinned &&
       stateStore.getPreferences().shelfInteraction.autoRetract &&
       shelfWindow.isVisible()
     ) {
@@ -353,7 +379,8 @@ app.whenReady().then(async () => {
       peekWindow,
       notchDropoutWindow: FEATURE_FLAGS.useNotchDropout ? (notchDropoutWindow ?? undefined) : undefined,
       broadcastState: () => broadcastState(),
-      reregisterShortcuts: () => preferencesSync.sync()
+      reregisterShortcuts: () => preferencesSync.sync(),
+      onHistoryCleared: () => clipboardHistory.invalidatePendingCaptures()
     }),
     secureSessionStore,
     broadcastState: () => broadcastState(),
@@ -397,6 +424,23 @@ app.whenReady().then(async () => {
   nativeAgent.on('shakeDetected', (event: ShakeDetectedEvent) => {
     void shelfController.handleShakeDetected(event)
   })
+
+  // Startup heal (docs/vorssaint-shelf-plan.md Phase 1): one bookmark
+  // chance for every dead path on the live shelf before the first
+  // broadcast. Native helper is up, so resolution is real. Persisting
+  // happens inside the healer only when something healed.
+  const shelfHealer = new ShelfHealer({
+    stateStore,
+    ...createNodeHealerDeps((bookmarkBase64, originalPath) =>
+      nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
+    ),
+  })
+  try {
+    await shelfHealer.healPersonalLiveShelf()
+  } catch (error) {
+    console.error('[ledge] startup shelf heal failed:', error)
+  }
+
   nativeAgent.on('clipboardChanged', (event) => {
     if (event && typeof event === 'object' && 'changeCount' in event) {
       clipboardMonitor.notifyFromNative(

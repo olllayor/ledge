@@ -22,6 +22,19 @@ export const FREE_SYNC_DEVICE_LIMIT = 1;
 export const PRO_SYNC_SHELF_LIMIT = 500;
 export const PRO_SYNC_DEVICE_LIMIT = 3;
 
+// Variant ids that grant Pro. Configured via env (comma-separated) so a
+// future SKU change does not require a code deploy. Shared by the
+// order/license activation paths in billing.ts and the webhook in http.ts:
+// without an allowlist, ANY paid order / subscription on the store would
+// promote the caller to Pro.
+export function proVariantIds(): string[] {
+  const raw = process.env.LEMON_SQUEEZY_PRO_VARIANT_IDS ?? "";
+  return raw
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+}
+
 export const sessionArgs = {
   sessionToken: v.string(),
 };
@@ -62,12 +75,18 @@ export async function storageBytesUsed(ctx: QueryCtx | MutationCtx, userId: Id<"
   // fields yet (nothing writes them), so any shelfItems-based accounting
   // here would be a global table scan returning zero. Revisit when the
   // rows gain real byte counts plus a by_createdBy index.
-  const assets = await ctx.db
+  //
+  // Full index iteration instead of `.take(1000)`: a capped take silently
+  // dropped the tail once a user passed 1000 assets, undercounting usage
+  // and letting the per-plan storage cap be bypassed with arbitrary
+  // additional uploads.
+  let total = 0;
+  for await (const asset of ctx.db
     .query("imageAssets")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
-    .take(1000);
-
-  return assets.reduce((total, asset) => total + asset.bytes, 0);
+    .withIndex("by_user", (q) => q.eq("userId", userId))) {
+    total += asset.bytes;
+  }
+  return total;
 }
 
 export async function assertTeamPermission(

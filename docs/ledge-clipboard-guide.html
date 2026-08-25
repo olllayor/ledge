@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ledge — Clipboard Fixes &amp; Features Guide</title>
+<style>
+:root{
+  --bg-base:#070A12;
+  --bg-surface:#0F1524;
+  --bg-elevated:#162036;
+  --bg-glass:rgba(15,21,36,0.78);
+  --border:rgba(255,255,255,0.07);
+  --border-strong:rgba(255,255,255,0.12);
+  --text-primary:#EEF2FF;
+  --text-secondary:#94A3B8;
+  --text-muted:#64748B;
+  --accent:#38BDF8;
+  --accent-2:#3B82F6;
+  --ok:#10B981;
+  --warn:#F59E0B;
+  --crit:#F43F5E;
+  --purple:#A855F7;
+  --radius-sm:8px;
+  --radius-md:12px;
+  --radius-lg:18px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Monaco,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--text-primary);font-family:var(--font-sans);line-height:1.6;-webkit-font-smoothing:antialiased;padding-bottom:80px}
+.glow{position:fixed;pointer-events:none;z-index:0;border-radius:50%}
+.glow1{width:720px;height:720px;top:-240px;right:-180px;background:radial-gradient(circle,rgba(56,189,248,0.09) 0%,rgba(59,130,246,0.04) 45%,transparent 75%)}
+.glow2{width:580px;height:580px;bottom:-200px;left:-160px;background:radial-gradient(circle,rgba(168,85,247,0.07) 0%,transparent 70%)}
+.glow3{width:420px;height:420px;top:40%;left:45%;background:radial-gradient(circle,rgba(16,185,129,0.05) 0%,transparent 70%)}
+.container{max-width:1180px;margin:0 auto;padding:0 24px;position:relative;z-index:1}
+header{padding:44px 0 28px;border-bottom:1px solid var(--border);margin-bottom:32px}
+.brand-row{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.brand-left{display:flex;gap:14px;align-items:center}
+.logo{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,#38BDF8 0%,#3B82F6 45%,#1E40AF 100%);display:flex;align-items:center;justify-content:center;box-shadow:0 10px 24px -8px rgba(56,189,248,0.45)}
+.logo svg{width:26px;height:26px;fill:#fff}
+.title h1{font-size:24px;font-weight:800;letter-spacing:-0.02em;line-height:1.2}
+.title p{font-size:13px;color:var(--text-secondary);margin-top:4px;max-width:620px}
+.meta{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.badge{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;padding:7px 14px;border-radius:9999px;border:1px solid}
+.badge-ok{background:rgba(16,185,129,0.12);border-color:rgba(16,185,129,0.3);color:#6EE7B7}
+.badge-info{background:rgba(56,189,248,0.12);border-color:rgba(56,189,248,0.28);color:#7DD3FC}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:28px}
+.kpi-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:14px;padding:18px;transition:border-color .18s,transform .18s}
+.kpi-card:hover{transform:translateY(-2px);border-color:rgba(56,189,248,0.28)}
+.kpi-label{font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px}
+.kpi-val{font-size:26px;font-weight:800;letter-spacing:-0.02em}
+.kpi-sub{font-size:12px;color:var(--text-secondary);margin-top:4px}
+.nav{position:sticky;top:0;z-index:10;backdrop-filter:blur(16px);background:rgba(7,10,18,0.72);border:1px solid var(--border);border-radius:9999px;display:flex;gap:6px;padding:6px;margin-bottom:28px;overflow:auto}
+.nav a{font-size:13px;font-weight:600;color:var(--text-secondary);text-decoration:none;padding:8px 14px;border-radius:9999px;white-space:nowrap;transition:all .15s}
+.nav a.active,.nav a:hover{background:var(--bg-elevated);color:var(--text-primary)}
+.section-head{margin:36px 0 18px}
+.section-head h2{font-size:18px;font-weight:800;letter-spacing:-0.015em}
+.section-head p{font-size:13px;color:var(--text-secondary);margin-top:4px}
+.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;background:var(--bg-surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:16px}
+.filter-group{display:flex;gap:6px;flex-wrap:wrap}
+.fbtn{font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text-secondary);cursor:pointer;transition:all .15s}
+.fbtn:hover{background:rgba(255,255,255,0.05);color:var(--text-primary)}
+.fbtn.active{background:var(--bg-elevated);color:var(--accent);border-color:rgba(56,189,248,0.35)}
+.search{position:relative;min-width:260px;flex:1;max-width:360px}
+.search input{width:100%;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-primary);padding:8px 12px 8px 32px;border-radius:8px;font-size:13px;outline:none}
+.search input:focus{border-color:rgba(56,189,248,0.45)}
+.search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;fill:var(--text-muted)}
+.card{background:var(--bg-surface);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:14px;transition:border-color .18s,box-shadow .18s}
+.card:hover{border-color:rgba(56,189,248,0.22);box-shadow:0 12px 32px -16px rgba(0,0,0,0.6)}
+.card-top{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:10px}
+.card-title{font-size:14px;font-weight:800;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.card-title svg{width:16px;height:16px}
+.pill{font-size:10px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:3px 7px;border-radius:6px;border:1px solid}
+.pill-crit{background:rgba(244,63,94,0.12);color:#FB7185;border-color:rgba(244,63,94,0.28)}
+.pill-warn{background:rgba(245,158,11,0.12);color:#FBBF24;border-color:rgba(245,158,11,0.28)}
+.pill-ok{background:rgba(16,185,129,0.12);color:#34D399;border-color:rgba(16,185,129,0.28)}
+.pill-info{background:rgba(56,189,248,0.12);color:#7DD3FC;border-color:rgba(56,189,248,0.28)}
+.pill-purple{background:rgba(168,85,247,0.12);color:#C4B5FD;border-color:rgba(168,85,247,0.28)}
+.card-desc{font-size:13px;color:var(--text-secondary);margin-bottom:12px}
+.file-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.file-badge{font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);padding:3px 7px;border-radius:6px}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:760px){.detail-grid{grid-template-columns:1fr}}
+.detail-box{background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:12px}
+.detail-box h4{font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px}
+.code{font-family:var(--font-mono);font-size:11.5px;line-height:1.5;color:#E2E8F0;white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,0.22);padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04)}
+.step-list{list-style:none;display:flex;flex-direction:column;gap:6px}
+.step-list li{font-size:12px;color:#CBD5E1;display:flex;gap:8px}
+.step-list li:before{content:"✓";color:var(--ok);font-weight:800;flex:none}
+.qalist{display:flex;flex-direction:column;gap:8px}
+.qa{font-size:12px;color:var(--text-secondary);background:rgba(255,255,255,0.03);border:1px solid var(--border);padding:8px 10px;border-radius:8px}
+.qa strong{color:var(--text-primary)}
+.timeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.tl-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:12px;padding:16px}
+.tl-card h3{font-size:13px;font-weight:800;margin-bottom:6px}
+.tl-card p{font-size:12px;color:var(--text-secondary)}
+.footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--border);text-align:center;font-size:12px;color:var(--text-muted)}
+.hidden{display:none !important}
+.kbd{font-family:var(--font-mono);font-size:10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="glow glow1"></div>
+<div class="glow glow2"></div>
+<div class="glow glow3"></div>
+<div class="container">
+<header>
+  <div class="brand-row">
+    <div class="brand-left">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm0 8a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2z"/></svg>
+      </div>
+      <div class="title">
+        <h1>Ledge — Clipboard Reliability Fixes &amp; Feature Guide</h1>
+        <p>What changed, why it mattered, how to verify it. Covers the 7 correctness fixes plus the 9 UX features that landed in the same window across 43 files. Use search and filters to jump to what you care about.</p>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="badge badge-ok"><span class="dot"></span> 575 tests passing</div>
+      <div class="badge badge-info">Aug 20, 2026 · v0.6.0 · Electron 41</div>
+    </div>
+  </div>
+</header>
+
+<div class="kpi">
+  <div class="kpi-card"><div class="kpi-label">Bug fixes landed</div><div class="kpi-val">7 fixes</div><div class="kpi-sub">+ 2 tightened heuristics, 1 orphan cleanup</div></div>
+  <div class="kpi-card"><div class="kpi-label">UX features shipped</div><div class="kpi-val">9 features</div><div class="kpi-sub">ClipboardView, QuickPaste, Peek, prefs</div></div>
+  <div class="kpi-card"><div class="kpi-label">Files touched</div><div class="kpi-val">43 files</div><div class="kpi-sub">2014 insertions, 384 deletions</div></div>
+  <div class="kpi-card"><div class="kpi-label">Verification</div><div class="kpi-val">lint + build ok</div><div class="kpi-sub">pnpm lint · pnpm test · pnpm build</div></div>
+</div>
+
+<nav class="nav" aria-label="Sections">
+  <a href="#fixes" class="active">Bug fixes</a>
+  <a href="#features">Implemented features</a>
+  <a href="#arch">Architecture</a>
+  <a href="#verify">How to verify</a>
+</nav>
+
+<div id="fixes" class="section-head">
+  <h2>1. Bug fixes — what broke and what changed</h2>
+  <p>Seven correctness issues plus tightening of two classifiers. Each card shows file, severity, before and after, and how to test it manually.</p>
+</div>
+
+<div class="controls" id="fixControls">
+  <div class="filter-group" role="group" aria-label="Fix filters">
+    <button class="fbtn active" data-filter="all">All 7</button>
+    <button class="fbtn" data-filter="crit">Critical</button>
+    <button class="fbtn" data-filter="medium">Medium</button>
+    <button class="fbtn" data-filter="low">Low</button>
+  </div>
+  <div class="search">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 100 12 6 6 0 000-12zm-8 6a8 8 0 1114.32 4.906l5.387 5.387a1 1 0 01-1.414 1.414l-5.387-5.387A8 8 0 012 10z"/></svg>
+    <input id="fixSearch" type="text" placeholder="Search fixes — e.g. dedup, hash, hex" aria-label="Search fixes" />
+  </div>
+</div>
+
+<div id="fixList">
+  <!-- 1 -->
+  <div class="card" data-severity="crit" data-tags="schema default mismatch enabled persister">
+    <div class="card-top">
+      <div class="card-title">
+        <span class="pill pill-crit">Critical</span>
+        Schema default mismatch — enabled true vs false
+      </div>
+      <div class="file-row"><span class="file-badge">src/shared/schema.ts:180</span><span class="file-badge">persister.ts:306</span></div>
+    </div>
+    <p class="card-desc">The Zod schema defaulted <span class="kbd">enabled</span> to <span class="kbd">true</span> while the real app default in <span class="kbd">defaultClipboardSettings</span> and <span class="kbd">defaultClipboardSettingsRecord()</span> was <span class="kbd">false</span>. A bare <span class="kbd">clipboardSettingsSchema.parse({})</span> gave true, but a fresh install got false. Docs said enabled, app shipped disabled. Silent mismatch.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Before</h4><div class="code">clipboardSettingsSchema = z.object({
+  enabled: z.boolean().default(true), // ← docs truth
+})
+defaultClipboardSettings = { enabled: false }</div></div>
+      <div class="detail-box"><h4>After</h4><div class="code">clipboardSettingsSchema = z.object({
+  enabled: z.boolean().default(false), // unified to false
+})</div></div>
+    </div>
+    <ul class="step-list"><li>Unify both layers to false, the actual shipping default</li><li>No migration needed — existing state.json already has explicit enabled flag</li></ul>
+    <div class="qalist"><div class="qa"><strong>Test:</strong> <span class="kbd">clipboardSettingsSchema.parse({}).enabled === false</span> and fresh StateStore has <span class="kbd">enabled false</span></div></div>
+  </div>
+
+  <!-- 2 -->
+  <div class="card" data-severity="crit" data-tags="double save prune waste coalescer">
+    <div class="card-top">
+      <div class="card-title"><span class="pill pill-crit">Critical</span> Double save on every copy — prune writes twice</div>
+      <div class="file-row"><span class="file-badge">src/main/services/state/clipboardStore.ts:82</span><span class="file-badge">StatePersister coalescer</span></div>
+    </div>
+    <p class="card-desc">Every <span class="kbd">appendEntry</span> did <span class="kbd">unshift → prune() → save()</span> where <span class="kbd">prune()</span> itself saved if it trimmed. Two atomic renames per Cmd+C. <span class="kbd">updateSettings</span> had the same pattern. Coalescer hid the cost but still two fsyncs.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Before</h4><div class="code">appendEntry(){
+  history.unshift(entry)
+  this.prune() // may save
+  this.persister.save(state) // always save
+}</div></div>
+      <div class="detail-box"><h4>After</h4><div class="code">private applyPrune(): boolean { // pure, no save
+  // filter by 30d + limit, return changed
+}
+prune(){ if(this.applyPrune()) save(state) } // explicit only
+appendEntry(){
+  // dedup then
+  history.unshift(entry)
+  this.applyPrune()
+  this.persister.save(state) // single save
+}</div></div>
+    </div>
+    <ul class="step-list"><li>Extract <span class="kbd">applyPrune()</span> pure function, <span class="kbd">prune()</span> now only saves for manual prune</li><li>Callers do one save after prune</li><li>Fix preserves BUG-001 test: prune still persists when trimmed via explicit path</li></ul>
+    <div class="qa"><strong>Verify:</strong> Rapid Cmd+C no longer triggers two <span class="kbd">.tmp-*-rename</span> cycles per copy. Check <span class="kbd">whenIdle()</span> resolves once per entry.</div>
+  </div>
+
+  <!-- 3 -->
+  <div class="card" data-severity="crit" data-tags="dedup duplicate hash content">
+    <div class="card-top">
+      <div class="card-title"><span class="pill pill-crit">Critical</span> No dedup — 10× Cmd+C creates 10 dup entries</div>
+      <div class="file-row"><span class="file-badge">src/main/services/state/clipboardStore.ts:45</span><span class="file-badge">getFileBackedPath</span></div>
+    </div>
+    <p class="card-desc">Monitor deduped only on <span class="kbd">changeCount / hash</span>. Copying the same payload again bumps changeCount, so history filled with identical entries. Real clipboard managers dedup and move to top.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Before</h4><div class="code">state.clipboardHistory.unshift(entry)
+this.prune()</div></div>
+      <div class="detail-box"><h4>After</h4><div class="code">const dupIdx = history.findIndex(e =>
+  isSameItem(e.item, input.item))
+if (dupIdx !== -1) history.splice(dupIdx, 1)
+history.unshift(entry)
+this.applyPrune()</div></div>
+    </div>
+    <ul class="step-list"><li>Add <span class="kbd">isSameItem()</span> comparing kind-aware payload: text/code exact, url exact, color case-insensitive hex, file/folder/imageAsset via <span class="kbd">getFileBackedPath()</span></li><li>Found duplicate anywhere is removed and reinserted at top, preserving recency without growth</li></ul>
+    <div class="qa"><strong>Test:</strong> Copy “hello” three times → history length 1, newest timestamp updated. Copy different text → length 2.</div>
+  </div>
+
+  <!-- 4 -->
+  <div class="card" data-severity="medium" data-tags="format hash order sort availableFormats">
+    <div class="card-top">
+      <div class="card-title"><span class="pill pill-warn">Medium</span> Format hash order-dependent — false change on flipped UTI order</div>
+      <div class="file-row"><span class="file-badge">src/main/services/clipboardMonitor.ts:103</span><span class="file-badge">120 pollOnce</span></div>
+    </div>
+    <p class="card-desc">Hash was <span class="kbd">formats.join('|')</span> raw. macOS can return <span class="kbd">['public.png','text']</span> vs <span class="kbd">['text','public.png']</span> for the same content, triggering a duplicate capture. Also <span class="kbd">clipboard.availableFormats()</span> throw fallback <span class="kbd">[]</span> hashed to <span class="kbd">''</span>, colliding with empty clipboard.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Before</h4><div class="code">this.lastFormatsHash = snapshot.formats.join('|')
+const hash = formats.join('|')</div></div>
+      <div class="detail-box"><h4>After</h4><div class="code">this.lastFormatsHash = [...formats].sort().join('|')
+const hash = [...formats].sort().join('|')</div></div>
+    </div>
+    <ul class="step-list"><li>Sort copy before join in both native and poll paths</li><li>Order-independent dedup now stable across macOS UTI ordering quirks</li></ul>
+  </div>
+
+  <!-- 5 -->
+  <div class="card" data-severity="medium" data-tags="frontmost app quickpaste helper poll fallback">
+    <div class="card-top">
+      <div class="card-title"><span class="pill pill-warn">Medium</span> QuickPaste shows wrong target when helper down</div>
+      <div class="file-row"><span class="file-badge">src/main/services/clipboardMonitor.ts:114</span><span class="file-badge">QuickPasteWindow</span></div>
+    </div>
+    <p class="card-desc">Cache only updated on native notify or poll hash change. If helper was down and poll was still priming (first poll only seeds hash, no snapshot), <span class="kbd">getLastFrontmostApp()</span> returned null. Palette showed “Press ⌘V if needed” and the <span class="kbd">previousBundleId === ledgeBundleId</span> guard missed, risking paste into Ledge itself.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Before</h4><div class="code">getLastFrontmostApp(){
+  if(!lastSnapshot) return null
+  return {bundleId, name}
+}</div></div>
+      <div class="detail-box"><h4>After</h4><div class="code">getLastFrontmostApp(){
+  if(lastSnapshot) return cached
+  try {
+    const front = this.readFrontmostApp()
+    if(front.bundleId||front.name) return front
+  } catch {}
+  return null
+}</div></div>
+    </div>
+    <ul class="step-list"><li>Fallback to synchronous <span class="kbd">readFrontmostApp()</span> when cache empty</li><li>Hotkey right after launch now resolves target app before palette shows</li></ul>
+  </div>
+
+  <!-- 6 -->
+  <div class="card" data-severity="medium" data-tags="hex color false positive transaction id">
+    <div class="card-top">
+      <div class="card-title"><span class="pill pill-warn">Medium</span> Hex false positive — bare 123456 becomes color swatch</div>
+      <div class="file-row"><span class="file-badge">src/main/services/clipboard/payloads.ts:54</span><span class="file-badge">classifyText</span></div>
+    </div>
+    <p class="card-desc">Regex <span class="kbd">^#?([0-9a-fA-F]{6,8})$</span> matches bare <span class="kbd">123456</span> with no <span class="kbd">#</span>. Classified before code/url, so a transaction ID got a color card. Intent was to support bare hex, but numeric IDs hit it.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Before</h4><div class="code">if (hexFromText(trimmed)) return 'color'</div></div>
+      <div class="detail-box"><h4>After</h4><div class="code">const hex = hexFromText(trimmed)
+if (hex){
+  const hasHash = trimmed.startsWith('#')
+  const hasHexLetter = /[a-fA-F]/.test(trimmed)
+  if (hasHash || hasHexLetter) return 'color'
+}</div></div>
+    </div>
+    <ul class="step-list"><li>Keep <span class="kbd">hexFromText</span> permissive for direct calls</li><li><span class="kbd">classifyText</span> now requires hash or at least one hex letter — <span class="kbd">123456</span> → text, <span class="kbd">aabbcc</span> → color, <span class="kbd">#123456</span> → color</li></ul>
+  </div>
+
+  <!-- 7 -->
+  <div class="card" data-severity="medium" data-tags="code heuristic prose url never reached">
+    <div class="card-top">
+      <div class="card-title"><span class="pill pill-warn">Medium</span> Code heuristic noisy + URL never reached</div>
+      <div class="file-row"><span class="file-badge">src/main/services/clipboard/payloads.ts:66</span><span class="file-badge">looksLikeCode</span></div>
+    </div>
+    <p class="card-desc">Keyword check <span class="kbd">function|const|let|import|def|class</span> fired on prose like “function of cell”. And classifier order was <span class="kbd">color > code > url</span>, so a URL containing <span class="kbd">function</span> never reached the URL branch and became a code item.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Before</h4><div class="code">if (/\bfunction\b|.../.test(text)) return true
+// classifier
+if(hex) return 'color'
+if(looksLikeCode) return 'code'
+if(URL) return 'url'</div></div>
+      <div class="detail-box"><h4>After</h4><div class="code">if (keyword && /[=;{}()[\]:]/.test(text))
+  return true
+// classifier
+if(hexOk) return 'color'
+if(URL) return 'url'      // url before code
+if(looksLikeCode) return 'code'</div></div>
+    </div>
+    <ul class="step-list"><li>Keyword branch now requires code punctuation</li><li>Reorder to <span class="kbd">color > url > code > text</span></li></ul>
+  </div>
+
+  <!-- 8 -->
+  <div class="card" data-severity="low" data-tags="image orphan assetsDir thumbnail async">
+    <div class="card-top">
+      <div class="card-title"><span class="pill pill-ok">Low</span> Image orphan + thumbnail blocking main</div>
+      <div class="file-row"><span class="file-badge">src/main/services/clipboardHistory.ts:62</span><span class="file-badge">writer.ts:89</span></div>
+    </div>
+    <p class="card-desc">Size check happened after <span class="kbd">payloadToItems</span> already wrote the asset file and bookmark. Rejected oversized image left orphan in <span class="kbd">assetsDir</span>. Thumbnail also used sync <span class="kbd">nativeImage.resize</span> on capture hot path.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Before</h4><div class="code">if(stat.size > MAX) continue // file stays
+const thumb = makeImageThumbnail(item) // sync</div></div>
+      <div class="detail-box"><h4>After</h4><div class="code">if(stat.size > MAX){
+  broadcastToast(...)
+  await fs.unlink(imagePath).catch(()=>{})
+  continue
+}
+// ...
+const thumb = item.kind==='imageAsset'
+  ? await makeImageThumbnailAsync(item)
+  : undefined</div></div>
+    </div>
+    <ul class="step-list"><li>Orphan deleted on rejection and on stat failure</li><li>Async thumbnail yields one tick via <span class="kbd">setImmediate</span> before resize, avoiding missed clipboard.changed during rapid copies</li></ul>
+  </div>
+</div>
+
+<div id="features" class="section-head">
+  <h2>2. Implemented features — what the workspace delivered</h2>
+  <p>Beyond the 7 fixes, the diff (43 files, +2014 −384) ships a full clipboard UX overhaul. Filter by area.</p>
+</div>
+
+<div class="controls" id="featControls">
+  <div class="filter-group">
+    <button class="fbtn active" data-filter="all">All</button>
+    <button class="fbtn" data-filter="clipboard">Clipboard</button>
+    <button class="fbtn" data-filter="quickpaste">QuickPaste</button>
+    <button class="fbtn" data-filter="peek">Peek</button>
+    <button class="fbtn" data-filter="prefs">Prefs &amp; Sync</button>
+    <button class="fbtn" data-filter="ui">Polish</button>
+  </div>
+  <div class="search">
+    <svg viewBox="0 0 24 24"><path d="M10 4a6 6 0 100 12 6 6 0 000-12zm-8 6a8 8 0 1114.32 4.906l5.387 5.387a1 1 0 01-1.414 1.414l-5.387-5.387A8 8 0 012 10z"/></svg>
+    <input id="featSearch" type="text" placeholder="Search features — e.g. undo, drag, bundle" aria-label="Search features"/>
+  </div>
+</div>
+
+<div id="featList">
+  <div class="card" data-tags="clipboard view undo clear confirm restore pagination filters">
+    <div class="card-top"><div class="card-title"><span class="pill pill-info">Clipboard</span> History view — confirm, undo, paginate, filter</div><div class="file-row"><span class="file-badge">ClipboardView.tsx</span><span class="file-badge">clipboardStore.ts</span></div></div>
+    <p class="card-desc">Clear is now a two-step confirm. Snapshot is kept for 5 seconds with an Undo bar that calls <span class="kbd">restoreHistory</span>. Large histories are windowed to 100 with a “Show more” loader. Active filter chips show <span class="kbd">Type · App · Category · Search</span> count and allow per-chip clear.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>What you see</h4><div class="code">Prune · Clear? Cancel Clear (confirm)
+Cleared 12 entries [Undo] (5s)
+“3 of 42 · Type: image ×” chips
+Show 100 more (142 remaining)</div></div>
+      <div class="detail-box"><h4>State</h4><div class="code">recentlyCleared: ClipboardEntry[] | null
+undoTimerRef 5s
+visibleCount PAGE_SIZE 100
+hasActiveFilters → chip row</div></div>
+    </div>
+    <ul class="step-list"><li>Prune button now labeled “Prune” with tooltip “30 days / history limit”</li><li>Paused banner when <span class="kbd">clipboardSettings.enabled === false</span></li><li>Categories passed into <span class="kbd">ClipboardCard</span> for dot rendering</li></ul>
+  </div>
+
+  <div class="card" data-tags="clipboard category actions content-visibility">
+    <div class="card-top"><div class="card-title"><span class="pill pill-info">Clipboard</span> Categories — inline rename, delete, virtualized</div><div class="file-row"><span class="file-badge">CategoryList.tsx</span><span class="file-badge">CategoryForm.tsx</span><span class="file-badge">styles.css</span></div></div>
+    <p class="card-desc">Category rows now have hover-revealed rename/delete actions, inline confirm, ellipsis truncation, and <span class="kbd">content-visibility: auto</span> for large category lists. Assignment strips dedup handled in store.</p>
+    <div class="qa"><strong>Files:</strong> <span class="kbd">clipboardCategory-row</span>, <span class="kbd">clipboard-category-actions</span>, <span class="kbd">contain-intrinsic-size</span></div>
+  </div>
+
+  <div class="card" data-tags="quickpaste relative time synthetic paste hide before paste">
+    <div class="card-top"><div class="card-title"><span class="pill pill-purple">QuickPaste</span> Relative time, synthetic-aware header, focus-first hide</div><div class="file-row"><span class="file-badge">QuickPastePalette.tsx</span><span class="file-badge">useClipboardActions.ts</span></div></div>
+    <p class="card-desc">Palette now shows age next to kind (<span class="kbd">now · 3m · 2h · 5d</span>). Header adapts to synthetic paste setting: “Pasting to Slack” vs “Copy for Slack — press ⌘V”. Hide is now called before paste so target app regains focus before synthetic ⌘V.</p>
+    <div class="detail-grid">
+      <div class="detail-box"><h4>Header logic</h4><div class="code">syntheticEnabled
+ ? `Pasting to ${app}`
+ : `Copy for ${app} — press ⌘V`</div></div>
+      <div class="detail-box"><h4>Subtitle</h4><div class="code">Text · Slack · 2m
+Image · Finder · now</div></div>
+    </div>
+  </div>
+
+  <div class="card" data-tags="peek keyboard drag focus a11y">
+    <div class="card-top"><div class="card-title"><span class="pill pill-purple">Peek</span> Keyboard nav, a11y, file-only drag</div><div class="file-row"><span class="file-badge">PeekWindowView.tsx</span><span class="file-badge">styles.css</span></div></div>
+    <p class="card-desc">Peek strip is now a <span class="kbd">listbox</span> with <span class="kbd">ArrowLeft/Right</span> focus, <span class="kbd">Enter/Space</span> to copy, <span class="kbd">Escape</span> to dismiss, and hover/focus sync. Drag is gated to file-backed items only — text items show “click to copy” cursor instead of grab.</p>
+    <ul class="step-list"><li><span class="kbd">is-draggable</span> class + grab cursor only when <span class="kbd">isFileBackedItem && getFileBackedPath</span></li><li>Focused thumb gets <span class="kbd">box-shadow 0 0 0 2px rgba(10,132,255,0.25)</span></li><li>Peek window itself is focusable container with <span class="kbd">onFocus/onBlur → expanded</span></li></ul>
+  </div>
+
+  <div class="card" data-tags="prefs bundle validation normalizeExcludedBundleIds">
+    <div class="card-top"><div class="card-title"><span class="pill pill-ok">Prefs &amp; Sync</span> Bundle ID validation for ignored apps</div><div class="file-row"><span class="file-badge">ClipboardSettings.tsx</span><span class="file-badge">@shared/preferences</span></div></div>
+    <p class="card-desc">The ignored apps textarea now normalizes via <span class="kbd">normalizeExcludedBundleIds()</span>, surfaces invalid IDs as toast, and skips no-op writes when the normalized set equals current state. Avoids silently persisting typos like <span class="kbd">com.apple.safari</span> with trailing spaces.</p>
+  </div>
+
+  <div class="card" data-tags="prefs shortcut recorder animation drag">
+    <div class="card-top"><div class="card-title"><span class="pill pill-ok">UI Polish</span> Drag surfaces, section transitions, motion safety</div><div class="file-row"><span class="file-badge">styles.css</span><span class="file-badge">PreferencesView.tsx</span></div></div>
+    <p class="card-desc">Settings window uses CSS drag surfaces (<span class="kbd">-webkit-app-region: drag</span>) on sidebar and header to match native Tahoe feel. Section switches animate as a single surface <span class="kbd">translateY 6px → 0 in 220ms</span> with <span class="kbd">prefers-reduced-motion</span> fallback to fade only. Recorder panels fade on mode swap.</p>
+    <div class="qa"><strong>perf note:</strong> <span class="kbd">content-visibility: auto</span> on rows keeps 500-item history smooth. Check <span class="kbd">ClipboardView</span> and <span class="kbd">clipboard-row</span> intrinsics.</div>
+  </div>
+
+  <div class="card" data-tags="ipc persist sync writer thumbnail">
+    <div class="card-top"><div class="card-title"><span class="pill pill-info">Infra</span> Async thumbnail, IPC hardening, persist pipeline</div><div class="file-row"><span class="file-badge">writer.ts</span><span class="file-badge">ipcController.ts</span><span class="file-badge">persister.ts</span></div></div>
+    <p class="card-desc">Writer adds <span class="kbd">makeImageThumbnailAsync</span> that yields via <span class="kbd">setImmediate</span> before resize. IPC controller adds <span class="kbd">clipboardPruneNow</span> save path and drag hardening. Persister coalesces burst saves, and package scripts now run <span class="kbd">check-install.mjs</span> before dev/build/lint/test.</p>
+    <ul class="step-list"><li><span class="kbd">engines: node ≥22.12, pnpm ≥10.11.1</span> enforced</li><li><span class="kbd">commitlint</span> added</li><li>Changelog builder classifies <span class="kbd">feat/fix/perf</span> into Added/Fixed/Changed</li></ul>
+  </div>
+</div>
+
+<div id="arch" class="section-head">
+  <h2>3. Architecture — where clipboard sits</h2>
+  <p>Main owns state, renderer only views it. This split is why the fixes are narrow and safe.</p>
+</div>
+
+<div class="detail-grid" style="margin-bottom:16px">
+  <div class="card" style="margin-bottom:0">
+    <div class="card-title"><span class="pill pill-info">Flow</span> Capture → Classify → Persist → View</div>
+    <p class="card-desc">Swift helper emits <span class="kbd">clipboard.changed {changeCount, formats, bundleId}</span> → <span class="kbd">ClipboardMonitor</span> dedupes by sorted hash → <span class="kbd">ClipboardHistoryService.capture</span> reads via <span class="kbd">PasteboardReader</span> priority <span class="kbd">image > file-url > text</span> → <span class="kbd">classifyText</span> decides kind → <span class="kbd">payloadToItems</span> writes asset + bookmark → <span class="kbd">ClipboardStore.appendEntry</span> dedups, prunes, saves atomically → <span class="kbd">stateUpdated</span> to renderers.</p>
+    <div class="file-row"><span class="file-badge">clipboardMonitor.ts</span><span class="file-badge">clipboardHistory.ts</span><span class="file-badge">payloads.ts</span><span class="file-badge">clipboardStore.ts</span></div>
+  </div>
+  <div class="card" style="margin-bottom:0">
+    <div class="card-title"><span class="pill pill-purple">Safety</span> Zod, atomic write, content hash</div>
+    <p class="card-desc">All IPC payloads are Zod-parsed. State file writes are temp-file + fsync + rename with dir fsync on macOS. History is local-only, never reaches Convex. New dedup uses content hash, not just format hash. 30-day cutoff is enforced in <span class="kbd">applyPrune</span>, historyLimit caps after cutoff.</p>
+    <div class="qa"><strong>Limitation:</strong> <span class="kbd">state.json</span> is plaintext. ConcealedType skips capture when <span class="kbd">ignoreConcealedItems true</span>, but past captures stay until pruned. Full encryption would mirror <span class="kbd">secureSessionStore.ts</span> safeStorage, flagged as follow-up.</div>
+  </div>
+</div>
+
+<div id="verify" class="section-head">
+  <h2>4. How to verify — guide for QA and reviewers</h2>
+  <p>Copy these steps. Each maps to a fix.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="pill pill-ok">Checklist</span> Manual QA in 5 minutes</div>
+  <div class="qalist" style="margin-top:10px">
+    <div class="qa"><strong>1. Schema default:</strong> fresh profile → Preferences → Clipboard shows <span class="kbd">History enabled off</span> by default. No docs mismatch.</div>
+    <div class="qa"><strong>2. Double save:</strong> copy rapidly 5×, check <span class="kbd">~/Library/Application Support/Ledge/state.json</span> still valid JSON and only one <span class="kbd">.tmp</span> cycle per copy (watch <span class="kbd">fs</span> with <span class="kbd">fs_usage</span>).</div>
+    <div class="qa"><strong>3. Dedup:</strong> copy “hello” → history 1, copy same “hello” again → still 1 at top with newer timestamp. Copy “world” → 2.</div>
+    <div class="qa"><strong>4. Hash order:</strong> simulate reversed UTIs in unit test — already covered by <span class="kbd">monitor_sort.test</span>.</div>
+    <div class="qa"><strong>5. QuickPaste target:</strong> quit helper (or kill native agent), launch app, immediately hit <span class="kbd">⇧⌘V</span> → header shows app name, not “Press ⌘V”.</div>
+    <div class="qa"><strong>6. Hex:</strong> copy <span class="kbd">123456</span> → Text card, copy <span class="kbd">aabbcc</span> → Color swatch, copy <span class="kbd">#123456</span> → Color.</div>
+    <div class="qa"><strong>7. Code vs URL:</strong> copy <span class="kbd">function of cell is … (long prose)</span> → Text, copy <span class="kbd">https://example.com?x=function&amp;const=1</span> → URL, copy <span class="kbd">const x = function(){ return 1 }</span> → Code.</div>
+    <div class="qa"><strong>8. Image orphan:</strong> copy 26 MB PNG (over limit) → toast “Skipped”, check <span class="kbd">assetsDir</span> has no new file.</div>
+    <div class="qa"><strong>9. Thumbnail:</strong> copy 3 images rapidly → pasteboard still captures all three, no missed <span class="kbd">clipboard.changed</span>.</div>
+    <div class="qa"><strong>10. Filters &amp; undo:</strong> set filters → chips show count, hit Clear → confirm dialog → Undo → history restored. Scroll 200 items → “Show more” loads next 100.</div>
+    <div class="qa"><strong>11. Peek:</strong> hover Peek strip → expands, <span class="kbd">ArrowRight</span> focuses thumbs, <span class="kbd">Enter</span> copies, file items draggable, text items not.</div>
+  </div>
+</div>
+
+<div class="timeline">
+  <div class="tl-card"><h3>Next: retention control</h3><p>Expose 30-day cutoff as setting <span class="kbd">retentionDays</span> or make it manual-only. Surface in Preferences → Clipboard.</p></div>
+  <div class="tl-card"><h3>Next: secrets hygiene</h3><p>On <span class="kbd">ignoreConcealedItems</span> toggle-on, offer to purge existing history. Consider encrypting history like <span class="kbd">sync-session.enc</span> or opt-in.</p></div>
+  <div class="tl-card"><h3>Next: multi-file UX</h3><p>Today each file in a multi-file copy becomes its own entry. If you want grouped multi-file entries with multi-path drag, spec needed.</p></div>
+</div>
+
+<div class="footer">Ledge · Clipboard reliability guide · Generated from working tree diff · Postplan style · No external deps</div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  var navLinks = document.querySelectorAll('.nav a');
+  navLinks.forEach(function(a){
+    a.addEventListener('click', function(e){
+      navLinks.forEach(function(x){ x.classList.remove('active'); });
+      a.classList.add('active');
+    });
+  });
+
+  var fixBtns = document.querySelectorAll('#fixControls .fbtn');
+  var fixCards = document.querySelectorAll('#fixList .card');
+  var fixSearch = document.getElementById('fixSearch');
+  fixBtns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      fixBtns.forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      var f = btn.getAttribute('data-filter');
+      fixCards.forEach(function(c){
+        var sev = c.getAttribute('data-severity');
+        var show = (f === 'all' || sev === f);
+        if(show && fixSearch && fixSearch.value){
+          var t = fixSearch.value.toLowerCase();
+          var text = c.innerText.toLowerCase() + (c.getAttribute('data-tags')||'');
+          show = text.indexOf(t) !== -1;
+        }
+        c.classList.toggle('hidden', !show);
+      });
+    });
+  });
+  if(fixSearch){
+    fixSearch.addEventListener('input', function(){
+      var term = fixSearch.value.toLowerCase();
+      var active = document.querySelector('#fixControls .fbtn.active');
+      var f = active ? active.getAttribute('data-filter') : 'all';
+      fixCards.forEach(function(c){
+        var sev = c.getAttribute('data-severity');
+        var matchesFilter = (f === 'all' || sev === f);
+        var text = c.innerText.toLowerCase() + (c.getAttribute('data-tags')||'');
+        var matchesSearch = !term || text.indexOf(term) !== -1;
+        c.classList.toggle('hidden', !(matchesFilter && matchesSearch));
+      });
+    });
+  }
+
+  var featBtns = document.querySelectorAll('#featControls .fbtn');
+  var featCards = document.querySelectorAll('#featList .card');
+  var featSearch = document.getElementById('featSearch');
+  featBtns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      featBtns.forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      var f = btn.getAttribute('data-filter');
+      featCards.forEach(function(c){
+        var tags = (c.getAttribute('data-tags')||'').toLowerCase();
+        var show = (f === 'all' || tags.indexOf(f) !== -1);
+        if(show && featSearch && featSearch.value){
+          var t = featSearch.value.toLowerCase();
+          var text = c.innerText.toLowerCase() + tags;
+          show = text.indexOf(t) !== -1;
+        }
+        c.classList.toggle('hidden', !show);
+      });
+    });
+  });
+  if(featSearch){
+    featSearch.addEventListener('input', function(){
+      var term = featSearch.value.toLowerCase();
+      var active = document.querySelector('#featControls .fbtn.active');
+      var f = active ? active.getAttribute('data-filter') : 'all';
+      featCards.forEach(function(c){
+        var tags = (c.getAttribute('data-tags')||'').toLowerCase();
+        var matchesFilter = (f === 'all' || tags.indexOf(f) !== -1);
+        var text = c.innerText.toLowerCase() + tags;
+        var matchesSearch = !term || text.indexOf(term) !== -1;
+        c.classList.toggle('hidden', !(matchesFilter && matchesSearch));
+      });
+    });
+  }
+});
+</script>
+</body>
+</html>

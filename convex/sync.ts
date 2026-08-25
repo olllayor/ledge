@@ -59,7 +59,13 @@ function itemToShelfItemRow(item: Record<string, unknown>, meta: ShelfItemMeta):
     title: item.title,
     subtitle: item.subtitle,
     preview: item.preview,
-    order: item.order,
+    // `shelfItems.order` is v.string(). Personal shelves push numeric
+    // orders (0..n-1) while team mutations push lexorank strings, so
+    // stringify numbers here — same convention as migrations.ts.
+    // NOTE: plain toString() does not preserve numeric ordering under
+    // byte-wise comparison ("10" < "2"); acceptable because Phase 1
+    // reads come from the shelves.items array, not this table.
+    order: typeof item.order === "number" ? item.order.toString() : (item.order as string),
     version: meta.version,
     serverUpdatedAt: meta.serverUpdatedAt,
     deletedAt: undefined,

@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { fileRefSchema, shelfItemBaseSchema } from './commonSchemas';
+import { MAX_TEXT_PAYLOAD_LENGTH } from './shelfLimits';
+
+// Re-exported so ingest call sites and tests share one source of truth.
+export { MAX_ITEMS_PER_SHELF, MAX_TEXT_PAYLOAD_LENGTH } from './shelfLimits';
 
 export const shelfColorSchema = z.enum(['ember', 'wave', 'forest', 'sand']);
 export const shelfOriginSchema = z.enum(['shake', 'tray', 'shortcut', 'manual', 'restore']);
@@ -171,6 +175,9 @@ export const clipboardEntrySchema = z.object({
   // match; content hashes make re-copied screenshots dedupable.
   imageSha256: z.string().optional(),
   categoryIds: z.array(z.string()).default([]),
+  // Pinned entries survive both the age cutoff and the count limit;
+  // null means unpinned (the common case).
+  pinnedAt: z.string().optional(),
 });
 
 export const clipboardCategorySchema = z.object({
@@ -184,6 +191,9 @@ export const clipboardSettingsSchema = z.object({
   enabled: z.boolean().default(false),
   historyLimit: z.number().int().positive().max(2000).default(200),
   ignoreConcealedItems: z.boolean().default(true),
+  // Heuristic secret-shape skip for apps that never mark the
+  // pasteboard as concealed (see clipboard/sensitiveText.ts).
+  skipSensitiveText: z.boolean().default(true),
   ignoreBundleIds: z.array(z.string()).default([]),
   quickPasteHotkey: z.string().default('CommandOrControl+Shift+V'),
   peekHotkey: z.string().default(''),
@@ -194,6 +204,7 @@ export const defaultClipboardSettings = {
   enabled: false,
   historyLimit: 200,
   ignoreConcealedItems: true,
+  skipSensitiveText: true,
   ignoreBundleIds: [] as string[],
   quickPasteHotkey: 'CommandOrControl+Shift+V',
   peekHotkey: '',
@@ -217,6 +228,9 @@ export const appStateSchema = z.object({
   clipboardHistory: z.array(clipboardEntrySchema).default([]),
   clipboardCategories: z.array(clipboardCategorySchema).default([]),
   clipboardSettings: clipboardSettingsSchema.default(defaultClipboardSettings),
+  // Runtime-only: never persisted. Composed by the orchestrator on each
+  // broadcast so renderer + tray can reflect pin state.
+  shelfPinned: z.boolean().default(false),
 });
 
 export const fileDropPayloadSchema = z.object({
@@ -226,7 +240,7 @@ export const fileDropPayloadSchema = z.object({
 
 export const textPayloadSchema = z.object({
   kind: z.literal('text'),
-  text: z.string().min(1),
+  text: z.string().min(1).max(MAX_TEXT_PAYLOAD_LENGTH),
 });
 
 export const urlPayloadSchema = z.object({

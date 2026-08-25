@@ -74,7 +74,6 @@ export function PreferencesView({ state }: PreferencesViewProps) {
               className={`settings-nav-item ${id === activeSection ? 'is-active' : ''}`}
               type="button"
               aria-current={id === activeSection ? 'page' : undefined}
-              title={label}
               onClick={() => setActiveSection(id)}
             >
               <span className="settings-nav-icon">{icon}</span>
@@ -91,12 +90,15 @@ export function PreferencesView({ state }: PreferencesViewProps) {
       </aside>
 
       <section className="settings-stage">
-        <header className="settings-stage-head">
+        {/* key on activeSection remounts header + groups so the CSS
+            section-in animation replays on every nav switch. Sibling keys
+            must differ from each other, hence the head-/groups- prefixes. */}
+        <header className="settings-stage-head" key={`head-${activeSection}`}>
           <h1>{header.title}</h1>
           <p className="settings-stage-subtitle">{header.subtitle}</p>
         </header>
 
-        <div className="settings-groups">
+        <div className="settings-groups" key={`groups-${activeSection}`}>
           {activeSection === 'general' && <GeneralSettings state={state} showToast={showToast} />}
           {activeSection === 'shelf' && <ShelfSettings state={state} showToast={showToast} />}
           {activeSection === 'activation' && <ActivationSettings state={state} showToast={showToast} />}

@@ -9,6 +9,7 @@ import {
   clipboardEntryCategoryAssignInputSchema,
   clipboardEntryIdInputSchema,
   clipboardGetRecentInputSchema,
+  clipboardHistoryRestoreInputSchema,
   clipboardQuickPastePasteInputSchema,
   clipboardSettingsUpdateSchema
 } from '@shared/ipcSchemas'
@@ -50,6 +51,12 @@ export interface ClipboardIpcDeps {
   clipboardWriter?: ClipboardWriter
   /** Bundle id used to short-circuit "paste back into Ledge" checks. */
   ledgeBundleId?: string
+  /**
+   * Notifies the clipboard history service that captures in flight are
+   * stale (history was cleared) so they must not append ghost entries.
+   * Optional so tests can omit it.
+   */
+  onHistoryCleared?(): void
 }
 
 export class ClipboardIpcController {
@@ -110,6 +117,14 @@ export class ClipboardIpcController {
     })
     this.bus.handle(IPC_CHANNELS.clipboardEntryClearAll, async () => {
       this.deps.stateStore.clearClipboardHistory()
+      // A capture that started before the clear must not land its entry
+      // after it — the user asked for an empty history.
+      this.deps.onHistoryCleared?.()
+      this.deps.broadcastState()
+    })
+    this.bus.handle(IPC_CHANNELS.clipboardHistoryRestore, async (_event, payload: unknown) => {
+      const entries = clipboardHistoryRestoreInputSchema.parse(payload)
+      this.deps.stateStore.restoreClipboardHistory(entries)
       this.deps.broadcastState()
     })
     this.bus.handle(IPC_CHANNELS.clipboardPruneNow, async () => {
@@ -156,6 +171,12 @@ export class ClipboardIpcController {
       const parsed = clipboardEntryIdInputSchema.parse(payload)
       this.deps.stateStore.removeClipboardEntry(parsed.entryId)
       this.deps.broadcastState()
+    })
+    this.bus.handle(IPC_CHANNELS.clipboardEntryTogglePin, async (_event, payload: unknown) => {
+      const parsed = clipboardEntryIdInputSchema.parse(payload)
+      const pinned = this.deps.stateStore.toggleClipboardEntryPin(parsed.entryId)
+      this.deps.broadcastState()
+      return pinned
     })
   }
 
@@ -250,8 +271,12 @@ export class ClipboardIpcController {
     this.bus.on(IPC_CHANNELS.notchDropoutDragState, (_event, payload: unknown) => {
       const parsed = z.object({ suppressed: z.boolean() }).safeParse(payload)
       if (!parsed.success) return
-      win.suppressHide = parsed.data.suppressed
-      if (!parsed.data.suppressed) {
+      if (parsed.data.suppressed) {
+        // Main owns the release timing — startDrag returns before the
+        // drop, so the renderer cannot know when the session ended.
+        win.beginDragSuppression()
+      } else {
+        win.suppressHide = false
         // Drag finished; the hover monitor's leave edge fired (suppressed)
         // mid-drag and won't fire again, so re-check here.
         win.hideUnlessCursorInside()

@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect,  useRef, useState, type RefObject } from 'react';
 import type { AppState, IngestPayload, ShelfItemRecord } from '@shared/schema';
-import { getExportableItems, getHeroCountLabel, getHeroMode, type HeroMode, type SessionMode } from '../lib/shelfFlow';
+import { getExportableItems, getHeroCountLabel, getHeroMode, type HeroMode, type MenuTarget, type SessionMode } from '../lib/shelfFlow';
+import { isBareEscape } from '../lib/keyboard';
 import {
   getHeroPreviewSource,
   heroStackClassName,
@@ -11,88 +12,7 @@ import {
   IconClose,
   IconMenuDots,
   IconChevronDown,
-  IconChevronLeft,
-  IconGrid,
-  IconFolder,
-  IconArrowUpRight,
 } from './Icons';
-import { TeamSwitcher } from './TeamSwitcher';
-
-function EmptyStateIllustration() {
-  return (
-    <svg
-      viewBox="0 0 96 96"
-      aria-hidden="true"
-      className="empty-state-illustration"
-    >
-      <defs>
-        <clipPath id="doc-clip">
-          <rect x="0" y="0" width="28" height="36" rx="4" />
-        </clipPath>
-      </defs>
-      {/* Back-left doc */}
-      <g className="empty-state-doc empty-state-doc-left">
-        <rect
-          x="14"
-          y="22"
-          width="28"
-          height="36"
-          rx="4"
-          fill="var(--surface)"
-          stroke="var(--line)"
-          strokeWidth="1"
-        />
-        <rect x="18" y="30" width="20" height="2" rx="1" fill="var(--line-strong)" opacity="0.6" />
-        <rect x="18" y="36" width="16" height="2" rx="1" fill="var(--line-strong)" opacity="0.4" />
-        <rect x="18" y="42" width="12" height="2" rx="1" fill="var(--line-strong)" opacity="0.3" />
-      </g>
-      {/* Back-right doc */}
-      <g className="empty-state-doc empty-state-doc-right">
-        <rect
-          x="54"
-          y="22"
-          width="28"
-          height="36"
-          rx="4"
-          fill="var(--surface)"
-          stroke="var(--line)"
-          strokeWidth="1"
-        />
-        <rect x="58" y="30" width="20" height="2" rx="1" fill="var(--line-strong)" opacity="0.6" />
-        <rect x="58" y="36" width="16" height="2" rx="1" fill="var(--line-strong)" opacity="0.4" />
-        <rect x="58" y="42" width="12" height="2" rx="1" fill="var(--line-strong)" opacity="0.3" />
-      </g>
-      {/* Front-center doc */}
-      <g className="empty-state-doc empty-state-doc-center">
-        <rect
-          x="34"
-          y="30"
-          width="28"
-          height="36"
-          rx="4"
-          fill="var(--surface-strong)"
-          stroke="var(--line-strong)"
-          strokeWidth="1"
-        />
-        <rect x="38" y="38" width="20" height="2" rx="1" fill="var(--ink-faint)" opacity="0.5" />
-        <rect x="38" y="44" width="16" height="2" rx="1" fill="var(--ink-faint)" opacity="0.35" />
-        <rect x="38" y="50" width="12" height="2" rx="1" fill="var(--ink-faint)" opacity="0.25" />
-      </g>
-      {/* Shelf base */}
-      <rect
-        x="12"
-        y="72"
-        width="72"
-        height="8"
-        rx="4"
-        fill="var(--surface)"
-        stroke="var(--line)"
-        strokeWidth="1"
-        opacity="0.8"
-      />
-    </svg>
-  );
-}
 
 interface ShelfViewState {
   liveShelfId: string | null;
@@ -111,6 +31,20 @@ interface ShelfViewProps {
   state: ShelfViewState;
 }
 
+interface OverflowAction {
+  id: string;
+  label: string;
+  destructive?: boolean;
+  disabled?: boolean;
+  onSelect(): Promise<void> | void;
+}
+
+const PING_INTERVAL_MS = 1000;
+
+function isActionableFileItem(item: ShelfItemRecord): boolean {
+  return (item.kind === 'file' || item.kind === 'folder' || item.kind === 'imageAsset') && !('file' in item && item.file.isMissing);
+}
+
 function ShelfView({ state }: ShelfViewProps) {
   const liveShelf = state.liveShelfId
     ? { id: state.liveShelfId, items: state.liveShelfItems, updatedAt: state.liveShelfUpdatedAt }
@@ -119,21 +53,19 @@ function ShelfView({ state }: ShelfViewProps) {
   const primaryItem = items[0] ?? null;
   const itemCount = items.length;
   const heroMode = getHeroMode(items);
-  const autoCloseShelf = state.autoCloseShelf ?? false;
-  const doubleClickAction = state.doubleClickAction ?? 'open';
   const [isImporting, setIsImporting] = useState(false);
   const [sessionMode, setSessionMode] = useState<SessionMode>('idle');
-  const [isHovering, setIsHovering] = useState(false);
-  const [undoState, setUndoState] = useState<{ paths: string[] } | null>(null);
+  const [menuTarget, setMenuTarget] = useState<MenuTarget>('shelf');
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemSheetRef = useRef<HTMLDivElement | null>(null);
   const lastUpdatedAtRef = useRef(liveShelf?.updatedAt ?? '');
   const dragDepthRef = useRef(0);
-  const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Throttled keep-alive for the main-process inactivity timer. Without
+  // these pings the auto-retract timer expires 60 s after the last IPC
+  // mutation even while the user is actively hovering and reading, and
+  // the shelf retracts under the cursor.
   const lastPingRef = useRef(0);
-  const PING_INTERVAL_MS = 1000;
-  const UNDO_TIMEOUT = 5000;
   const isAcceptingDrop = sessionMode === 'acceptingDrop';
   const isExporting = sessionMode === 'exporting';
   const isMenuOpen = sessionMode === 'menuOpen';
@@ -157,6 +89,7 @@ function ShelfView({ state }: ShelfViewProps) {
 
   useEffect(() => {
     dragDepthRef.current = 0;
+    setMenuTarget('shelf');
     setSessionMode('idle');
   }, [liveShelf?.id]);
 
@@ -177,6 +110,7 @@ function ShelfView({ state }: ShelfViewProps) {
     }
 
     dragDepthRef.current = 0;
+    setMenuTarget('shelf');
     setSessionMode('idle');
   }, [itemCount, liveShelf]);
 
@@ -213,14 +147,18 @@ function ShelfView({ state }: ShelfViewProps) {
         return;
       }
 
+      setMenuTarget('shelf');
       setSessionMode('idle');
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
+      // Only bare Escape dismisses; modifier-carrying presses are left
+      // for future shortcuts (Cmd+Escape etc.) to claim.
+      if (!isBareEscape(event)) {
         return;
       }
 
+      setMenuTarget('shelf');
       setSessionMode('idle');
     };
 
@@ -238,6 +176,7 @@ function ShelfView({ state }: ShelfViewProps) {
     }
 
     setIsImporting(true);
+    setMenuTarget('shelf');
     setSessionMode('idle');
 
     try {
@@ -265,39 +204,13 @@ function ShelfView({ state }: ShelfViewProps) {
     window.ledge.shelfInteractionPing();
   }, []);
 
-  const handleExportAndClear = useCallback(() => {
-    const exportable = getExportableItems(items);
-    if (exportable.length === 0) return false;
-
-    const didStartDrag =
-      exportable.length === 1
-        ? window.ledge.startItemDrag(exportable[0]!.id)
-        : window.ledge.startItemsDrag(exportable.map((i) => i.id));
-
-    if (didStartDrag) {
-      const paths = (
-        exportable as { file: { resolvedPath?: string; originalPath?: string; isMissing: boolean } }[]
-      )
-        .filter((i) => !i.file.isMissing)
-        .map((i) => i.file.resolvedPath || i.file.originalPath)
-        .filter((p): p is string => Boolean(p));
-      if (paths.length > 0) {
-        setUndoState({ paths });
-        if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
-        undoTimeoutRef.current = setTimeout(() => setUndoState(null), UNDO_TIMEOUT);
-      }
-      window.ledge.clearShelf();
-    }
-
-    return didStartDrag;
-  }, [items]);
-
   const handleDragEnter = useCallback((event: React.DragEvent<HTMLElement>) => {
     if (isExporting || !isExternalTransfer(event.dataTransfer)) {
       return;
     }
 
     dragDepthRef.current += 1;
+    setMenuTarget('shelf');
     setSessionMode('acceptingDrop');
     pingInteraction();
   }, [isExporting, pingInteraction]);
@@ -325,6 +238,7 @@ function ShelfView({ state }: ShelfViewProps) {
     pingInteraction();
 
     if (sessionMode !== 'acceptingDrop') {
+      setMenuTarget('shelf');
       setSessionMode('acceptingDrop');
     }
   }, [isExporting, sessionMode, pingInteraction]);
@@ -347,18 +261,22 @@ function ShelfView({ state }: ShelfViewProps) {
   }, [pushPayloads]);
 
   const openItemSheet = useCallback(() => {
+    setMenuTarget('shelf');
     setSessionMode('itemListOpen');
   }, []);
 
-  const openOverflowMenu = useCallback(async () => {
+  const openOverflowMenu = useCallback(() => {
     if (!liveShelf) {
       return;
     }
-    await window.ledge.showShelfContextMenu();
-  }, [liveShelf]);
+
+    setMenuTarget(primaryItem ? 'frontItem' : 'shelf');
+    setSessionMode('menuOpen');
+  }, [liveShelf, primaryItem]);
 
   const closeTransientSurface = useCallback(() => {
     dragDepthRef.current = 0;
+    setMenuTarget('shelf');
     setSessionMode('idle');
   }, []);
 
@@ -370,134 +288,212 @@ function ShelfView({ state }: ShelfViewProps) {
     setSessionMode((current) => (current === 'exporting' ? 'idle' : current));
   }, []);
 
+  async function moveItem(itemId: string, direction: -1 | 1) {
+    if (!liveShelf) {
+      return;
+    }
+
+    const currentItems = [...items];
+    const index = currentItems.findIndex((item) => item.id === itemId);
+    const targetIndex = index + direction;
+    if (index === -1 || targetIndex < 0 || targetIndex >= currentItems.length) {
+      return;
+    }
+
+    const next = [...currentItems];
+    const [entry] = next.splice(index, 1);
+    next.splice(targetIndex, 0, entry);
+    await window.ledge.reorderItems(next.map((item) => item.id));
+  }
+
+  const menuActions: OverflowAction[] = [];
+  if (primaryItem) {
+    if (isActionableFileItem(primaryItem)) {
+      const missing = 'file' in primaryItem && primaryItem.file.isMissing;
+      menuActions.push(
+        {
+          id: 'quick-look',
+          label: 'Quick Look',
+          disabled: missing,
+          onSelect: async () => {
+            closeTransientSurface();
+            await window.ledge.previewItem(primaryItem.id);
+          },
+        },
+        {
+          id: 'reveal',
+          label: 'Reveal in Finder',
+          disabled: missing,
+          onSelect: async () => {
+            closeTransientSurface();
+            await window.ledge.revealItem(primaryItem.id);
+          },
+        },
+        {
+          id: 'open',
+          label: 'Open',
+          disabled: missing,
+          onSelect: async () => {
+            closeTransientSurface();
+            await window.ledge.openItem(primaryItem.id);
+          },
+        },
+        {
+          id: 'share-all',
+          label: 'Share All',
+          disabled: getExportableItems(items).length === 0,
+          onSelect: async () => {
+            closeTransientSurface();
+            await window.ledge.shareShelfItems();
+          },
+        },
+      );
+    } else if (primaryItem.kind === 'text' || primaryItem.kind === 'url') {
+      menuActions.push(
+        {
+          id: 'copy',
+          label: 'Copy',
+          onSelect: async () => {
+            closeTransientSurface();
+            await window.ledge.copyItem(primaryItem.id);
+          },
+        },
+        {
+          id: 'save',
+          label: 'Save',
+          onSelect: async () => {
+            closeTransientSurface();
+            await window.ledge.saveItem(primaryItem.id);
+          },
+        },
+      );
+
+      if (primaryItem.kind === 'url') {
+        menuActions.push({
+          id: 'open-url',
+          label: 'Open',
+          onSelect: async () => {
+            closeTransientSurface();
+            await window.ledge.openItem(primaryItem.id);
+          },
+        });
+      }
+    }
+  }
+
+  if (liveShelf) {
+    menuActions.push({
+      id: 'show-items',
+      label: 'Show Items',
+      disabled: itemCount < 2,
+      onSelect: () => {
+        openItemSheet();
+      },
+    });
+
+    menuActions.push(
+      {
+        id: 'clear',
+        label: 'Clear Shelf',
+        destructive: true,
+        disabled: itemCount === 0,
+        onSelect: async () => {
+          closeTransientSurface();
+          await window.ledge.clearShelf();
+        },
+      },
+      {
+        id: 'close',
+        label: 'Close Shelf',
+        onSelect: async () => {
+          closeTransientSurface();
+          await window.ledge.closeShelf();
+        },
+      },
+    );
+  }
+
   return (
-    <main
-      className={`shelf-shell${isAcceptingDrop ? ' is-accepting-drop' : ''}${isExporting ? ' is-exporting' : ''}${isItemListOpen ? ' has-item-sheet' : ''}`}
-      onPaste={handlePaste}
-      tabIndex={0}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      onPointerDown={pingInteraction}
-      onKeyDown={pingInteraction}
-      onPointerEnter={() => {
-        if (isExporting) {
-          setSessionMode('idle');
-        }
-        setIsHovering(true);
-      }}
-      onPointerLeave={() => {
-        setIsHovering(false);
-      }}
-    >
-      <div className="drag-handle" />
-
-      {isItemListOpen && liveShelf ? (
-        <ItemSheet
-          items={items}
-          sheetRef={itemSheetRef}
-          doubleClickAction={doubleClickAction}
-          onClose={closeTransientSurface}
-        />
-      ) : (
-        <>
-          <header className="shelf-topbar">
-            <button
-              className="chrome-button chrome-button-close"
-              onClick={() => void window.ledge.closeShelf()}
-              aria-label="Close shelf"
-            >
-              <IconClose />
-            </button>
-
-            <TeamSwitcher />
-
-            <button
-              ref={menuButtonRef}
-              className="chrome-button chrome-button-menu"
-              onClick={openOverflowMenu}
-              disabled={!liveShelf || isExporting}
-              aria-label="Open shelf actions"
-              aria-haspopup="menu"
-              aria-expanded={isMenuOpen}
-            >
-              <IconMenuDots />
-            </button>
-          </header>
-
-          <section
-            className={`drop-surface compact ${itemCount === 0 ? 'is-empty' : ''}${isAcceptingDrop ? ' is-accepting' : ''}`}
+    <main className="shelf-shell" onPaste={handlePaste} tabIndex={0} onPointerDown={pingInteraction} onKeyDown={pingInteraction}>
+      <section
+        className={`shelf-panel${isAcceptingDrop ? ' is-accepting-drop' : ''}${isExporting ? ' is-exporting' : ''}${isItemListOpen ? ' has-item-sheet' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onPointerEnter={() => {
+          if (isExporting) {
+            setSessionMode('idle');
+          }
+        }}
+      >
+        <header className="shelf-topbar">
+          <button
+            className="chrome-button chrome-button-close"
+            onClick={() => void window.ledge.closeShelf()}
+            aria-label="Close shelf"
           >
-            {itemCount === 0 ? (
-              <div className="empty-state compact">
-                <EmptyStateIllustration />
-                <p className="surface-title compact">Drop files here</p>
-              </div>
-            ) : primaryItem ? (
-              <div className="hero-wrapper">
-                <HeroItemMemo
-                  items={items}
-                  item={primaryItem}
-                  heroMode={heroMode}
-                  isImporting={isImporting}
-                  isExporting={isExporting}
-                  dragLocked={isMenuOpen || isItemListOpen}
-                  autoCloseShelf={autoCloseShelf}
-                  doubleClickAction={doubleClickAction}
-                  onExportStart={handleExportStart}
-                  onExportEnd={handleExportEnd}
-                  onExportItems={handleExportAndClear}
-                  onOpenItemSheet={openItemSheet}
-                />
-                {isHovering && !isExporting && !isImporting && itemCount > 0 && (
-                  <button
-                    className="drag-button"
-                    onClick={handleExportAndClear}
-                    aria-label="Drag items out"
-                  >
-                    <IconArrowUpRight />
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="empty-state compact">
-                <EmptyStateIllustration />
-                <p className="surface-title compact">Drop files here</p>
-              </div>
-            )}
-          </section>
+            <IconClose />
+          </button>
+          <button
+            ref={menuButtonRef}
+            className="chrome-button chrome-button-menu"
+            onClick={openOverflowMenu}
+            disabled={!liveShelf || isExporting}
+            aria-label="Open shelf actions"
+            aria-haspopup="menu"
+            aria-expanded={isMenuOpen}
+          >
+            <IconMenuDots />
+          </button>
+        </header>
 
-          {banner ? (
-            <section className="permission-banner compact">
-              <div>
-                <p className="banner-title">{banner.title}</p>
-                <p className="banner-copy">{banner.copy}</p>
-              </div>
-              <button className="ghost-button small" onClick={() => void window.ledge.openPermissionSettings()}>
-                Open Settings
-              </button>
-            </section>
-          ) : null}
+        {isMenuOpen && menuActions.length > 0 ? (
+          <OverflowMenu actions={menuActions} menuRef={menuRef} menuTarget={menuTarget} />
+        ) : null}
 
-          {undoState ? (
-            <div className="undo-bar">
-              <span className="undo-bar-label">Items exported</span>
-              <button
-                className="undo-bar-action"
-                onClick={() => {
-                  void window.ledge.addPayloads([{ kind: 'fileDrop', paths: undoState.paths }]);
-                  setUndoState(null);
-                  if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
-                }}
-                type="button"
-              >
-                Undo
-              </button>
+        <section
+          className={`drop-surface compact ${itemCount === 0 ? 'is-empty' : ''}${isAcceptingDrop ? ' is-accepting' : ''}`}
+        >
+          {itemCount === 0 ? (
+            <div className="empty-state compact">
+              <p className="surface-title compact">Drop files here</p>
             </div>
+          ) : primaryItem ? (
+            <HeroItemMemo
+              items={items}
+              item={primaryItem}
+              heroMode={heroMode}
+              isImporting={isImporting}
+              isExporting={isExporting}
+              dragLocked={isMenuOpen || isItemListOpen}
+              onExportStart={handleExportStart}
+              onExportEnd={handleExportEnd}
+              onOpenItemSheet={openItemSheet}
+            />
+          ) : (
+            <div className="empty-state compact">
+              <p className="surface-title compact">Drop files here</p>
+            </div>
+          )}
+
+          {liveShelf && isItemListOpen ? (
+            <ItemSheet items={items} sheetRef={itemSheetRef} onMove={moveItem} onClose={closeTransientSurface} />
           ) : null}
-        </>
-      )}
+        </section>
+
+        {banner ? (
+          <section className="permission-banner compact">
+            <div>
+              <p className="banner-title">{banner.title}</p>
+              <p className="banner-copy">{banner.copy}</p>
+            </div>
+            <button className="ghost-button small" onClick={() => void window.ledge.openPermissionSettings()}>
+              Open Settings
+            </button>
+          </section>
+        ) : null}
+      </section>
     </main>
   );
 }
@@ -595,72 +591,104 @@ HeroItemMemo.displayName = 'HeroItemMemo';
 interface ItemSheetProps {
   items: ShelfItemRecord[];
   sheetRef: RefObject<HTMLDivElement | null>;
-  doubleClickAction: 'open' | 'reveal';
+  onMove(itemId: string, direction: -1 | 1): Promise<void>;
   onClose(): void;
 }
 
-function ItemSheet({ items, sheetRef, doubleClickAction, onClose }: ItemSheetProps) {
-  function handleCellDoubleClick(itemId: string) {
-    if (doubleClickAction === 'reveal') {
-      void window.ledge.revealItem(itemId);
-    } else {
-      void window.ledge.openItem(itemId);
-    }
-  }
-
+function ItemSheet({ items, sheetRef, onMove, onClose }: ItemSheetProps) {
   return (
     <section ref={sheetRef} className="item-sheet" aria-label="Shelf items">
       <header className="item-sheet-header">
-        <button className="ghost-button icon-button" onClick={onClose} aria-label="Back">
-          <IconChevronLeft />
+        <div>
+          <p className="item-sheet-title">Items</p>
+          <p className="item-sheet-copy">Reorder or remove without leaving the compact view.</p>
+        </div>
+        <button className="ghost-button small" onClick={onClose}>
+          Done
         </button>
-        <div className="item-sheet-header-center">
-          <p className="item-sheet-title">{items.length} Files</p>
-          <p className="item-sheet-copy">{items.length > 0 ? 'Items in shelf' : ''}</p>
-        </div>
-        <div className="item-sheet-actions" aria-hidden="true">
-          <span className="ghost-button icon-button active" aria-label="Grid view (only mode)">
-            <IconGrid />
-          </span>
-        </div>
       </header>
-      <div className="item-sheet-grid">
-        {items.map((item) => (
-          <div
-            className="item-grid-cell"
+      <div className="item-sheet-list">
+        {items.map((item, index) => (
+          <ItemSheetRow
             key={item.id}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              window.ledge.showItemContextMenu(item.id);
-            }}
-            onDoubleClick={() => handleCellDoubleClick(item.id)}
-          >
-            <div className="item-grid-preview">
-              {getHeroPreviewSource(item) ? (
-                <img src={getHeroPreviewSource(item) || undefined} alt={item.title} width={88} height={88} />
-              ) : (
-                <HeroGlyphMemo kind={item.kind} />
-              )}
-            </div>
-            <p className="item-grid-title">{item.title}</p>
-            <p className="item-grid-subtitle">{item.preview.summary || item.subtitle || 'File'}</p>
-            {item.createdByUser?.email && (
-              <p className="item-grid-creator" title={`Added by ${item.createdByUser.email}`}>
-                by {item.createdByUser.email.split('@')[0]}
-              </p>
-            )}
-          </div>
+            item={item}
+            isFirst={index === 0}
+            isLast={index === items.length - 1}
+            onMove={onMove}
+          />
         ))}
-        {items.length > 0 && (
-          <button className="item-grid-cell action-cell" onClick={() => window.ledge.revealItem(items[0]?.id)} type="button">
-            <div className="item-grid-preview action-preview">
-              <IconFolder />
-            </div>
-            <p className="item-grid-title">Reveal in Finder</p>
-          </button>
-        )}
       </div>
     </section>
+  );
+}
+
+interface ItemSheetRowProps {
+  item: ShelfItemRecord;
+  isFirst: boolean;
+  isLast: boolean;
+  onMove(itemId: string, direction: -1 | 1): Promise<void>;
+}
+
+function ItemSheetRow({ item, isFirst, isLast, onMove }: ItemSheetRowProps) {
+  const fileBacked = isActionableFileItem(item);
+  const missing = fileBacked && 'file' in item && item.file.isMissing;
+  const previewCopy = missing ? 'Missing from disk' : item.subtitle || item.preview.summary;
+
+  return (
+    <article className={`item-sheet-row${missing ? ' is-missing' : ''}`}>
+      <div className="item-sheet-copy-block">
+        <div className="item-sheet-kind">{item.kind}</div>
+        <div className="item-sheet-text">
+          <p className="item-sheet-row-title">{item.title}</p>
+          <p className="item-sheet-row-copy">{previewCopy}</p>
+        </div>
+      </div>
+      <div className="item-sheet-controls">
+        <button
+          className="ghost-button small"
+          disabled={isFirst}
+          onClick={() => void onMove(item.id, -1)}
+          aria-label="Move up"
+        >
+          ↑
+        </button>
+        <button
+          className="ghost-button small"
+          disabled={isLast}
+          onClick={() => void onMove(item.id, 1)}
+          aria-label="Move down"
+        >
+          ↓
+        </button>
+      </div>
+    </article>
+  );
+}
+
+interface OverflowMenuProps {
+  actions: OverflowAction[];
+  menuRef: RefObject<HTMLDivElement | null>;
+  menuTarget: MenuTarget;
+}
+
+function OverflowMenu({ actions, menuRef, menuTarget }: OverflowMenuProps) {
+  return (
+    <div ref={menuRef} className="overflow-menu" role="menu" aria-label="Shelf actions">
+      {menuTarget === 'frontItem' && (
+        <p className="overflow-menu-heading">Front item</p>
+      )}
+      {actions.map((action) => (
+        <button
+          key={action.id}
+          className={`overflow-menu-item${action.destructive ? ' is-destructive' : ''}`}
+          disabled={action.disabled}
+          role="menuitem"
+          onClick={() => void action.onSelect()}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -671,11 +699,8 @@ interface HeroItemProps {
   isImporting: boolean;
   isExporting: boolean;
   dragLocked: boolean;
-  autoCloseShelf: boolean;
-  doubleClickAction: 'open' | 'reveal';
   onExportStart(): void;
   onExportEnd(): void;
-  onExportItems(): boolean;
   onOpenItemSheet(): void;
 }
 
@@ -686,11 +711,8 @@ function HeroItem({
   isImporting,
   isExporting,
   dragLocked,
-  autoCloseShelf,
-  doubleClickAction,
   onExportStart,
   onExportEnd,
-  onExportItems,
   onOpenItemSheet,
 }: HeroItemProps) {
   const previewSrc = getHeroPreviewSource(item);
@@ -712,8 +734,17 @@ function HeroItem({
       return;
     }
 
+    // Cancel the renderer's HTML5 drag and start the native macOS file
+    // drag from the main process instead (webContents.startDrag). The
+    // sendSync round-trip blocks until the native drag session starts,
+    // so a true return value means the export is really underway.
     event.preventDefault();
-    if (onExportItems()) {
+    const didStartDrag =
+      exportableItems.length === 1
+        ? window.ledge.startItemDrag(exportableItems[0]!.id)
+        : window.ledge.startItemsDrag(exportableItems.map((i) => i.id));
+
+    if (didStartDrag) {
       onExportStart();
     } else {
       onExportEnd();
@@ -724,11 +755,7 @@ function HeroItem({
     if (isExporting) {
       return;
     }
-    if (doubleClickAction === 'reveal') {
-      void window.ledge.revealItem(item.id);
-    } else {
-      void window.ledge.openItem(item.id);
-    }
+    void window.ledge.openItem(item.id);
   }
 
   return (
@@ -736,13 +763,7 @@ function HeroItem({
       className={`hero-item is-${heroMode}${canDragOut ? ' is-draggable' : ''}${isExporting ? ' is-exporting' : ''}`}
       draggable={canDragOut}
       onDragStart={handleHeroDragStart}
-      onDragEnd={() => {
-        const wasExporting = isExporting;
-        onExportEnd();
-        if (autoCloseShelf && wasExporting) {
-          void window.ledge.closeShelf();
-        }
-      }}
+      onDragEnd={onExportEnd}
       onDoubleClick={handleHeroDoubleClick}
       onContextMenu={(e) => {
         e.preventDefault();

@@ -22,15 +22,26 @@ function CategoryListImpl({
 }: CategoryListProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
 
   const submitRename = useCallback(
     (id: string) => {
       const trimmed = editingName.trim()
-      if (trimmed) onRename(id, trimmed)
+      if (!trimmed) {
+        setEditingId(null)
+        setEditingName('')
+        return
+      }
+      const dup = categories.some((c) => c.id !== id && c.name.trim().toLowerCase() === trimmed.toLowerCase())
+      if (dup) {
+        window.ledge?.showToast(`Category "${trimmed}" already exists`, 'error')
+        return
+      }
+      onRename(id, trimmed)
       setEditingId(null)
       setEditingName('')
     },
-    [editingName, onRename],
+    [categories, editingName, onRename],
   )
 
   return (
@@ -46,7 +57,7 @@ function CategoryListImpl({
         </button>
       </li>
       {categories.map((category) => (
-        <li key={category.id}>
+        <li key={category.id} className="clipboard-category-row">
           {editingId === category.id ? (
             <input
               className="clipboard-category-input"
@@ -62,29 +73,66 @@ function CategoryListImpl({
               }}
               autoFocus
             />
-          ) : (
-            <button
-              type="button"
-              className={`clipboard-category${selected === category.id ? ' is-active' : ''}`}
-              onClick={() => onSelect(category.id)}
-              onDoubleClick={() => {
-                setEditingId(category.id)
-                setEditingName(category.name)
-              }}
-              onContextMenu={(event) => {
-                event.preventDefault()
-                if (window.confirm('Are you sure you want to delete this category?')) {
+          ) : confirmingDeleteId === category.id ? (
+            <div className="clipboard-category-confirm">
+              <span className="clipboard-category-confirm-label">Delete?</span>
+              <button type="button" className="ghost-button small" onClick={() => setConfirmingDeleteId(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ghost-button small is-danger"
+                onClick={() => {
                   onRemove(category.id)
-                }
-              }}
-              title="Double-click to rename · Right-click to delete"
-            >
-              <span
-                className="clipboard-category-swatch"
-                style={{ background: colorCssVar(category.color) }}
-              />
-              {category.name}
-            </button>
+                  setConfirmingDeleteId(null)
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          ) : (
+            <div className="clipboard-category-item">
+              <button
+                type="button"
+                className={`clipboard-category${selected === category.id ? ' is-active' : ''}`}
+                onClick={() => onSelect(category.id)}
+                onDoubleClick={() => {
+                  setEditingId(category.id)
+                  setEditingName(category.name)
+                }}
+                title="Click to filter · Double-click to rename"
+                style={{ flex: 1 }}
+              >
+                <span
+                  className="clipboard-category-swatch"
+                  style={{ background: colorCssVar(category.color) }}
+                />
+                <span className="clipboard-category-name">{category.name}</span>
+              </button>
+              <div className="clipboard-category-actions">
+                <button
+                  type="button"
+                  className="clipboard-category-action"
+                  aria-label={`Rename ${category.name}`}
+                  title="Rename"
+                  onClick={() => {
+                    setEditingId(category.id)
+                    setEditingName(category.name)
+                  }}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  className="clipboard-category-action is-danger"
+                  aria-label={`Delete ${category.name}`}
+                  title="Delete category"
+                  onClick={() => setConfirmingDeleteId(category.id)}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
           )}
         </li>
       ))}

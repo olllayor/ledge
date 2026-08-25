@@ -25,6 +25,7 @@ function makeState(): AppState {
     clipboardCategories: [],
     clipboardSettings: {} as AppState['clipboardSettings'],
     team: { activeTeamId: null },
+    shelfPinned: false,
   } as AppState;
 }
 

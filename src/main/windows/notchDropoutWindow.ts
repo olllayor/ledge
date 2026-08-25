@@ -13,6 +13,7 @@ const PEEK_FALLBACK_MENUBAR_HEIGHT = 32;
 export class NotchDropoutWindow {
   private window: BrowserWindow | null = null;
   private _suppressHide = false;
+  private suppressHideSince = 0;
 
   get suppressHide(): boolean {
     return this._suppressHide;
@@ -20,6 +21,38 @@ export class NotchDropoutWindow {
 
   set suppressHide(value: boolean) {
     this._suppressHide = value;
+    if (value) {
+      this.suppressHideSince = Date.now();
+    }
+  }
+
+  /**
+   * Hold hide-suppression for a native drag session and release it
+   * safely afterwards.
+   *
+   * `webContents.startDrag()` returns as soon as the drag session
+   * STARTS, so the renderer cannot know when the drop happened — its
+   * "drag finished" IPC fired mid-drag and the hover monitor could hide
+   * the panel out from under the drag. Main owns the lifecycle instead:
+   * hold for at least `minHoldMs`, then let the cursor position decide
+   * whether the panel should go away.
+   */
+  beginDragSuppression(minHoldMs = 1500): void {
+    this.suppressHide = true;
+    const since = this.suppressHideSince;
+    const release = () => {
+      if (!this._suppressHide || this.suppressHideSince !== since) {
+        // Released elsewhere or a newer suppression started — nothing to do.
+        return;
+      }
+      if (Date.now() - since < minHoldMs) {
+        setTimeout(release, 200);
+        return;
+      }
+      this._suppressHide = false;
+      this.hideUnlessCursorInside();
+    };
+    setTimeout(release, minHoldMs);
   }
 
   async ensure(): Promise<BrowserWindow> {

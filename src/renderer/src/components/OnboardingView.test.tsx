@@ -46,12 +46,14 @@ function buildState(): AppState {
       enabled: false,
       historyLimit: 200,
       ignoreConcealedItems: true,
+      skipSensitiveText: true,
       ignoreBundleIds: [],
       quickPasteHotkey: 'CommandOrControl+Shift+V',
       peekHotkey: '',
       syntheticPasteEnabled: false
     },
-    team: { activeTeamId: null }
+    team: { activeTeamId: null },
+    shelfPinned: false
   };
 }
 

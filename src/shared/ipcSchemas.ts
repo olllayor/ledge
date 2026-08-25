@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ingestPayloadSchema } from './schema';
+import { clipboardEntrySchema, ingestPayloadSchema } from './schema';
 
 // Re-export a curated subset of the per-channel Zod schemas. The full
 // payload shapes for IPC channels live here (instead of inline in
@@ -75,6 +75,24 @@ export const clipboardSettingsUpdateSchema = z
     syntheticPasteEnabled: z.boolean().optional(),
   })
   .strict();
+
+// Bulk restore of clipboard entries (undo-after-clear, imports). Bounded
+// so a malicious or buggy caller cannot persist thousands of multi-MB
+// thumbnails into state.json and broadcast them to every window.
+// `id` is length-capped rather than uuid-strict: legacy entries captured
+// before ids were generated with randomUUID() must still restore.
+export const clipboardHistoryRestoreInputSchema = z
+  .array(
+    clipboardEntrySchema.extend({
+      id: z.string().min(1).max(128),
+      capturedAt: z.string().refine((value) => Number.isFinite(Date.parse(value)), {
+        message: 'capturedAt must be a parseable timestamp',
+      }),
+      thumbnailDataUri: z.string().max(512 * 1024).optional(),
+      imageSha256: z.string().max(128).optional(),
+    }),
+  )
+  .max(2000);
 
 export const clipboardQuickPastePasteInputSchema = z.object({
   entryId: z.string().min(1),

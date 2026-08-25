@@ -5,6 +5,7 @@ import { internalMutation } from "./_generated/server";
 const BATCH_SIZE = 100;
 
 export const cleanupExpiredSessions = internalMutation({
+  args: {},
   handler: async (ctx) => {
     const now = Date.now();
     // Walk the `by_expiresAt` and `by_revokedAt` indexes to find
@@ -48,6 +49,7 @@ export const cleanupExpiredSessions = internalMutation({
 });
 
 export const cleanupExpiredOtps = internalMutation({
+  args: {},
   handler: async (ctx) => {
     const now = Date.now();
     // Same fix as `cleanupExpiredSessions`: walk the `by_expiresAt`
@@ -84,6 +86,7 @@ export const cleanupExpiredOtps = internalMutation({
 });
 
 export const cleanupOldWebhookEvents = internalMutation({
+  args: {},
   handler: async (ctx) => {
     // Keep 30 days of dedup history. A replayed event older than that
     // is a non-issue: even if we re-apply the entitlement, the worst
@@ -108,6 +111,7 @@ export const cleanupOldWebhookEvents = internalMutation({
 });
 
 export const cleanupOldUploadEvents = internalMutation({
+  args: {},
   handler: async (ctx) => {
     // Image upload events are only meaningful for the rolling 1-hour
     // in-flight cap. Anything older than 24h can be safely discarded.
@@ -132,9 +136,18 @@ export const cleanupOldUploadEvents = internalMutation({
 // blob in `_storage` with no imageAssets row pointing at it — deleted
 // rows never, leaking bytes forever. Blobs younger than the grace
 // period may still be mid-upload and are skipped.
+//
+// NOTE: iteration is oldest-first (ascending _creationTime), so old
+// orphans are always reached regardless of upload volume.
+//
+// TODO(phase-2): this only understands claims via legacy `imageAssets`.
+// Once `shelfItems.storageId` / `cloudStorageId` are populated they need
+// a `by_storageId` index and a claim check here, or this cron will
+// delete LIVE team-item blobs after the grace period.
 const ORPHAN_BLOB_GRACE_MS = 24 * 60 * 60 * 1000;
 
 export const cleanupOrphanedStorageBlobs = internalMutation({
+  args: {},
   handler: async (ctx) => {
     const cutoff = Date.now() - ORPHAN_BLOB_GRACE_MS;
     let orphaned = 0;

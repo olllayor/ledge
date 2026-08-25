@@ -276,6 +276,61 @@ test("upsertShelf: free user is capped at FREE_SYNC_SHELF_LIMIT", async () => {
   ).rejects.toThrow("Cloud shelf limit reached");
 });
 
+test("upsertShelf: dual-writes items with numeric orders as string ranks", async () => {
+  const t = convexTest(schema, modules);
+  const { sessionToken } = await setupUser(t, "dual-write@example.com", "pro");
+
+  await t.mutation(api.sync.upsertShelf, {
+    sessionToken,
+    shelfId: "shelf-with-items",
+    name: "With items",
+    color: "ember",
+    origin: "manual",
+    items: [
+      {
+        id: "item-1",
+        createdAt: new Date().toISOString(),
+        order: 0,
+        title: "Notes",
+        subtitle: "",
+        preview: { summary: "", detail: "" },
+        kind: "text",
+        text: "hello",
+      },
+      {
+        id: "item-2",
+        createdAt: new Date().toISOString(),
+        order: 1,
+        title: "Report.pdf",
+        subtitle: "",
+        preview: { summary: "", detail: "" },
+        kind: "file",
+        file: {
+          originalPath: "/tmp/Report.pdf",
+          resolvedPath: "/tmp/Report.pdf",
+          isStale: false,
+          isMissing: false,
+        },
+        mimeType: "application/pdf",
+      },
+    ],
+    localCreatedAt: new Date().toISOString(),
+    localUpdatedAt: new Date().toISOString(),
+    imageStorageBytes: 0,
+  });
+
+  const stored = await t.run(async (ctx) =>
+    ctx.db
+      .query("shelfItems")
+      .withIndex("by_team_shelf", (q) => q.eq("teamId", "").eq("shelfId", "shelf-with-items"))
+      .collect(),
+  );
+  expect(stored).toHaveLength(2);
+  for (const row of stored) {
+    expect(typeof row.order).toBe("string");
+  }
+});
+
 test("deleteShelf: tombstones the row, frees the active-shelf cap", async () => {
   const t = convexTest(schema, modules);
   const { sessionToken } = await setupUser(t, "delete-shelf@example.com", "free");

@@ -12,6 +12,7 @@ import type {
   SyncState,
 } from '@shared/schema'
 import type { PersistedState } from './types'
+import { sanitizeRawShelfForLimits, sanitizeRawClipboardHistoryForLimits } from '@shared/shelfLimits'
 
 const persistedStateSchema = appStateSchema.omit({ permissionStatus: true })
 
@@ -223,6 +224,45 @@ function migratePersistedState(parsed: unknown, defaultState: PersistedState): L
   const shapes = persistedStateSchema.shape
   let salvaged = false
 
+  // Ceiling sanitizer runs BEFORE slice validation: an overflowing or
+  // oversized store would otherwise fail the whole shelf slice and
+  // reset it (data loss). Trimming here keeps the load bounded and the
+  // trimmed snapshot gets re-persisted via `didMigrate`.
+  const sanitizeSlice = (key: 'liveShelf' | 'recentShelves' | 'teamLiveShelves'): void => {
+    const value = raw[key]
+    if (Array.isArray(value)) {
+      let touched = false
+      raw[key] = value.map((shelf) => {
+        if (!shelf || typeof shelf !== 'object') return shelf
+        const result = sanitizeRawShelfForLimits(shelf as { items?: unknown })
+        touched = touched || result.changed
+        return result.value
+      })
+      if (touched) salvaged = true
+      return
+    }
+    if (value && typeof value === 'object') {
+      const result = sanitizeRawShelfForLimits(value as { items?: unknown })
+      if (result.changed) {
+        raw[key] = result.value
+        salvaged = true
+      }
+    }
+  }
+  sanitizeSlice('liveShelf')
+  sanitizeSlice('recentShelves')
+  sanitizeSlice('teamLiveShelves')
+
+  // Clipboard slice: enforce the total-text byte budget on raw JSON so
+  // a bloated history is trimmed at load instead of persisting forever.
+  if (Array.isArray(raw.clipboardHistory)) {
+    const clipResult = sanitizeRawClipboardHistoryForLimits(raw.clipboardHistory as unknown[])
+    if (clipResult.changed) {
+      raw.clipboardHistory = clipResult.value
+      salvaged = true
+    }
+  }
+
   const slice = <T>(schema: z.ZodType<T>, key: keyof typeof shapes & string): T | null => {
     const result = schema.safeParse(raw[key])
     if (result.success) {
@@ -288,6 +328,7 @@ export function defaultClipboardSettingsRecord(): ClipboardSettings {
     enabled: false,
     historyLimit: 200,
     ignoreConcealedItems: true,
+    skipSensitiveText: true,
     ignoreBundleIds: [],
     quickPasteHotkey: 'CommandOrControl+Shift+V',
     peekHotkey: '',

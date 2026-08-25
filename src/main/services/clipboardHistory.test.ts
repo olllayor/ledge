@@ -190,4 +190,37 @@ describe('ClipboardHistoryService.capture', () => {
     await service.capture(snapshot(pasteboard.formats))
     expect(stateStore.getClipboardEntries()).toHaveLength(0)
   })
+
+  it('serializes concurrent captures of the same image into one entry', async () => {
+    const pasteboard = new FakePasteboardReader()
+    pasteboard.formats = ['public.png']
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+    pasteboard.image = { isEmpty: () => false, toPNG: () => png }
+
+    const { service, stateStore } = await buildService({ pasteboard })
+    // Two change events for the same bytes fired back-to-back. Serialized,
+    // the second observes the first's hash via the dedupe probe and merely
+    // bumps recency instead of writing a second uuid-named asset file.
+    await Promise.all([
+      service.capture(snapshot(pasteboard.formats)),
+      service.capture(snapshot(pasteboard.formats)),
+    ])
+
+    const entries = stateStore.getClipboardEntries()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.item.kind).toBe('imageAsset')
+  })
+
+  it('drops an in-flight capture when history is cleared mid-capture', async () => {
+    const pasteboard = new FakePasteboardReader()
+    pasteboard.formats = ['public.utf8-plain-text']
+    pasteboard.text = 'ghost'
+
+    const { service, stateStore } = await buildService({ pasteboard })
+    const pending = service.capture(snapshot(pasteboard.formats))
+    service.invalidatePendingCaptures()
+    await pending
+
+    expect(stateStore.getClipboardEntries()).toHaveLength(0)
+  })
 })

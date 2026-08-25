@@ -50,6 +50,7 @@ function TeamSettingsConfigured({
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [confirmingRemovalId, setConfirmingRemovalId] = useState<string | null>(null);
 
   const sessionToken = sync.sessionToken;
 
@@ -75,8 +76,21 @@ function TeamSettingsConfigured({
     }
   }, [teams.myTeams, showDeleteConfirm]);
 
+  useEffect(() => {
+    if (
+      confirmingRemovalId &&
+      teamDetail &&
+      !teamDetail.members.some((m: Doc<'teamMembers'>) => m.userId === confirmingRemovalId)
+    ) {
+      setConfirmingRemovalId(null);
+    }
+  }, [teamDetail, confirmingRemovalId]);
+
   async function handleCreate() {
-    if (!newTeamName.trim()) return;
+    // Same gate as the Create button's `disabled` — the Enter key path
+    // bypasses the attribute, so without this a still-loading (or
+    // erroring) teams query would fire a doomed mutation.
+    if (!newTeamName.trim() || teams.teamsLoading) return;
     try {
       const teamId = await teams.createTeam(newTeamName.trim());
       setNewTeamName('');
@@ -112,8 +126,10 @@ function TeamSettingsConfigured({
   async function handleRemoveMember(teamId: string, userId: string) {
     try {
       await teams.removeMember(teamId, userId);
+      setConfirmingRemovalId(null);
       showToast('Member removed');
     } catch (err) {
+      setConfirmingRemovalId(null);
       showToast(err instanceof Error ? err.message : 'Failed to remove member', 'error');
     }
   }
@@ -255,12 +271,23 @@ function TeamSettingsConfigured({
                   )}
                   {isAdmin && m.userId !== teamDetail.team.createdBy && (
                     <button
-                      className="settings-link-btn"
+                      className="settings-link-btn is-danger"
                       type="button"
-                      onClick={() => { if (window.confirm('Remove this member?')) void handleRemoveMember(selectedTeam._id, m.userId); }}
-                      style={{ color: 'var(--danger)', fontSize: '0.7rem' }}
+                      aria-label={
+                        confirmingRemovalId === m.userId
+                          ? `Confirm removing ${m.email ?? m.userId}`
+                          : `Remove ${m.email ?? m.userId}`
+                      }
+                      onClick={() => {
+                        if (confirmingRemovalId === m.userId) {
+                          void handleRemoveMember(selectedTeam._id, m.userId);
+                        } else {
+                          setConfirmingRemovalId(m.userId);
+                        }
+                      }}
+                      onBlur={() => setConfirmingRemovalId((id) => (id === m.userId ? null : id))}
                     >
-                      Remove
+                      {confirmingRemovalId === m.userId ? 'Confirm' : 'Remove'}
                     </button>
                   )}
                 </div>
@@ -325,7 +352,6 @@ function TeamSettingsConfigured({
                             showToast(err instanceof Error ? err.message : 'Failed to revoke', 'error');
                           }
                         }}
-                        style={{ fontSize: '0.7rem' }}
                       >
                         Revoke
                       </button>
@@ -349,6 +375,7 @@ function TeamSettingsConfigured({
                         className="settings-cta is-danger"
                         type="button"
                         onClick={() => void handleDeleteTeam(selectedTeam._id)}
+                        onBlur={() => setShowDeleteConfirm(null)}
                       >
                         Confirm delete
                       </button>
@@ -357,6 +384,7 @@ function TeamSettingsConfigured({
                         className="settings-cta is-danger"
                         type="button"
                         onClick={() => setShowDeleteConfirm(selectedTeam._id)}
+                        onBlur={() => setShowDeleteConfirm(null)}
                       >
                         Delete
                       </button>

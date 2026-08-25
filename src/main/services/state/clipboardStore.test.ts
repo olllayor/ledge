@@ -344,3 +344,53 @@ describe('ClipboardStore.prune (regression: BUG-001)', () => {
     await persister.whenIdle()
   })
 })
+
+describe('ClipboardStore pinning', () => {
+  it('toggles pinnedAt and reports state', async () => {
+    const { clipboard } = await buildStore()
+    clipboard.appendEntry({
+      capturedAt: new Date().toISOString(),
+      sourceBundleId: 'app.a',
+      sourceAppName: 'A',
+      item: makeTextItem('a')
+    })
+    const id = clipboard.getEntries()[0]!.id
+
+    expect(clipboard.togglePin(id)).toBe(true)
+    expect(clipboard.getEntries()[0]?.pinnedAt).toBeTruthy()
+    expect(clipboard.togglePin(id)).toBe(false)
+    expect(clipboard.getEntries()[0]?.pinnedAt).toBeUndefined()
+  })
+
+  it('returns false when toggling a missing entry', async () => {
+    const { clipboard } = await buildStore()
+    expect(clipboard.togglePin('nope')).toBe(false)
+  })
+
+  it('keeps pinned entries past the age cutoff and count limit', async () => {
+    const { clipboard, state } = await buildStore()
+
+    // Pin while fresh (prune runs on every append), then backdate it
+    // past the 30-day cutoff and tighten limits.
+    clipboard.appendEntry({ capturedAt: new Date().toISOString(), sourceBundleId: '', sourceAppName: '', item: makeTextItem('old-pinned') })
+    clipboard.togglePin(clipboard.getEntries()[0]!.id)
+    state.clipboardHistory[0]!.capturedAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString()
+    clipboard.updateSettings({ historyLimit: 2 })
+
+    for (const id of ['n1', 'n2', 'n3']) {
+      clipboard.appendEntry({
+        capturedAt: new Date().toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem(id)
+      })
+    }
+
+    const entries = clipboard.getEntries()
+    // The pinned entry survives both the 30-day cutoff and the count cap;
+    // unpinned entries trim to the limit of 2.
+    expect(entries.find((e) => e.item.kind === 'text' && (e.item as { text: string }).text.includes('old-pinned'))).toBeTruthy()
+    const unpinned = entries.filter((e) => !e.pinnedAt)
+    expect(unpinned.length).toBe(2)
+  })
+})

@@ -1,6 +1,6 @@
 import { app, globalShortcut } from 'electron'
 import { normalizeExcludedBundleIds } from '@shared/preferences'
-import { permissionStatusSchema, type PreferencePatch, type PermissionStatus, type PreferencesRecord } from '@shared/schema'
+import { permissionStatusSchema, type PreferencePatch, type PermissionStatus } from '@shared/schema'
 import { normalizeGlobalShortcut, validateGlobalShortcut } from './systemUtils'
 import type { StateStore } from './stateStore'
 import type { NativeAgentClient } from '../native/nativeAgent'
@@ -36,6 +36,8 @@ export class PreferencesSyncService {
     shortcutRegistered: false,
     shortcutError: '',
   }
+  private lastRegisteredMain: string | null = null
+  private lastRegisteredSecondary = new Set<string>()
   private loginItemStatus: LoginItemSettingsSnapshot = { ...LOGIN_ITEM_DEV_DEFAULTS }
 
   constructor(
@@ -97,12 +99,9 @@ export class PreferencesSyncService {
       }
     }
     this.refreshLoginItemStatus()
-    globalShortcut.unregisterAll()
-    this.status = {
-      shortcutRegistered: false,
-      shortcutError: '',
-    }
-
+    // Granular re-register to avoid flicker: only touch shortcuts that
+    // actually changed. unregisterAll() left a window where QuickPaste
+    // was briefly dead if main failed.
     const normalizedShortcut = normalizeGlobalShortcut(preferences.globalShortcut)
     if (normalizedShortcut !== preferences.globalShortcut) {
       preferences = this.stateStore.setPreferences({
@@ -110,123 +109,125 @@ export class PreferencesSyncService {
       })
     }
 
-    this.registerMainShortcut(normalizedShortcut)
-    // Clipboard hotkeys are independent of the main shortcut: clearing or
-    // breaking the main shortcut must not silently drop quick-paste/peek.
-    this.registerClipboardShortcuts(preferences)
+    this.syncShortcutsGranular(normalizedShortcut)
   }
 
-  private registerMainShortcut(normalizedShortcut: string): void {
-    if (!normalizedShortcut) {
-      return
-    }
+  private syncShortcutsGranular(normalizedMain: string): void {
+    this.status = { shortcutRegistered: false, shortcutError: '' }
 
-    const shortcutError = validateGlobalShortcut(normalizedShortcut)
-    if (shortcutError) {
-      this.status = {
-        shortcutRegistered: false,
-        shortcutError,
-      }
-      return
-    }
-
-    try {
-      const registered = globalShortcut.register(normalizedShortcut, () => {
-        void this.onCreateShelfFromShortcut()
-      })
-
-      this.status = registered
-        ? {
-            shortcutRegistered: true,
-            shortcutError: '',
-          }
-        : {
-            shortcutRegistered: false,
-            shortcutError: 'Shortcut could not be registered. It may already be in use.',
-          }
-    } catch (error) {
-      this.status = {
-        shortcutRegistered: false,
-        shortcutError:
-          error instanceof Error ? error.message : 'Shortcut could not be registered.',
-      }
-    }
-  }
-
-  private registerClipboardShortcuts(preferences: PreferencesRecord): void {
-    const settings = this.stateStore.getClipboardSettings()
-    const mainShortcut = normalizeGlobalShortcut(preferences.globalShortcut)
-    const registeredShortcuts = new Set<string>()
-
-    this.tryRegisterSecondaryShortcut({
-      raw: settings.quickPasteHotkey,
-      mainShortcut,
-      alreadyRegistered: registeredShortcuts,
-      label: 'quick-paste',
-      onTrigger: () => {
-        const previousApp = this.clipboardMonitor.getLastFrontmostApp()
-        const previousBundleId = previousApp?.bundleId ?? ''
-        const previousAppName = previousApp?.name ?? ''
-        void this.quickPasteWindow.show(previousBundleId, previousAppName)
-      },
-    })
-
-    this.tryRegisterSecondaryShortcut({
-      raw: settings.peekHotkey,
-      mainShortcut,
-      alreadyRegistered: registeredShortcuts,
-      label: 'peek',
-      onTrigger: () => {
-        if (FEATURE_FLAGS.useNotchDropout && this.notchDropoutWindow) {
-          void this.notchDropoutWindow.toggle()
-        } else {
-          void this.peekWindow.show()
+    // Main shortcut. Order matters: validate and register the NEW
+    // accelerator BEFORE releasing the old one, so a failed registration
+    // never leaves the user with no hotkey at all.
+    if (normalizedMain) {
+      const err = validateGlobalShortcut(normalizedMain)
+      if (err) {
+        // Invalid input: keep whatever is still registered and say why.
+        this.status = { shortcutRegistered: Boolean(this.lastRegisteredMain), shortcutError: err }
+      } else if (this.lastRegisteredMain === normalizedMain) {
+        const already = globalShortcut.isRegistered?.(normalizedMain) ?? false
+        if (!already && this.lastRegisteredMain) {
+          try { globalShortcut.register(normalizedMain, () => void this.onCreateShelfFromShortcut()) } catch {}
         }
-      },
-    })
+        this.status = { shortcutRegistered: true, shortcutError: '' }
+      } else {
+        try {
+          const ok = globalShortcut.register(normalizedMain, () => void this.onCreateShelfFromShortcut())
+          if (ok) {
+            // New binding is live — only now release the previous one.
+            if (this.lastRegisteredMain) {
+              try { globalShortcut.unregister(this.lastRegisteredMain) } catch {}
+            }
+            this.lastRegisteredMain = normalizedMain
+            this.status = { shortcutRegistered: true, shortcutError: '' }
+          } else {
+            this.status = {
+              shortcutRegistered: Boolean(this.lastRegisteredMain),
+              shortcutError: 'Shortcut could not be registered. It may already be in use.',
+            }
+          }
+        } catch (error) {
+          this.status = {
+            shortcutRegistered: Boolean(this.lastRegisteredMain),
+            shortcutError: error instanceof Error ? error.message : 'Shortcut could not be registered.',
+          }
+        }
+      }
+    } else if (this.lastRegisteredMain) {
+      // Shortcut intentionally cleared in preferences.
+      try { globalShortcut.unregister(this.lastRegisteredMain) } catch {}
+      this.lastRegisteredMain = null
+      this.status = { shortcutRegistered: false, shortcutError: '' }
+    }
+
+    // Secondary shortcuts: diff against lastRegisteredSecondary to avoid flicker.
+    const settings = this.stateStore.getClipboardSettings()
+    const desired = new Map<string, { label: string; onTrigger: () => void }>()
+    const addDesired = (raw: string, label: string, onTrigger: () => void) => {
+      const norm = normalizeGlobalShortcut(raw)
+      if (!norm) return
+      if (norm === normalizedMain) {
+        // Surface conflict instead of silently skipping.
+        this.status = {
+          ...this.status,
+          shortcutError: `${label} hotkey conflicts with main shortcut and was skipped.`,
+        }
+        console.warn(`[ledge] ${label} hotkey equals main, skipped`)
+        return
+      }
+      if (desired.has(norm)) return
+      const vErr = validateGlobalShortcut(norm)
+      if (vErr) {
+        this.status = { ...this.status, shortcutRegistered: false, shortcutError: vErr }
+        console.error(`[ledge] ${label} hotkey registration failed:`, vErr)
+        return
+      }
+      desired.set(norm, { label, onTrigger })
+    }
+
+    // Only register clipboard hotkeys when history is enabled — otherwise
+    // Quick Paste / Peek are dead UI that still steal the shortcut.
+    if (settings.enabled) {
+      addDesired(settings.quickPasteHotkey, 'quick-paste', () => {
+        const previousApp = this.clipboardMonitor.getLastFrontmostApp()
+        void this.quickPasteWindow.show(previousApp?.bundleId ?? '', previousApp?.name ?? '')
+      })
+      addDesired(settings.peekHotkey, 'peek', () => {
+        if (FEATURE_FLAGS.useNotchDropout && this.notchDropoutWindow) void this.notchDropoutWindow.toggle()
+        else void this.peekWindow.show()
+      })
+    }
+
+    // Unregister stale secondary
+    for (const old of [...this.lastRegisteredSecondary]) {
+      if (!desired.has(old)) {
+        try { globalShortcut.unregister(old) } catch {}
+        this.lastRegisteredSecondary.delete(old)
+      }
+    }
+    // Register new. Electron signals failure by returning false rather
+    // than throwing — ignoring the boolean left a dead hotkey recorded
+    // as registered until restart.
+    for (const [norm, { label, onTrigger }] of desired) {
+      if (this.lastRegisteredSecondary.has(norm)) continue
+      try {
+        const ok = globalShortcut.register(norm, onTrigger)
+        if (ok) {
+          this.lastRegisteredSecondary.add(norm)
+        } else {
+          this.status = {
+            ...this.status,
+            shortcutError: `${label} hotkey could not be registered. It may already be in use.`,
+          }
+          console.error(`[ledge] ${label} hotkey registration failed (register returned false)`)
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Shortcut could not be registered.'
+        this.status = { ...this.status, shortcutRegistered: false, shortcutError: msg }
+        console.error(`[ledge] ${label} hotkey registration failed:`, error)
+      }
+    }
   }
 
-  private tryRegisterSecondaryShortcut(params: {
-    raw: string
-    mainShortcut: string
-    alreadyRegistered: Set<string>
-    label: string
-    onTrigger: () => void
-  }): void {
-    const { raw, mainShortcut, alreadyRegistered, label, onTrigger } = params
-    const normalized = normalizeGlobalShortcut(raw)
-    if (!normalized) {
-      return
-    }
-
-    if (normalized === mainShortcut || alreadyRegistered.has(normalized)) {
-      return
-    }
-
-    const validationError = validateGlobalShortcut(normalized)
-    if (validationError) {
-      this.status = {
-        ...this.status,
-        shortcutRegistered: false,
-        shortcutError: validationError,
-      }
-      console.error(`[ledge] ${label} hotkey registration failed:`, validationError)
-      return
-    }
-
-    try {
-      globalShortcut.register(normalized, onTrigger)
-      alreadyRegistered.add(normalized)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Shortcut could not be registered.'
-      this.status = {
-        ...this.status,
-        shortcutRegistered: false,
-        shortcutError: message,
-      }
-      console.error(`[ledge] ${label} hotkey registration failed:`, error)
-    }
-  }
 }
 
 /**

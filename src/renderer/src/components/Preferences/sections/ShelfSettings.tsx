@@ -70,9 +70,7 @@ export function ShelfSettings({ state, showToast }: { state: AppState; showToast
               >
                 Get more
               </button>
-            ) : (
-              <span />
-            )
+            ) : undefined
           }
         />
       </SettingsGroup>

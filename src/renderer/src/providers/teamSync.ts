@@ -333,10 +333,14 @@ function toUpsert(
     case 'file':
     case 'folder':
     case 'imageAsset':
-      // The macOS bookmark is a local-only secret — never leaves the device.
+      // Local filesystem paths never leave the device: they would leak
+      // the user's username/directory structure to the server and to
+      // every teammate reading the row. The macOS bookmark is a local
+      // secret too. Receivers strip paths anyway (`remoteToLocalItems`),
+      // but don't store them server-side in the first place.
       upsert.file = {
-        originalPath: item.file.originalPath,
-        resolvedPath: item.file.resolvedPath,
+        originalPath: '',
+        resolvedPath: '',
         isStale: item.file.isStale,
         isMissing: item.file.isMissing,
       };

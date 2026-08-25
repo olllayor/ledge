@@ -2,6 +2,7 @@ import { clipboard, screen } from 'electron'
 import { isFileBackedItem } from '@shared/fileUtils'
 import { type IngestPayload, type ShelfItemRecord, type ShelfRecord } from '@shared/schema'
 import { ImportedImageTooLargeError, detectPayloadFromText, payloadToItems, refreshFileRef } from './payloads'
+import { ShelfCapacityError } from '@shared/shelfLimits'
 import { broadcastToast } from './toastBroadcaster'
 import type { StateStore } from './stateStore'
 import type { NativeAgentClient, ShakeDetectedEvent } from '../native/nativeAgent'
@@ -29,7 +30,22 @@ export interface AddPayloadsOptions {
  * (it positions and shows the shelf) but does not own any windows.
  */
 export class ShelfController {
+  private pinned = false
+
   constructor(private readonly deps: ShelfControllerDeps) {}
+
+  /** Runtime-only pin (never persisted): opts the shelf out of auto-retract. */
+  get isPinned(): boolean {
+    return this.pinned
+  }
+
+  togglePinned(): boolean {
+    this.pinned = !this.pinned
+    // Re-evaluate arming so un-pinning restarts the retract countdown
+    // and pinning clears it immediately.
+    this.deps.onInactivityTick()
+    return this.pinned
+  }
 
   async createShelf(
     reason: ShelfRecord['origin'],
@@ -139,7 +155,17 @@ export class ShelfController {
     }
 
     this.deps.stateStore.ensureLiveShelf(options.origin ?? 'manual')
-    this.deps.stateStore.appendItems(allItems)
+    try {
+      this.deps.stateStore.appendItems(allItems)
+    } catch (error) {
+      // Shelf-full is a user-facing limit, not an internal bug: surface
+      // it and keep the shelf (and its window flow) intact.
+      if (error instanceof ShelfCapacityError) {
+        broadcastToast(error.message, 'error')
+        return false
+      }
+      throw error
+    }
     if (this.deps.shelfWindow.isVisible()) {
       await this.deps.shelfWindow.show(options.inactive ?? false)
     } else {
