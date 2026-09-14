@@ -73,11 +73,30 @@ describe('remoteToLocalItems', () => {
     }
   })
 
-  it('passes through creator attribution', () => {
+  it('passes through creator attribution from createdByEmail or createdByUser', () => {
     const items = remoteToLocalItems([
       remoteDoc('a', 'a0', { createdByUser: { email: 'alex@team.dev' } }),
+      remoteDoc('b', 'a1', { createdByUser: undefined, createdByEmail: 'blake@team.dev' }),
     ])
     expect(items[0].createdByUser).toEqual({ email: 'alex@team.dev' })
+    expect(items[1].createdByUser).toEqual({ email: 'blake@team.dev' })
+  })
+
+  it('maps code items from the text payload field', () => {
+    const items = remoteToLocalItems([
+      remoteDoc('c', 'a0', { kind: 'code', text: undefined }),
+      remoteDoc('d', 'a1', { kind: 'code', text: 'console.log(1)', language: 'typescript' }),
+    ])
+    // remoteDoc default text is content-c; override to empty via undefined then set explicitly
+    expect(items[1]).toMatchObject({ kind: 'code', text: 'console.log(1)', language: 'typescript' })
+  })
+
+  it('does not throw when createdAt is missing', () => {
+    const doc = remoteDoc('a', 'a0') as Omit<RemoteTeamItemDoc, 'createdAt'> & { createdAt?: unknown }
+    delete doc.createdAt
+    const items = remoteToLocalItems([doc as RemoteTeamItemDoc])
+    expect(items).toHaveLength(1)
+    expect(items[0].createdAt).toBe(new Date(0).toISOString())
   })
 
   it('drops docs whose payload cannot produce a valid local item', () => {

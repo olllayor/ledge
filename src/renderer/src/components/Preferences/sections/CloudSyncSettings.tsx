@@ -6,6 +6,20 @@ import { ProBadge } from '../../ProUpgradePrompt';
 import { OtpInput } from '../../OtpInput';
 import { SettingsGroup, SettingsRow, StatusPill, type ShowToast } from '../primitives';
 
+const STATUS_LABELS: Record<string, string> = {
+  signedOut: 'Not signed in',
+  setupRequired: 'Setup required',
+  syncing: 'Syncing…',
+  synced: 'Synced',
+  offline: 'Offline',
+  quotaReached: 'Quota reached',
+  entitlementStale: 'Pro check stale',
+  error: 'Error',
+};
+
+function syncStatusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
 
 export function CloudSyncSettings({ state, showToast }: { state: AppState; showToast: ShowToast }) {
   const sync = useSync();
@@ -98,7 +112,18 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
         <SettingsGroup title="Account">
           <SettingsRow
             title="Status"
-            trailing={<StatusPill label={state.sync.status} variant={state.sync.status === 'synced' ? 'good' : state.sync.status === 'error' || state.sync.status === 'quotaReached' ? 'warn' : 'neutral'} />}
+            trailing={
+              <StatusPill
+                label={syncStatusLabel(state.sync.status)}
+                variant={
+                  state.sync.status === 'synced'
+                    ? 'good'
+                    : state.sync.status === 'error' || state.sync.status === 'quotaReached'
+                      ? 'warn'
+                      : 'neutral'
+                }
+              />
+            }
           />
           <SettingsRow title="Signed in as" copy={state.sync.signedInEmail} />
           <SettingsRow
@@ -160,7 +185,7 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
         <SettingsRow
           title="Status"
           copy="Sign in to keep your shelves in sync across devices."
-          trailing={<StatusPill label={state.sync.status} variant="neutral" />}
+          trailing={<StatusPill label={syncStatusLabel(state.sync.status)} variant="neutral" />}
         />
       </SettingsGroup>
 

@@ -306,7 +306,18 @@ authRoutes.post('/verify', async (c) => {
     return c.json({ error: 'Invalid or expired sign-in code.' }, 401);
   }
 
-  await run(c.env.DB, `UPDATE auth_otps SET consumed_at = ? WHERE id = ?`, [at, decision.otp.id]);
+  // Atomic single-use claim: two concurrent verifies of the same code can
+  // both pass evaluateOtpCandidate before either writes. Guard the consume
+  // with `consumed_at IS NULL` so only one UPDATE lands; the loser is
+  // treated as an invalid code.
+  const claimed = await insertIfUnderLimit(
+    c.env.DB,
+    `UPDATE auth_otps SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL`,
+    [at, decision.otp.id],
+  );
+  if (!claimed) {
+    return c.json({ error: 'Invalid or expired sign-in code.' }, 401);
+  }
 
   const user = await ensureUser(c.env.DB, email, at);
 

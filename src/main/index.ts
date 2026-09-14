@@ -98,6 +98,7 @@ let contextMenus: ShelfContextMenus
 let preferencesSync: PreferencesSyncService
 let ipcRegistrar: IpcRegistrar
 let isFlushingStateForQuit = false
+let hasFlushedStateForQuit = false
 
 const persistenceErrorToast = createThrottledToast(PERSISTENCE_ERROR_TOAST_THROTTLE_MS)
 
@@ -487,15 +488,24 @@ app.on('before-quit', (event) => {
   // Without this, a quick drop-then-quit (or any IPC reply that
   // triggered a save) can leave state.json half-written as a
   // `.tmp-PID` sibling; the next launch would then trip the
-  // corruption handler and lose the most recent change. The first
-  // time `before-quit` fires, we cancel the default quit, flush,
-  // and re-quit. Subsequent firings (the re-quit) pass through.
+  // corruption handler and lose the most recent change.
+  //
+  // Three cases:
+  //   1. Flush already finished — this is the re-quit; allow it.
+  //   2. Flush still in flight — swallow the extra quit (double Cmd+Q,
+  //      tray Quit + Cmd+Q) so we don't abandon the write.
+  //   3. First quit — cancel, flush, then re-quit.
+  //
   // Shut the helper down first: this clears the auto-restart timer so a
   // dying child can't respawn mid-quit, and reaps the process so it never
   // outlives the app.
   clipboardMonitor?.stop()
   nativeAgent?.stop()
+  if (hasFlushedStateForQuit) {
+    return
+  }
   if (isFlushingStateForQuit) {
+    event.preventDefault()
     return
   }
   if (!stateStore || stateStore.whenIdle === undefined) {
@@ -517,6 +527,8 @@ app.on('before-quit', (event) => {
     if (timeoutHandle !== null) {
       clearTimeout(timeoutHandle)
     }
+    hasFlushedStateForQuit = true
+    isFlushingStateForQuit = false
     app.quit()
   })
 })

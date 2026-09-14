@@ -111,6 +111,7 @@ For simplicity, first wave: `POST /assets` streams body to R2 in the Worker (no 
 | POST | `/teams/:teamId/members/:userId` | change role |
 | DELETE | `/teams/:teamId/members/:userId` | remove member |
 | POST | `/teams/:teamId/invites` | `{ email, role }` |
+| GET | `/teams/:teamId/invites` | admin: pending invites for the team (id + email + role only) |
 | GET | `/invites/pending` | for session email; **no raw token** in list (id + team + role + email only) |
 | POST | `/invites/:inviteId/accept` | email must match |
 | POST | `/invites/:inviteId/reject` | |

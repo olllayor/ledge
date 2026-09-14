@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { clipboardEntrySchema, ingestPayloadSchema } from './schema';
+import { clipboardEntrySchema, clipboardSettingsFields, ingestPayloadSchema } from './schema';
 
 // Re-export a curated subset of the per-channel Zod schemas. The full
 // payload shapes for IPC channels live here (instead of inline in
@@ -64,17 +64,10 @@ export const clipboardEntryCategoryAssignInputSchema = z.object({
   categoryId: z.string().min(1),
 });
 
-export const clipboardSettingsUpdateSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    historyLimit: z.number().int().positive().max(2000).optional(),
-    ignoreConcealedItems: z.boolean().optional(),
-    ignoreBundleIds: z.array(z.string()).optional(),
-    quickPasteHotkey: z.string().optional(),
-    peekHotkey: z.string().optional(),
-    syntheticPasteEnabled: z.boolean().optional(),
-  })
-  .strict();
+// Derived from the shared field types (no defaults) so a new setting can
+// never silently go dead on the main side, and a partial patch never
+// fills missing keys with defaults (updateSettings spreads the patch).
+export const clipboardSettingsUpdateSchema = z.object(clipboardSettingsFields).partial().strict();
 
 // Bulk restore of clipboard entries (undo-after-clear, imports). Bounded
 // so a malicious or buggy caller cannot persist thousands of multi-MB

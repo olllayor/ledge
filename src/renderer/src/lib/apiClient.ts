@@ -238,16 +238,16 @@ export interface TeamItemUpsertBody {
   order: string;
   version: number;
   serverUpdatedAt: number;
+  /** Local ISO timestamp; persisted in the item payload for pull. */
+  createdAt?: string;
   file?: { originalPath: string; resolvedPath: string; isStale: boolean; isMissing: boolean };
   mimeType?: string;
   text?: string;
-  savedFilePath?: string;
   url?: string;
   hex?: string;
   name?: string;
-  codeText?: string;
   language?: string;
-  cloudStorageId?: string;
+  cloudStorageKey?: string;
   cloudStorageBytes?: number;
 }
 
@@ -344,7 +344,7 @@ export class LedgeApiClient {
     return this.call(`/teams/${encodeURIComponent(teamId)}`, { token });
   }
 
-  updateTeam(token: string, teamId: string, name: string): Promise<{ id: string }> {
+  updateTeam(token: string, teamId: string, name: string): Promise<{ ok: true }> {
     return this.call(`/teams/${encodeURIComponent(teamId)}`, {
       method: 'PATCH',
       token,
@@ -389,19 +389,19 @@ export class LedgeApiClient {
   }
 
   async listPendingInvites(token: string): Promise<PendingInviteDto[]> {
-    const result = await this.call<PendingInviteDto[] | { invites: PendingInviteDto[] }>(
+    const result = await this.call<PendingInviteDto[] | { invitations: PendingInviteDto[] }>(
       '/invites/pending',
       { token },
     );
-    return Array.isArray(result) ? result : (result.invites ?? []);
+    return Array.isArray(result) ? result : (result.invitations ?? []);
   }
 
   async listPendingInvitesForTeam(token: string, teamId: string): Promise<PendingInviteDto[]> {
-    const result = await this.call<PendingInviteDto[] | { invites: PendingInviteDto[] }>(
+    const result = await this.call<PendingInviteDto[] | { invitations: PendingInviteDto[] }>(
       `/teams/${encodeURIComponent(teamId)}/invites`,
       { token },
     );
-    return Array.isArray(result) ? result : (result.invites ?? []);
+    return Array.isArray(result) ? result : (result.invitations ?? []);
   }
 
   acceptInvite(token: string, inviteId: string): Promise<{ ok: true }> {

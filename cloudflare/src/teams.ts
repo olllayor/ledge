@@ -190,6 +190,12 @@ export function sanitizeTeamItem(rawBody: Record<string, unknown>): {
   if (kind === 'code' && typeof rawBody.language === 'string') {
     payload.language = rawBody.language;
   }
+  // Preserve local createdAt so clients can rebuild shelf item timestamps.
+  if (typeof rawBody.createdAt === 'string' && rawBody.createdAt) {
+    payload.createdAt = rawBody.createdAt;
+  } else if (typeof rawBody.createdAt === 'number' && Number.isFinite(rawBody.createdAt)) {
+    payload.createdAt = new Date(rawBody.createdAt).toISOString();
+  }
   if (typeof rawBody.cloudStorageKey === 'string' && rawBody.cloudStorageKey) {
     payload.cloudStorageKey = rawBody.cloudStorageKey;
   }
@@ -589,6 +595,52 @@ teamsRoutes.delete('/teams/:teamId/invites/:inviteId', async (c) => {
 });
 
 /**
+ * Pending invites for a team (admin only). Mirrors `/invites/pending`
+ * payload so the settings UI can list and revoke from one shape.
+ * Never includes token or token_hash.
+ */
+teamsRoutes.get('/teams/:teamId/invites', async (c) => {
+  try {
+    const user = getUser(c);
+    const teamId = c.req.param('teamId');
+    await requireTeamMember(c.env, teamId, user.id, 'admin');
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, team_id, email, role, status, expires_at, created_at, invited_by
+       FROM team_invitations
+       WHERE team_id = ?1 AND status = 'pending'
+       ORDER BY created_at DESC`,
+    )
+      .bind(teamId)
+      .all<{
+        id: string;
+        team_id: string;
+        email: string;
+        role: TeamRole;
+        status: string;
+        expires_at: number;
+        created_at: number;
+        invited_by: string;
+      }>();
+
+    return c.json({
+      invitations: results.map((i) => ({
+        id: i.id,
+        teamId: i.team_id,
+        email: i.email,
+        role: i.role,
+        status: i.status,
+        expiresAt: i.expires_at,
+        createdAt: i.created_at,
+        invitedBy: i.invited_by,
+      })),
+    });
+  } catch (err) {
+    return fail(c, err);
+  }
+});
+
+/**
  * Pending invites for the session email only.
  * Never includes token or token_hash.
  */
@@ -599,7 +651,7 @@ teamsRoutes.get('/invites/pending', async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT i.id, i.team_id, i.email, i.role, i.status, i.expires_at, i.created_at,
-              t.name AS team_name
+              i.invited_by, t.name AS team_name
        FROM team_invitations i
        JOIN teams t ON t.id = i.team_id
        WHERE i.email = ?1 AND i.status = 'pending'
@@ -614,6 +666,7 @@ teamsRoutes.get('/invites/pending', async (c) => {
         status: string;
         expires_at: number;
         created_at: number;
+        invited_by: string;
         team_name: string;
       }>();
 
@@ -627,6 +680,7 @@ teamsRoutes.get('/invites/pending', async (c) => {
         status: i.status,
         expiresAt: i.expires_at,
         createdAt: i.created_at,
+        invitedBy: i.invited_by,
       })),
     });
   } catch (err) {

@@ -361,4 +361,59 @@ describe('computeShakeReady', () => {
     expect(firstChild.killCalls).toEqual(['SIGTERM', 'SIGKILL'])
     agent.stop()
   })
+
+  it('resolveBookmark reports missing when the helper is down (regression)', async () => {
+    const spawnProcess = vi.fn<(binaryPath: string) => MockChildProcess>()
+    const agent = new NativeAgentClient({
+      spawnProcess,
+      resolveBinaryPath: () => null
+    })
+    await agent.start()
+
+    const result = await agent.resolveBookmark('bm', '/tmp/gone.txt')
+    expect(result).toEqual({
+      resolvedPath: '/tmp/gone.txt',
+      isStale: true,
+      isMissing: true
+    })
+    agent.stop()
+  })
+
+  it('timeout circuit breaker disposes the hung helper and marks it unavailable', async () => {
+    vi.useFakeTimers()
+    // Completely hung helper: accepts writes, never replies (including
+    // the startup handshake), so consecutive timeouts accumulate.
+    const spawnProcess = vi.fn<(binaryPath: string) => MockChildProcess>(() => {
+      const child = new MockChildProcess()
+      child.stdin.write.mockImplementation(() => true)
+      return child
+    })
+    const agent = new NativeAgentClient({
+      spawnProcess,
+      resolveBinaryPath: () => process.execPath,
+      requestTimeoutMs: 25,
+      restartDelayMs: 50,
+      maxRestartDelayMs: 50
+    })
+
+    // start() awaits the handshake; advance timers so the hung handshake
+    // can time out and the await settles.
+    const startPromise = agent.start()
+    await vi.advanceTimersByTimeAsync(25)
+    await startPromise
+    expect(agent.getStatus().nativeHelperAvailable).toBe(false)
+
+    // Each subsequent launch also hangs its handshake. After 3 consecutive
+    // timeouts the breaker stops restarting.
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(50)
+      await vi.advanceTimersByTimeAsync(25)
+    }
+
+    expect(agent.getStatus().nativeHelperAvailable).toBe(false)
+    expect(agent.getStatus().lastError).toContain('Helper timeout')
+    const spawnsAtTrip = spawnProcess.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(spawnProcess.mock.calls.length).toBe(spawnsAtTrip)
+  })
 })

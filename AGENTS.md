@@ -58,7 +58,7 @@ Cloud sync is optional — local shelf works without it. The Worker lives in `cl
 Key env vars:
 - `VITE_LEDGE_API_URL` — Worker origin (renderer cloud features)
 - `VITE_PRO_CHECKOUT_URL` — Lemon Squeezy checkout page
-- Worker secrets: `EMAIL_FROM` (Cloudflare Email Service `send_email` binding — not Resend), `LEMON_SQUEEZY_API_KEY`, `LEMON_SQUEEZY_WEBHOOK_SECRET`
+- Worker secrets: `RESEND_API_KEY` (preferred email), `EMAIL_FROM` (from-address), `LEMON_SQUEEZY_API_KEY`, `LEMON_SQUEEZY_WEBHOOK_SECRET`. Email send order: Resend → Cloudflare `send_email` binding → console log.
 
 ```bash
 pnpm --filter ledge-cloudflare dev

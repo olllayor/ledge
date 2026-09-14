@@ -28,17 +28,17 @@ export interface RemoteTeamItemDoc {
   file?: { originalPath: string; resolvedPath: string; isStale: boolean; isMissing: boolean };
   mimeType?: string;
   text?: string;
-  savedFilePath?: string;
   url?: string;
-  cloudStorageId?: string;
+  cloudStorageKey?: string;
   cloudStorageBytes?: number;
   hex?: string;
   name?: string;
-  codeText?: string;
   language?: string;
+  /** Local ISO timestamp stored in the item payload. */
+  createdAt?: string | number;
   version: number;
   serverUpdatedAt: number;
-  createdAt: number;
+  createdByEmail?: string;
   createdByUser?: { email: string };
 }
 
@@ -60,16 +60,15 @@ export interface TeamItemUpsert {
   order: Rank;
   version: number;
   serverUpdatedAt: number;
+  createdAt?: string;
   file?: RemoteTeamItemDoc['file'];
   mimeType?: string;
   text?: string;
-  savedFilePath?: string;
   url?: string;
   hex?: string;
   name?: string;
-  codeText?: string;
   language?: string;
-  cloudStorageId?: string;
+  cloudStorageKey?: string;
   cloudStorageBytes?: number;
 }
 
@@ -90,6 +89,22 @@ export function sortRemoteDocs(docs: RemoteTeamItemDoc[]): RemoteTeamItemDoc[] {
 }
 
 /**
+ * Stable local ISO timestamp from a wire value. Missing/invalid values
+ * collapse to epoch so fingerprint comparison does not thrash every poll.
+ */
+function normalizeCreatedAt(raw: unknown): string {
+  if (typeof raw === 'string' && raw.length > 0) {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+    return raw;
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return new Date(raw).toISOString();
+  }
+  return new Date(0).toISOString();
+}
+
+/**
  * Convert server docs to local items (order 0..n-1).
  *
  * File-backed items arrive metadata-only: paths from another member's
@@ -102,14 +117,15 @@ export function sortRemoteDocs(docs: RemoteTeamItemDoc[]): RemoteTeamItemDoc[] {
 export function remoteToLocalItems(docs: RemoteTeamItemDoc[]): ShelfItemRecord[] {
   const items: ShelfItemRecord[] = [];
   for (const doc of sortRemoteDocs(docs)) {
+    const creatorEmail = doc.createdByUser?.email ?? doc.createdByEmail;
     const base = {
       id: doc.itemId,
-      createdAt: new Date(doc.createdAt).toISOString(),
+      createdAt: normalizeCreatedAt(doc.createdAt),
       order: items.length,
       title: doc.title,
       subtitle: doc.subtitle,
       preview: doc.preview,
-      createdByUser: doc.createdByUser,
+      createdByUser: creatorEmail ? { email: creatorEmail } : undefined,
     };
     const candidate = ((): ShelfItemRecord | null => {
       const missingFile = {
@@ -127,7 +143,7 @@ export function remoteToLocalItems(docs: RemoteTeamItemDoc[]): ShelfItemRecord[]
         case 'color':
           return { ...base, kind: 'color', hex: doc.hex ?? '#000000' };
         case 'code':
-          return { ...base, kind: 'code', text: doc.codeText ?? '', language: doc.language };
+          return { ...base, kind: 'code', text: doc.text ?? '', language: doc.language };
         case 'file':
           return {
             ...base,
@@ -310,23 +326,23 @@ function toUpsert(
     order,
     version: (remote?.version ?? 0) + 1,
     serverUpdatedAt: Date.now(),
+    createdAt: item.createdAt,
   };
 
   switch (item.kind) {
     case 'text':
       upsert.text = item.text;
-      upsert.savedFilePath = item.savedFilePath;
       break;
     case 'url':
       upsert.url = item.url;
-      upsert.savedFilePath = item.savedFilePath;
       break;
     case 'color':
       upsert.hex = item.hex;
       upsert.name = item.name;
       break;
     case 'code':
-      upsert.codeText = item.text;
+      // Server payload field is `text` (same as personal sync).
+      upsert.text = item.text;
       upsert.language = item.language;
       break;
     case 'file':

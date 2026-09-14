@@ -20,19 +20,26 @@ export async function runScheduledCleanup(env: Env): Promise<void> {
   await run(env.DB, `DELETE FROM image_upload_events WHERE created_at < ?`, [now - DAY_MS]);
 
   // Orphan R2 objects: keys with no image_assets row after the upload window.
+  // Paginate — a single list() only sees the first page (1000 keys).
   const assets = await queryAll<{ r2_key: string }>(
     env.DB,
     `SELECT r2_key FROM image_assets`,
   );
   const known = new Set(assets.map((row) => row.r2_key));
 
-  const listed = await env.ASSETS.list({ limit: 1000 });
-  for (const object of listed.objects) {
-    if (!known.has(object.key)) {
-      // Only delete objects older than 24h so in-flight uploads survive.
-      if (Date.now() - object.uploaded.getTime() > DAY_MS) {
-        await env.ASSETS.delete(object.key);
+  let cursor: string | undefined;
+  // Safety cap: 20 pages × 1000 = 20k objects per cron run.
+  for (let page = 0; page < 20; page += 1) {
+    const listed = await env.ASSETS.list({ limit: 1000, cursor });
+    for (const object of listed.objects) {
+      if (!known.has(object.key)) {
+        // Only delete objects older than 24h so in-flight uploads survive.
+        if (now - object.uploaded.getTime() > DAY_MS) {
+          await env.ASSETS.delete(object.key);
+        }
       }
     }
+    if (!listed.truncated || !listed.cursor) break;
+    cursor = listed.cursor;
   }
 }

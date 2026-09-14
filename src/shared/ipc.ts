@@ -13,7 +13,7 @@ import type {
   ClipboardEntry,
   ClipboardSettings,
 } from './schema';
-import { clipboardSettingsSchema, shelfItemSchema } from './schema';
+import { shelfItemSchema } from './schema';
 
 export const IPC_CHANNELS = {
   getState: 'ledge:get-state',
@@ -169,8 +169,9 @@ export const clipboardEntryTogglePinInputSchema = z.object({
 // earlier inline copy drifted (no .max(2000)) and had no importers.
 export { clipboardHistoryRestoreInputSchema } from './ipcSchemas';
 
-export const clipboardSettingsUpdateInputSchema = clipboardSettingsSchema.partial();
-export type ClipboardSettingsUpdatePayload = z.infer<typeof clipboardSettingsUpdateInputSchema>;
+// Same derived schema as main — one source of truth for clipboard settings patches.
+export { clipboardSettingsUpdateSchema as clipboardSettingsUpdateInputSchema } from './ipcSchemas';
+export type ClipboardSettingsUpdatePayload = Partial<ClipboardSettings>;
 
 export type StateListener = (state: AppState) => void;
 

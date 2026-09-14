@@ -177,9 +177,9 @@ export function TeamsProvider({ children }: { children: ReactNode }) {
 
   const updateTeam = useCallback(
     async (teamId: string, name: string) => {
-      const result = await api.client.updateTeam(sessionToken, teamId, name);
+      await api.client.updateTeam(sessionToken, teamId, name);
       await refreshTeams();
-      return result.id;
+      return teamId;
     },
     [sessionToken, refreshTeams],
   );

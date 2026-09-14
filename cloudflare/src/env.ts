@@ -14,6 +14,8 @@ export interface Env {
     }): Promise<{ messageId: string }>;
   };
   EMAIL_FROM?: string;
+  /** Resend API key. Preferred send path when set (free tier works). */
+  RESEND_API_KEY?: string;
   LEMON_SQUEEZY_API_KEY?: string;
   LEMON_SQUEEZY_WEBHOOK_SECRET?: string;
   /** Comma-separated Lemon Squeezy variant ids that grant Pro. */

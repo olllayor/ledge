@@ -355,11 +355,14 @@ export class NativeAgentClient extends EventEmitter {
     isStale: boolean
     isMissing: boolean
   }> {
+    // No helper or no bookmark: we cannot verify the path. Claiming
+    // "present" makes open/preview/drag fail later with no Relink
+    // affordance — report missing so the UI can offer recovery.
     if (!this.child || !bookmarkBase64) {
       return {
         resolvedPath: originalPath,
-        isStale: false,
-        isMissing: false
+        isStale: true,
+        isMissing: true
       }
     }
 
@@ -475,14 +478,29 @@ export class NativeAgentClient extends EventEmitter {
 
         if (child === this.child) {
           this.consecutiveTimeouts += 1
-          // Circuit breaker: don't kill helper on every single timeout
-          // if we're in a storm. After 3 consecutive timeouts, keep the
-          // process alive and surface error, avoiding restart loop.
+          // Circuit breaker: don't kill + restart on every single timeout
+          // if we're in a storm. After 3 consecutive timeouts, stop
+          // restarting — but still dispose the hung helper and mark it
+          // unavailable so the TS clipboard poller takes over. Leaving
+          // the child alive freezes capture until app restart.
           if (this.consecutiveTimeouts < 3) {
             this.handleChildUnavailable(child, `Native helper request timed out: ${method}`)
           } else {
             console.warn('[ledge] helper timeout circuit-breaker tripped, not restarting')
-            this.updateStatus({ lastError: `Helper timeout (${this.consecutiveTimeouts}×): ${method}` })
+            this.child = null
+            this.stdoutBuffer = ''
+            this.disposeChild(child)
+            this.rejectPending(helperUnavailableError(`Helper timeout circuit breaker: ${method}`))
+            this.shouldRestart = false
+            if (this.restartTimer) {
+              clearTimeout(this.restartTimer)
+              this.restartTimer = null
+            }
+            this.updateStatus({
+              nativeHelperAvailable: false,
+              accessibilityTrusted: false,
+              lastError: `Helper timeout (${this.consecutiveTimeouts}×): ${method}`
+            })
           }
         }
       }, this.requestTimeoutMs)

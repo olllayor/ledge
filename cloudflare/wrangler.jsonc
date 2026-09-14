@@ -25,7 +25,7 @@
     }
   ],
   "vars": {
-    "EMAIL_FROM": "Ledge <noreply@ledge.app>"
+    "EMAIL_FROM": "Ledge <onboarding@resend.dev>"
   },
   "triggers": {
     "crons": ["*/15 * * * *"]

@@ -113,6 +113,7 @@ export async function storageBytesUsed(db: D1Database, userId: string): Promise<
   return row?.used ?? 0;
 }
 
+/** Active (non-tombstoned) personal shelf only — deleted shelves reject item/asset ops. */
 export async function personalShelfExists(
   db: D1Database,
   userId: string,
@@ -120,7 +121,9 @@ export async function personalShelfExists(
 ): Promise<boolean> {
   const row = await queryOne<{ ok: number }>(
     db,
-    `SELECT 1 AS ok FROM shelves WHERE user_id = ? AND shelf_id = ? LIMIT 1`,
+    `SELECT 1 AS ok FROM shelves
+     WHERE user_id = ? AND shelf_id = ? AND deleted_at IS NULL
+     LIMIT 1`,
     [userId, shelfId],
   );
   return row != null;

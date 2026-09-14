@@ -14,6 +14,28 @@ import { runScheduledCleanup } from './cron';
 export function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  // Desktop renderer fetches are cross-origin (dev: localhost:5173 →
+  // 127.0.0.1:8787; packaged: file:// / custom protocol → workers.dev).
+  // Auth is Bearer tokens, not cookies, so reflecting Origin is safe.
+  // Must handle OPTIONS before any route middleware can 401 a preflight.
+  app.use('*', async (c, next) => {
+    const origin = c.req.header('Origin');
+    if (origin) {
+      c.header('Access-Control-Allow-Origin', origin);
+      c.header('Vary', 'Origin');
+      c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      c.header(
+        'Access-Control-Allow-Headers',
+        'Authorization, Content-Type, X-Shelf-Id, X-Item-Id',
+      );
+      c.header('Access-Control-Max-Age', '86400');
+    }
+    if (c.req.method === 'OPTIONS') {
+      return c.body(null, 204);
+    }
+    await next();
+  });
+
   app.get('/health', (c) => c.json({ ok: true }));
 
   app.route('/auth', authRoutes);

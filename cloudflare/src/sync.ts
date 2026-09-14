@@ -262,13 +262,18 @@ syncRoutes.get('/sync/shelves', requireAuth, async (c) => {
       [auth.id, since, LIST_SHELVES_LIMIT],
     );
   } else {
+    // Full snapshot: active shelves plus recent tombstones. Without
+    // tombstones a device whose first poll skips `since` never learns
+    // about deletions that happened while it was offline.
+    const tombstoneCutoff = nowMs() - 30 * 24 * 60 * 60 * 1000;
     rows = await queryAll<ShelfRow>(
       c.env.DB,
       `SELECT * FROM shelves
-       WHERE user_id = ? AND deleted_at IS NULL
+       WHERE user_id = ?
+         AND (deleted_at IS NULL OR updated_at > ?)
        ORDER BY updated_at DESC
        LIMIT ?`,
-      [auth.id, LIST_SHELVES_LIMIT],
+      [auth.id, tombstoneCutoff, LIST_SHELVES_LIMIT],
     );
   }
 

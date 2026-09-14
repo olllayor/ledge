@@ -187,17 +187,30 @@ export const clipboardCategorySchema = z.object({
   createdAt: z.string(),
 });
 
-export const clipboardSettingsSchema = z.object({
-  enabled: z.boolean().default(false),
-  historyLimit: z.number().int().positive().max(2000).default(200),
-  ignoreConcealedItems: z.boolean().default(true),
+// Field types without defaults — shared by the full settings schema and
+// the IPC update-patch schema so they cannot drift (see ipcSchemas.ts).
+export const clipboardSettingsFields = {
+  enabled: z.boolean(),
+  historyLimit: z.number().int().positive().max(2000),
+  ignoreConcealedItems: z.boolean(),
   // Heuristic secret-shape skip for apps that never mark the
   // pasteboard as concealed (see clipboard/sensitiveText.ts).
-  skipSensitiveText: z.boolean().default(true),
-  ignoreBundleIds: z.array(z.string()).default([]),
-  quickPasteHotkey: z.string().default('CommandOrControl+Shift+V'),
-  peekHotkey: z.string().default(''),
-  syntheticPasteEnabled: z.boolean().default(false),
+  skipSensitiveText: z.boolean(),
+  ignoreBundleIds: z.array(z.string()),
+  quickPasteHotkey: z.string(),
+  peekHotkey: z.string(),
+  syntheticPasteEnabled: z.boolean(),
+} as const;
+
+export const clipboardSettingsSchema = z.object({
+  enabled: clipboardSettingsFields.enabled.default(false),
+  historyLimit: clipboardSettingsFields.historyLimit.default(200),
+  ignoreConcealedItems: clipboardSettingsFields.ignoreConcealedItems.default(true),
+  skipSensitiveText: clipboardSettingsFields.skipSensitiveText.default(true),
+  ignoreBundleIds: clipboardSettingsFields.ignoreBundleIds.default([]),
+  quickPasteHotkey: clipboardSettingsFields.quickPasteHotkey.default('CommandOrControl+Shift+V'),
+  peekHotkey: clipboardSettingsFields.peekHotkey.default(''),
+  syntheticPasteEnabled: clipboardSettingsFields.syntheticPasteEnabled.default(false),
 });
 
 export const defaultClipboardSettings = {

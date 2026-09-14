@@ -9,7 +9,11 @@ import {
   type ReactNode,
 } from 'react';
 import type { ShelfRecord, SyncState } from '@shared/schema';
-import { estimateImportedImageStorageBytes, serializeShelfForCloud } from '@shared/sync';
+import {
+  coerceCloudItemsToLocal,
+  estimateImportedImageStorageBytes,
+  serializeShelfForCloud,
+} from '@shared/sync';
 import {
   api,
   isAuthError,
@@ -550,7 +554,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
             createdAt: remote.localCreatedAt,
             updatedAt: remote.localUpdatedAt,
             origin: remote.origin,
-            items: remote.items as ShelfRecord['items'],
+            // Worker strips path fields; rebuild the full FileRef so
+            // shelfRecordSchema accepts file-backed shelves (and the UI
+            // can offer Relink instead of failing the whole apply).
+            items: coerceCloudItemsToLocal(remote.items),
           };
           try {
             await window.ledge.applyRemoteShelf(payload);
