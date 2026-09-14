@@ -36,13 +36,13 @@ pnpm dev
 Cloud sync is optional at runtime. Local shelf behavior works without a backend.
 
 ```bash
-pnpm convex:dev
-VITE_CONVEX_URL="https://<deployment>.convex.cloud" pnpm dev
+pnpm --filter ledge-cloudflare dev
+VITE_LEDGE_API_URL="https://ledge-api.<your-subdomain>.workers.dev" pnpm dev
 ```
 
-Convex environment variables used by the paid-sync backend:
+Worker env/secrets:
 
-- `RESEND_API_KEY` and `EMAIL_FROM` for email OTP delivery (Resend)
+- `EMAIL_FROM` via Cloudflare Email Service `send_email` binding
 - `LEMON_SQUEEZY_API_KEY` for manual entitlement refresh
 - `LEMON_SQUEEZY_WEBHOOK_SECRET` for webhook signature verification
 
@@ -118,6 +118,7 @@ The production build is written to `dist/landing/`.
 - `src/renderer`: React UI for the shelf and preferences windows
 - `src/shared`: shared schemas and IPC contracts
 - `native/DropShelfNativeAgent`: Swift helper for shake detection and bookmark resolution
+- `cloudflare`: Cloudflare Worker (Hono) + D1 + R2 backend
 - `release-video`: release demo video composition and Remotion entrypoint
 - `scripts`: local build helpers for branding and the native agent
 

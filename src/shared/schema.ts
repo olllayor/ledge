@@ -40,9 +40,9 @@ export const imageAssetItemSchema = shelfItemBaseSchema.extend({
   mimeType: z.string().default('image/png'),
 });
 
-// Keep the ShelfItemRecord union in sync with convex/sharedSchemas.ts —
-// adding a kind here requires adding it there too, otherwise drag-out from
-// the clipboard into a real shelf will fail Convex sync silently.
+// Keep the ShelfItemRecord union in sync with cloudflare/src/sanitize.ts —
+// adding a kind here requires a matching sanitizer rule, otherwise drag-out
+// from the clipboard into a real shelf will fail cloud sync silently.
 export const textItemSchema = shelfItemBaseSchema.extend({
   kind: z.literal('text'),
   text: z.string(),

@@ -85,7 +85,7 @@ export function CloudSyncSettings({ state, showToast }: { state: AppState; showT
       <SettingsGroup>
         <div style={{ padding: '24px 16px', textAlign: 'center' }}>
           <p className="settings-row-title" style={{ marginBottom: 8 }}>Cloud Sync is not configured</p>
-          <p className="settings-row-copy">Set <code>VITE_CONVEX_URL</code> to enable cloud features.</p>
+          <p className="settings-row-copy">Set <code>VITE_LEDGE_API_URL</code> to enable cloud features.</p>
         </div>
       </SettingsGroup>
     );

@@ -1,3 +1,6 @@
+packages:
+  - cloudflare
+
 onlyBuiltDependencies:
   - electron
   - electron-winstaller

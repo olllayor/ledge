@@ -1,8 +1,25 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useAction, useMutation, useQuery, useConvex } from 'convex/react';
-import { api } from '../../../../convex/_generated/api';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import type { ShelfRecord, SyncState } from '@shared/schema';
 import { estimateImportedImageStorageBytes, serializeShelfForCloud } from '@shared/sync';
+import {
+  api,
+  isAuthError,
+  isCloudConfigured,
+  isNetworkError,
+  type RemoteShelfDto,
+  type SyncOverviewResponse,
+} from '../lib/apiClient';
+
+export interface SyncOverview extends SyncOverviewResponse {}
 
 interface SyncContextValue {
   configured: boolean;
@@ -17,34 +34,15 @@ interface SyncContextValue {
   loadBackfillCandidates(): Promise<ShelfRecord[]>;
   syncSelectedShelves(shelfIds: string[]): Promise<void>;
   refreshEntitlements(input: { licenseKey?: string; orderId?: string }): Promise<void>;
-}
-
-interface SyncOverview {
-  plan: 'free' | 'pro';
-  deviceCount: number;
-  deviceLimit: number;
-  syncedShelfCount: number;
-  shelfLimit: number;
-  storageBytesUsed: number;
-  storageBytesLimit: number;
-}
-
-interface RemoteShelf {
-  shelfId: string;
-  name: string;
-  color: ShelfRecord['color'];
-  origin: ShelfRecord['origin'];
-  items: ShelfRecord['items'];
-  localCreatedAt: string;
-  localUpdatedAt: string;
-  /** Set when the shelf was deleted (possibly on another device). */
-  deletedAt?: number;
+  /** Re-pull overview + shelves (focus/online/mutation). */
+  refreshCloudState(): Promise<void>;
 }
 
 const SESSION_KEY = 'ledge.sync.sessionToken';
 const EMAIL_KEY = 'ledge.sync.email';
 const DEBOUNCE_MS = 500;
 const SYNC_STATE_DEBOUNCE_MS = 300;
+const POLL_INTERVAL_MS = 30_000;
 
 const noop = async () => {};
 
@@ -64,6 +62,7 @@ const SyncContext = createContext<SyncContextValue>({
   loadBackfillCandidates: async () => [],
   syncSelectedShelves: noop,
   refreshEntitlements: noop,
+  refreshCloudState: noop,
 });
 
 export function useSync() {
@@ -93,18 +92,20 @@ class MutationQueue {
 export function SyncProvider({ children }: { children: ReactNode }) {
   // The session token is a long-lived bearer credential, so it is held in
   // the main process encrypted via the OS keychain (see SecureSessionStore)
-  // rather than in renderer localStorage. It loads asynchronously on mount,
-  // so both start empty and Convex queries stay 'skip' until it arrives.
+  // rather than in renderer localStorage. It loads asynchronously on mount.
   const [sessionToken, setSessionToken] = useState('');
   const [email, setEmail] = useState('');
   // False until the mount-time keychain load (and its validation) has
   // finished; gates effects that would otherwise broadcast a spurious
   // signed-out state while the real session is still being adopted.
   const [sessionResolved, setSessionResolved] = useState(false);
+  const [sessionDaysRemaining, setSessionDaysRemaining] = useState<number | null>(null);
+  const [overview, setOverview] = useState<SyncOverview | null>(null);
+  const [remoteShelves, setRemoteShelves] = useState<RemoteShelfDto[] | null>(null);
   const [localState, setLocalState] = useState<Awaited<ReturnType<typeof window.ledge.getState>> | null>(null);
   // Map of remote shelfId -> last applied localUpdatedAt, so we apply each
   // remote shelf exactly once per change rather than only ever syncing the
-  // first entry returned by the query.
+  // first entry returned by the poll.
   const [lastAppliedRemoteByShelf, setLastAppliedRemoteByShelf] = useState<Record<string, string>>({});
   const lastPushedShelfUpdatedAt = useRef('');
   const lastPushedPreferences = useRef('');
@@ -114,31 +115,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const syncStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSyncStateRef = useRef('');
   const pendingShelfRef = useRef<{ shelf: NonNullable<NonNullable<typeof localState>['liveShelf']>; updatedAt: string } | null>(null);
-  // Snapshot of shelf ids present locally, so we can detect when a shelf is
-  // permanently discarded on this device (evicted from Recents or cleared)
-  // and reclaim its cloud row. `null` until the first observation so a
-  // fresh launch never mistakes "not loaded yet" for "deleted".
-  const knownLocalShelfIdsRef = useRef<Set<string> | null>(null);
+  // Server `updatedAt` cursor for GET /sync/shelves?since=
+  const shelvesSinceRef = useRef(0);
+  // Guards concurrent refreshCloudState calls (focus + interval + mutation).
+  const refreshingRef = useRef(false);
 
-  const overview = useQuery(api.sync.overview, sessionToken ? { sessionToken } : 'skip') as SyncOverview | undefined;
-  const remoteShelves = useQuery(api.sync.listShelves, sessionToken ? { sessionToken } : 'skip') as
-    | RemoteShelf[]
-    | undefined;
-  const sessionInfo = useQuery(api.auth.me, sessionToken ? { sessionToken } : 'skip') as
-    | { sessionDaysRemaining: number }
-    | undefined
-    | null;
-  const requestOtpAction = useAction(api.auth.requestOtp);
-  const verifyOtpMutation = useMutation(api.auth.verifyOtp);
-  const signOutMutation = useMutation(api.auth.signOut);
-  const refreshSessionMutation = useMutation(api.auth.refreshSession);
-  const registerDeviceMutation = useMutation(api.sync.registerDevice);
-  const upsertShelfMutation = useMutation(api.sync.upsertShelf);
-  const deleteShelfMutation = useMutation(api.sync.deleteShelf);
-  const patchPreferencesMutation = useMutation(api.sync.patchPreferences);
-  const refreshEntitlementsAction = useAction(api.billing.refreshEntitlements);
-
-  const sessionDaysRemaining = sessionInfo ? sessionInfo.sessionDaysRemaining : null;
+  const configured = isCloudConfigured();
 
   // Debounced setSyncState: avoids flooding the main process with
   // identical patches on every localState tick (which fires on every
@@ -162,66 +144,88 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   // ── Session adoption & watchdog ──
   // A keychain token can be rejected by the backend long after the UI last
-  // saw it (revoked by a sign-out in another window or a packaged build
-  // sharing the credential store, expired, or replaced). A session-scoped
-  // `useQuery` THROWS that rejection into render, and the providers render
-  // above every view-level ErrorBoundary — so an unverified token can
-  // blank the whole window. Tokens therefore only reach `useQuery` after a
-  // promise-based validation round-trip; a rejected token heals from the
-  // keychain (another process may hold a fresher one) or drops to the
-  // honest signed-out state.
-  const convexClient = useConvex();
+  // saw it. Network failures must NOT clear the session — the device may
+  // simply be offline. Only an explicit 401/403 (or a heal that also
+  // fails auth) drops to signed-out.
   const adoptingRef = useRef(false);
+
+  const clearSessionLocal = useCallback(async () => {
+    setSessionToken('');
+    setEmail('');
+    setSessionDaysRemaining(null);
+    setOverview(null);
+    setRemoteShelves(null);
+    shelvesSinceRef.current = 0;
+    await window.ledge.clearSyncSession();
+    await window.ledge.setSyncState({
+      enabled: false,
+      status: 'signedOut',
+      signedInEmail: undefined,
+    });
+  }, []);
 
   const adoptSession = useCallback(
     async (token: string, tokenEmail: string) => {
       if (adoptingRef.current) return;
       adoptingRef.current = true;
       try {
-        await convexClient.query(api.auth.me, { sessionToken: token });
-        setSessionToken(token);
-        setEmail(tokenEmail);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '';
-        if (!message.includes('Authentication required')) {
-          // Network/redeploy noise — keep whatever session we already hold.
+        try {
+          const me = await api.client.me(token);
+          setSessionToken(token);
+          setEmail(me.email || tokenEmail);
+          setSessionDaysRemaining(me.daysRemaining);
           return;
+        } catch (error) {
+          if (isNetworkError(error)) {
+            // Offline: keep the token, stay quiet about signed-out.
+            setSessionToken(token);
+            setEmail(tokenEmail);
+            debouncedSetSyncState({
+              enabled: true,
+              status: 'offline',
+              signedInEmail: tokenEmail,
+              lastError: error instanceof Error ? error.message : 'Offline',
+            });
+            return;
+          }
+          if (!isAuthError(error)) {
+            // Unexpected 5xx / other HTTP noise — keep the session.
+            setSessionToken(token);
+            setEmail(tokenEmail);
+            return;
+          }
         }
+
         // Heal: the keychain may hold a fresher token written by another
-        // window (or a packaged build) that signed in after this copy
-        // went stale.
+        // window that signed in after this copy went stale.
         const stored = await window.ledge.getSyncSession();
         if (stored.sessionToken && stored.sessionToken !== token) {
           try {
-            await convexClient.query(api.auth.me, { sessionToken: stored.sessionToken });
+            const me = await api.client.me(stored.sessionToken);
             setSessionToken(stored.sessionToken);
-            setEmail(stored.email);
+            setEmail(me.email || stored.email);
+            setSessionDaysRemaining(me.daysRemaining);
             return;
-          } catch {
+          } catch (healError) {
+            if (isNetworkError(healError)) {
+              setSessionToken(stored.sessionToken);
+              setEmail(stored.email);
+              return;
+            }
             // The keychain copy is dead too — fall through to sign-out.
           }
         }
-        await window.ledge.clearSyncSession();
-        setSessionToken('');
-        setEmail('');
-        await window.ledge.setSyncState({
-          enabled: false,
-          status: 'signedOut',
-          signedInEmail: undefined,
-        });
+        await clearSessionLocal();
         window.ledge.showToast('Session expired — please sign in again.', 'info');
       } finally {
         adoptingRef.current = false;
       }
     },
-    [convexClient],
+    [clearSessionLocal, debouncedSetSyncState],
   );
 
   // Load the encrypted session from the main process on mount, migrating
   // any legacy plaintext token that older builds wrote to localStorage.
-  // `sessionResolved` stays false until the load (and its validation)
-  // finishes so a cold boot never broadcasts a spurious signed-out state
-  // to the other windows.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -251,21 +255,24 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     };
   }, [adoptSession]);
 
-  // Revalidate whenever the window regains focus — catches tokens revoked
-  // or replaced while this window was in the background.
+  // Revalidate whenever the window regains focus or comes back online.
   useEffect(() => {
     const onFocus = () => {
       if (sessionToken) void adoptSession(sessionToken, email);
     };
+    const onOnline = () => {
+      if (sessionToken) void adoptSession(sessionToken, email);
+    };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onOnline);
+    };
   }, [sessionToken, email, adoptSession]);
 
   // Converge across windows: the main-process state broadcast reports
-  // sign-ins/sign-outs performed in other windows. When it disagrees with
-  // the locally held session, re-read the keychain and adopt the newer
-  // credential — or drop a token that another window just revoked, before
-  // the backend refetch throws into render.
+  // sign-ins/sign-outs performed in other windows.
   useEffect(() => {
     if (!sessionResolved || !localState?.sync) return;
     const mainEmail = localState.sync.signedInEmail;
@@ -278,9 +285,66 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       } else if (!mainEmail) {
         setSessionToken('');
         setEmail('');
+        setOverview(null);
+        setRemoteShelves(null);
       }
     })();
   }, [localState?.sync, email, sessionToken, sessionResolved, adoptSession]);
+
+  // ── Cloud poll (overview + shelves with since cursor) ──
+  const refreshCloudState = useCallback(async () => {
+    if (!sessionToken || refreshingRef.current) return;
+    refreshingRef.current = true;
+    try {
+      const nextOverview = await api.client.overview(sessionToken);
+      setOverview(nextOverview);
+
+      const since = shelvesSinceRef.current;
+      const shelves = await api.client.listShelves(sessionToken, since);
+      if (shelves.length > 0) {
+        // Merge: a since-filtered poll only returns rows that changed.
+        setRemoteShelves((prev) => {
+          const byId = new Map((prev ?? []).map((shelf) => [shelf.shelfId, shelf]));
+          for (const shelf of shelves) {
+            byId.set(shelf.shelfId, shelf);
+          }
+          return [...byId.values()];
+        });
+        const maxUpdatedAt = shelves.reduce((max, shelf) => Math.max(max, shelf.updatedAt), since);
+        shelvesSinceRef.current = maxUpdatedAt;
+      } else if (since === 0) {
+        setRemoteShelves([]);
+      }
+    } catch (error) {
+      if (isAuthError(error)) {
+        await clearSessionLocal();
+        window.ledge.showToast('Session expired — please sign in again.', 'info');
+        return;
+      }
+      if (isNetworkError(error)) {
+        debouncedSetSyncState({
+          status: 'offline',
+          lastError: error instanceof Error ? error.message : 'Offline',
+        });
+        return;
+      }
+      debouncedSetSyncState({
+        status: 'error',
+        lastError: error instanceof Error ? error.message : 'Cloud sync failed.',
+      });
+    } finally {
+      refreshingRef.current = false;
+    }
+  }, [sessionToken, clearSessionLocal, debouncedSetSyncState]);
+
+  useEffect(() => {
+    if (!sessionToken) return;
+    void refreshCloudState();
+    const timer = window.setInterval(() => {
+      void refreshCloudState();
+    }, POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [sessionToken, refreshCloudState]);
 
   useEffect(() => {
     if (!sessionResolved) return;
@@ -314,74 +378,41 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     }
 
     queueRef.current.enqueue(() =>
-      registerDeviceMutation({
-        sessionToken,
-        deviceId: localState.sync.deviceId,
-        name: navigator.userAgent.includes('Mac') ? 'Mac' : 'Desktop',
-        platform: navigator.platform || 'desktop',
-      }).catch((error: unknown) => {
-        // Only a genuine quota response is a quota state. Mapping every
-        // failure here made plain outages look like "upgrade your plan".
-        const message = error instanceof Error ? error.message : String(error);
-        const isQuota = /device.*limit|limit reached/i.test(message);
-        debouncedSetSyncState({
-          status: isQuota ? 'quotaReached' : 'error',
-          lastError: message || (isQuota ? 'Device sync limit reached.' : 'Device registration failed.'),
-        });
-      }),
+      api.client
+        .registerDevice(sessionToken, {
+          deviceId: localState.sync.deviceId,
+          name: navigator.userAgent.includes('Mac') ? 'Mac' : 'Desktop',
+          platform: navigator.platform || 'desktop',
+        })
+        .catch((error: unknown) => {
+          // Only a genuine quota response is a quota state. Mapping every
+          // failure here made plain outages look like "upgrade your plan".
+          const message = error instanceof Error ? error.message : String(error);
+          const isQuota = /device.*limit|limit reached/i.test(message);
+          debouncedSetSyncState({
+            status: isQuota ? 'quotaReached' : 'error',
+            lastError: message || (isQuota ? 'Device sync limit reached.' : 'Device registration failed.'),
+          });
+        }),
     );
-  }, [localState?.sync.deviceId, registerDeviceMutation, sessionToken, debouncedSetSyncState]);
+  }, [localState?.sync.deviceId, sessionToken, debouncedSetSyncState]);
 
-  // Session renewal heartbeat. Without this, sessions hard-expire after
-  // 90 days and every device signs out at once. The server enforces its
-  // own minimum refresh interval and maximum lifetime by throwing; those
-  // failures are expected control flow, not errors — the overview query
-  // keeps the UI honest about actual expiry.
+  // Session renewal heartbeat.
   useEffect(() => {
     if (!sessionToken) {
       return;
     }
     const DAY_MS = 24 * 60 * 60 * 1000;
     const timer = window.setInterval(() => {
-      refreshSessionMutation({ sessionToken }).catch(() => undefined);
+      api.client.refreshSession(sessionToken).catch(() => undefined);
     }, DAY_MS);
     return () => window.clearInterval(timer);
-  }, [sessionToken, refreshSessionMutation]);
+  }, [sessionToken]);
 
-  // Reclaim cloud storage for shelves discarded on this device. A shelf
-  // that leaves the local set (Recents eviction, clear, or close) is
-  // deleted from Convex; if another device still has it, that device's
-  // next upsert re-creates it, so the delete only sticks when nothing
-  // references the shelf anymore.
-  useEffect(() => {
-    if (!localState) {
-      return;
-    }
-    const currentIds = new Set<string>();
-    if (localState.liveShelf) {
-      currentIds.add(localState.liveShelf.id);
-    }
-    for (const shelf of localState.recentShelves) {
-      currentIds.add(shelf.id);
-    }
-
-    const previousIds = knownLocalShelfIdsRef.current;
-    knownLocalShelfIdsRef.current = currentIds;
-    if (!previousIds || !sessionToken) {
-      return;
-    }
-
-    for (const id of previousIds) {
-      if (!currentIds.has(id)) {
-        queueRef.current.enqueue(() =>
-          deleteShelfMutation({ sessionToken, shelfId: id }).catch(() => {
-            // Best-effort reclamation; a failed delete simply leaves the
-            // row to be retried on a future discard or reconciliation.
-          }),
-        );
-      }
-    }
-  }, [localState, sessionToken, deleteShelfMutation]);
+  // NOTE: Recents eviction must NEVER delete the cloud row. `deleteShelf`
+  // is only for an explicit user discard of a synced shelf. Leaving the
+  // local recents list is not a delete intent — the shelf may still be
+  // live on another device.
 
   const pushPendingShelf = useCallback(() => {
     const pending = pendingShelfRef.current;
@@ -394,25 +425,29 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
     const cloudShelf = serializeShelfForCloud(pending.shelf);
     queueRef.current.enqueue(() =>
-      upsertShelfMutation({
-        sessionToken,
-        shelfId: cloudShelf.id,
-        name: cloudShelf.name,
-        color: cloudShelf.color,
-        origin: cloudShelf.origin,
-        items: cloudShelf.items,
-        localCreatedAt: cloudShelf.createdAt,
-        localUpdatedAt: cloudShelf.updatedAt,
-        imageStorageBytes: estimateImportedImageStorageBytes([pending.shelf]),
-      }).catch((error: unknown) => {
-        lastPushedShelfUpdatedAt.current = '';
-        debouncedSetSyncState({
-          status: 'error',
-          lastError: error instanceof Error ? error.message : 'Failed to sync shelf changes.',
-        });
-      }),
+      api.client
+        .upsertShelf(sessionToken, {
+          shelfId: cloudShelf.id,
+          name: cloudShelf.name,
+          color: cloudShelf.color,
+          origin: cloudShelf.origin,
+          items: cloudShelf.items,
+          localCreatedAt: cloudShelf.createdAt,
+          localUpdatedAt: cloudShelf.updatedAt,
+          imageStorageBytes: estimateImportedImageStorageBytes([pending.shelf]),
+        })
+        .then(() => {
+          void refreshCloudState();
+        })
+        .catch((error: unknown) => {
+          lastPushedShelfUpdatedAt.current = '';
+          debouncedSetSyncState({
+            status: 'error',
+            lastError: error instanceof Error ? error.message : 'Failed to sync shelf changes.',
+          });
+        }),
     );
-  }, [sessionToken, upsertShelfMutation, debouncedSetSyncState]);
+  }, [sessionToken, debouncedSetSyncState, refreshCloudState]);
 
   const pushPreferences = useCallback(() => {
     if (!localState?.preferences || !sessionToken) {
@@ -430,7 +465,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
     lastPushedPreferences.current = serialized;
     queueRef.current.enqueue(() =>
-      patchPreferencesMutation({ sessionToken, values: localState.preferences! }).catch((error: unknown) => {
+      api.client.putPreferences(sessionToken, localState.preferences!).catch((error: unknown) => {
         lastPushedPreferences.current = '';
         const message = error instanceof Error ? error.message : '';
         if (message.includes('Pro')) {
@@ -441,7 +476,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         }
       }),
     );
-  }, [localState?.preferences, overview?.plan, patchPreferencesMutation, sessionToken]);
+  }, [localState?.preferences, overview?.plan, sessionToken]);
 
   useEffect(() => {
     if (!sessionToken || !localState?.liveShelf || !remoteShelves) {
@@ -468,24 +503,19 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     }, DEBOUNCE_MS);
   }, [localState?.liveShelf, remoteShelves, sessionToken, pushPendingShelf]);
 
+  // Pull: apply remotes SERIALLY (never Promise.all last-write-wins).
   useEffect(() => {
     if (!sessionToken || !remoteShelves || remoteShelves.length === 0) {
       return;
     }
 
-    // Debounce reconciliation to avoid firing on every Convex subscription
-    // tick — remoteShelves can update frequently when other devices push.
+    let cancelled = false;
     const timer = setTimeout(() => {
       void (async () => {
         let updated: Record<string, string> | null = null;
-        // Watermarks must only advance after the IPC call actually
-        // resolves — a failed apply (e.g. Zod reject on malformed remote
-        // items) would otherwise mark the snapshot as seen forever and
-        // it would never be re-applied.
-        const jobs: Array<Promise<void>> = [];
         for (const remote of remoteShelves) {
-          // Tombstones are remembered under a sentinel so the deletion is
-          // processed exactly once per timestamp.
+          if (cancelled) return;
+
           const seen = lastAppliedRemoteByShelf[remote.shelfId];
           if (seen === remote.localUpdatedAt) {
             continue;
@@ -496,26 +526,18 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
           if (remote.deletedAt) {
             const deletedAt = remote.deletedAt;
-            // Tombstone: the shelf was deleted (possibly on another device).
-            // Drop every local copy instead of applying the snapshot.
-            jobs.push(
-              window.ledge
-                .removeSyncedShelf(remote.shelfId)
-                .then(() => {
-                  updated ??= { ...lastAppliedRemoteByShelf };
-                  updated[remote.shelfId] = tombstoneKey(deletedAt);
-                })
-                .catch((error: unknown) => {
-                  console.error('[sync] failed to remove synced shelf', remote.shelfId, error);
-                }),
-            );
+            try {
+              await window.ledge.removeSyncedShelf(remote.shelfId);
+              updated ??= { ...lastAppliedRemoteByShelf };
+              updated[remote.shelfId] = tombstoneKey(deletedAt);
+            } catch (error) {
+              console.error('[sync] failed to remove synced shelf', remote.shelfId, error);
+            }
             continue;
           }
 
           // A local push for this shelf is debounced/in-flight. Applying an
-          // older snapshot now could clobber the unpushed local edit; skip
-          // and let the next subscription tick (which fires after the push)
-          // re-evaluate. Not marking as seen keeps the retry alive.
+          // older snapshot now could clobber the unpushed local edit.
           const pending = pendingShelfRef.current;
           if (pending && pending.shelf.id === remote.shelfId) {
             continue;
@@ -528,28 +550,26 @@ export function SyncProvider({ children }: { children: ReactNode }) {
             createdAt: remote.localCreatedAt,
             updatedAt: remote.localUpdatedAt,
             origin: remote.origin,
-            items: remote.items,
+            items: remote.items as ShelfRecord['items'],
           };
-          jobs.push(
-            window.ledge
-              .applyRemoteShelf(payload)
-              .then(() => {
-                updated ??= { ...lastAppliedRemoteByShelf };
-                updated[remote.shelfId] = remote.localUpdatedAt;
-              })
-              .catch((error: unknown) => {
-                console.error('[sync] failed to apply remote shelf', remote.shelfId, error);
-              }),
-          );
+          try {
+            await window.ledge.applyRemoteShelf(payload);
+            updated ??= { ...lastAppliedRemoteByShelf };
+            updated[remote.shelfId] = remote.localUpdatedAt;
+          } catch (error) {
+            console.error('[sync] failed to apply remote shelf', remote.shelfId, error);
+          }
         }
-        await Promise.all(jobs);
-        if (updated) {
+        if (!cancelled && updated) {
           setLastAppliedRemoteByShelf(updated);
         }
       })();
     }, SYNC_STATE_DEBOUNCE_MS);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [lastAppliedRemoteByShelf, remoteShelves, sessionToken]);
 
   useEffect(() => {
@@ -610,59 +630,47 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     void window.ledge.setPreferences({ hasSeenShelfLimitMigration: true });
   }, [overview, hasSeenShelfLimitMigration, sessionToken]);
 
-  const requestOtp = useCallback(
-    async (nextEmail: string) => {
-      await requestOtpAction({ email: nextEmail });
-    },
-    [requestOtpAction],
-  );
+  const requestOtp = useCallback(async (nextEmail: string) => {
+    await api.client.requestOtp(nextEmail);
+  }, []);
 
   const verifyOtp = useCallback(
     async (nextEmail: string, code: string) => {
-      const result = await verifyOtpMutation({ email: nextEmail, code });
-      // verifyOtp returns `{ ok: false, reason: ... }` for failed
-      // attempts (wrong / expired / locked code) and the success
-      // shape `{ sessionToken, email }` on a valid code. Match the
-      // previous `ConvexError` user-facing message.
-      if (!("sessionToken" in result)) {
-        throw new Error("Invalid or expired sign-in code.");
-      }
-      const success = result as { sessionToken: string; email: string };
-      await window.ledge.setSyncSession({ sessionToken: success.sessionToken, email: success.email });
+      const result = await api.client.verifyOtp(nextEmail, code);
+      await window.ledge.setSyncSession({
+        sessionToken: result.sessionToken,
+        email: result.email,
+      });
       // The token was just minted by the backend, so no validation
       // round-trip is needed — adopt it directly.
-      setSessionToken(success.sessionToken);
-      setEmail(success.email);
+      setSessionToken(result.sessionToken);
+      setEmail(result.email);
+      setSessionDaysRemaining(result.daysRemaining);
       setSessionResolved(true);
+      shelvesSinceRef.current = 0;
+      setRemoteShelves(null);
     },
-    [verifyOtpMutation],
+    [],
   );
 
   const signOut = useCallback(async () => {
-    // Clear local state BEFORE revoking server-side: the revoke
-    // invalidates `overview`-style subscriptions, and Convex refetches
-    // them with the now-dead token — throwing into render if this
-    // window is still subscribed. Dropping the token first also makes
-    // sign-out work when the token is already dead (the revoke throws,
-    // but the keychain and UI still end up clean).
+    // Clear local state BEFORE revoking server-side so a dead token
+    // still leaves the UI clean.
     const token = sessionToken;
-    setSessionToken('');
-    setEmail('');
-    await window.ledge.clearSyncSession();
-    await window.ledge.setSyncState({ enabled: false, status: 'signedOut', signedInEmail: undefined });
+    await clearSessionLocal();
     if (token) {
       try {
-        await signOutMutation({ sessionToken: token });
+        await api.client.signOut(token);
       } catch {
         // Token already revoked/expired — nothing to do.
       }
     }
-  }, [sessionToken, signOutMutation]);
+  }, [sessionToken, clearSessionLocal]);
 
   const refreshSession = useCallback(async () => {
     if (!sessionToken) return;
-    await refreshSessionMutation({ sessionToken });
-  }, [sessionToken, refreshSessionMutation]);
+    await api.client.refreshSession(sessionToken);
+  }, [sessionToken]);
 
   const loadBackfillCandidates = useCallback(async () => {
     return await window.ledge.getSyncBackfillCandidates();
@@ -684,8 +692,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
           await Promise.all(
             batch.map((shelf) => {
               const cloudShelf = serializeShelfForCloud(shelf);
-              return upsertShelfMutation({
-                sessionToken,
+              return api.client.upsertShelf(sessionToken, {
                 shelfId: cloudShelf.id,
                 name: cloudShelf.name,
                 color: cloudShelf.color,
@@ -699,13 +706,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
           );
         }
 
-        // Preferences sync is a pro feature server-side; patching as a
-        // free user throws after the shelves already synced and (before
-        // this guard) reported the whole backfill as failed.
+        // Preferences sync is a pro feature server-side.
         if (localState && localState.sync.plan === 'pro') {
-          await patchPreferencesMutation({ sessionToken, values: localState.preferences });
+          await api.client.putPreferences(sessionToken, localState.preferences);
         }
         await window.ledge.setSyncState({ status: 'synced', lastSyncedAt: new Date().toISOString() });
+        await refreshCloudState();
       } catch (error) {
         // Always settle the status; a mid-batch failure used to leave
         // the UI stuck on "syncing" forever.
@@ -715,7 +721,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [localState, patchPreferencesMutation, sessionToken, upsertShelfMutation],
+    [localState, sessionToken, refreshCloudState],
   );
 
   const refreshEntitlements = useCallback(
@@ -723,17 +729,18 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       if (!sessionToken) {
         return;
       }
-      await refreshEntitlementsAction({ sessionToken, ...input });
+      await api.client.refreshEntitlements(sessionToken, input);
+      await refreshCloudState();
     },
-    [refreshEntitlementsAction, sessionToken],
+    [sessionToken, refreshCloudState],
   );
 
   const value = useMemo(
     () => ({
-      configured: true,
+      configured,
       sessionToken,
       email,
-      overview: overview ?? null,
+      overview,
       sessionDaysRemaining,
       requestOtp,
       verifyOtp,
@@ -742,11 +749,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       loadBackfillCandidates,
       syncSelectedShelves,
       refreshEntitlements,
+      refreshCloudState,
     }),
     [
+      configured,
       email,
       loadBackfillCandidates,
       overview,
+      refreshCloudState,
       refreshEntitlements,
       refreshSession,
       requestOtp,

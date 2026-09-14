@@ -164,6 +164,10 @@ export class StateStore {
     return this.shelves.replaceRecentShelf(shelf)
   }
 
+  upsertRecentShelf(shelf: Parameters<ShelfStore['upsertRecentShelf']>[0]) {
+    return this.shelves.upsertRecentShelf(shelf)
+  }
+
   removeRecentShelf(id: string) {
     return this.shelves.removeRecentShelf(id)
   }

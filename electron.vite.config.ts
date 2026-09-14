@@ -4,11 +4,27 @@ import react from '@vitejs/plugin-react';
 
 const root = resolve(__dirname, '.');
 const shared = resolve(root, 'src/shared');
+
+/** Extract origin for CSP, ignoring invalid values. */
+function cspOrigin(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
+const apiOrigin = cspOrigin(process.env.VITE_LEDGE_API_URL);
+const checkoutOrigin = cspOrigin(process.env.VITE_PRO_CHECKOUT_URL);
+const extraConnect = [apiOrigin, checkoutOrigin].filter((v): v is string => Boolean(v));
+const connectExtra = extraConnect.length > 0 ? ` ${extraConnect.join(' ')}` : '';
+
 const rendererCspByMode = {
   serve:
-    "default-src 'self' http://localhost:* ws://localhost:* https://*.convex.cloud wss://*.convex.cloud; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset: https://*.convex.cloud; connect-src 'self' http://localhost:* ws://localhost:* https://*.convex.cloud wss://*.convex.cloud; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';",
+    `default-src 'self' http://localhost:* ws://localhost:*${connectExtra}; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset:${connectExtra}; connect-src 'self' http://localhost:* ws://localhost:*${connectExtra}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`,
   build:
-    "default-src 'self' https://*.convex.cloud wss://*.convex.cloud; script-src 'self'; style-src 'self'; img-src 'self' data: blob: file: ledge-asset: https://*.convex.cloud; connect-src 'self' https://*.convex.cloud wss://*.convex.cloud; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';",
+    `default-src 'self'${connectExtra}; script-src 'self'; style-src 'self'; img-src 'self' data: blob: file: ledge-asset:${connectExtra}; connect-src 'self'${connectExtra}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`,
 } as const;
 
 export default defineConfig(({ command }) => ({

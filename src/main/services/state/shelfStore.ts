@@ -204,6 +204,25 @@ export class ShelfStore {
     this.persister.save(state)
   }
 
+  /**
+   * Insert-or-update a recent shelf. Cloud pull uses this so a shelf this
+   * device has never seen lands in recents instead of being dropped
+   * (`replaceRecentShelf` still no-ops unknown ids for non-sync callers).
+   * Insert respects the plan-based recents cap; overflow drops the oldest.
+   */
+  upsertRecentShelf(shelf: ShelfRecord): void {
+    const state = this.getState()
+    const index = state.recentShelves.findIndex((entry) => entry.id === shelf.id)
+    if (index === -1) {
+      const recentsLimit = recentShelvesLimitForPlan(state.sync.plan)
+      state.recentShelves = [shelf, ...state.recentShelves].slice(0, recentsLimit)
+      this.persister.save(state)
+      return
+    }
+    state.recentShelves[index] = shelf
+    this.persister.save(state)
+  }
+
   removeRecentShelf(id: string): void {
     const state = this.getState()
     const next = state.recentShelves.filter((entry) => entry.id !== id)

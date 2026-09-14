@@ -5,7 +5,7 @@ import { compareRanks, ranksBetween, type Rank } from '@shared/lexorank';
 /**
  * Pure helpers for team shelf sync. The provider (React) is a thin shell
  * around these so every decision — mapping, diffing, rank assignment —
- * is unit-testable without Convex or IPC.
+ * is unit-testable without the cloud API or IPC.
  *
  * Model: the local team shelf keeps Ledge's numeric `order` (0..n-1).
  * The server stores fractional string ranks. `buildTeamPushPlan`
@@ -17,10 +17,8 @@ import { compareRanks, ranksBetween, type Rank } from '@shared/lexorank';
 /** v1 teams share exactly one shelf per team under this canonical id. */
 export const TEAM_SHELF_ID = 'default';
 
-/** Shape returned by `api.sync.getTeamShelfItems` (a `shelfItems` doc). */
+/** Wire shape from `GET /teams/:teamId/shelf/items`. */
 export interface RemoteTeamItemDoc {
-  _id: string;
-  _creationTime: number;
   itemId: string;
   kind: ShelfItemRecord['kind'];
   title: string;
@@ -40,6 +38,7 @@ export interface RemoteTeamItemDoc {
   language?: string;
   version: number;
   serverUpdatedAt: number;
+  createdAt: number;
   createdByUser?: { email: string };
 }
 
@@ -105,7 +104,7 @@ export function remoteToLocalItems(docs: RemoteTeamItemDoc[]): ShelfItemRecord[]
   for (const doc of sortRemoteDocs(docs)) {
     const base = {
       id: doc.itemId,
-      createdAt: new Date(doc._creationTime).toISOString(),
+      createdAt: new Date(doc.createdAt).toISOString(),
       order: items.length,
       title: doc.title,
       subtitle: doc.subtitle,

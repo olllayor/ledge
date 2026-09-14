@@ -13,7 +13,7 @@
     "dev": "node scripts/check-install.mjs && pnpm brand:build && pnpm native:build && electron-vite dev",
     "build": "node scripts/check-install.mjs && pnpm clean:build && pnpm brand:build && pnpm native:build && electron-vite build",
     "preview": "pnpm brand:build && pnpm native:build && electron-vite preview",
-    "lint": "node scripts/check-install.mjs && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p convex/tsconfig.json",
+    "lint": "node scripts/check-install.mjs && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && pnpm --filter ledge-cloudflare typecheck",
     "test": "node scripts/check-install.mjs && vitest run && pnpm native:test",
     "test:watch": "vitest",
     "video:studio": "pnpm --dir release-video video:studio",
@@ -33,21 +33,17 @@
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs patch --dry-run",
     "release:notes": "node scripts/release-notes.mjs",
-    "convex:dev": "convex dev",
-    "convex:codegen": "convex codegen",
     "commitlint": "commitlint --from HEAD~1 --to HEAD --verbose"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.0",
     "@commitlint/config-conventional": "^19.6.0",
-    "@edge-runtime/vm": "^5.0.0",
     "@electron/asar": "3.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "22.20.1",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.2.0",
-    "convex-test": "^0.0.53",
     "electron": "41.2.0",
     "electron-builder": "26.9.0",
     "electron-vite": "5.0.0",
@@ -112,11 +108,8 @@
     "nodeGypRebuild": false
   },
   "dependencies": {
-    "@convex-dev/migrations": "^0.3.5",
     "clsx": "^2.1.1",
-    "convex": "^1.38.0",
     "fractional-indexing": "^4.0.0",
-    "resend": "^6.17.2",
     "tailwind-merge": "^3.6.0"
   },
   "engines": {

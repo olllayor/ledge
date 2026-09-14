@@ -29,8 +29,6 @@ function remoteDoc(
   overrides: Partial<RemoteTeamItemDoc> = {},
 ): RemoteTeamItemDoc {
   return {
-    _id: `doc-${itemId}`,
-    _creationTime: 1_700_000_000_000,
     itemId,
     kind: 'text',
     title: itemId,
@@ -40,6 +38,7 @@ function remoteDoc(
     text: `content-${itemId}`,
     version: 1,
     serverUpdatedAt: 1_700_000_000_000,
+    createdAt: 1_700_000_000_000,
     ...overrides,
   }
 }

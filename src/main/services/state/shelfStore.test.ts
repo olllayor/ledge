@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ShelfStore } from './shelfStore'
 import { StatePersister, buildStateFileLayout, defaultPreferences, defaultSyncStateRecord, defaultClipboardSettingsRecord } from './persister'
 import type { PersistedState } from './types'
-import type { ShelfItemRecord } from '@shared/schema'
+import type { ShelfItemRecord, ShelfRecord } from '@shared/schema'
 
 const tempDirs: string[] = []
 
@@ -266,5 +266,36 @@ describe('ShelfStore', () => {
     // file-backed; no shelf mutation should have happened.
     expect(updated).toBeNull()
     expect(shelves.getLiveShelf()?.items[0]?.id).toBe('text-1')
+  })
+
+  it('upsertRecentShelf inserts unknown remotes and updates known ones', async () => {
+    const { shelves, persister } = await buildShelfStore()
+
+    shelves.createShelf('manual')
+    shelves.appendItems([makeItem('a', 0)])
+    shelves.closeShelf()
+    const live = shelves.createShelf('manual')
+    void live
+
+    const unknown: ShelfRecord = {
+      id: 'from-other-device',
+      name: 'remote',
+      color: 'ember',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      origin: 'manual',
+      items: [makeItem('r1', 0)],
+    }
+    shelves.upsertRecentShelf(unknown)
+    await persister.whenIdle()
+
+    const recents = shelves.getRecentShelves()
+    expect(recents.find((s) => s.id === 'from-other-device')?.name).toBe('remote')
+
+    shelves.upsertRecentShelf({ ...unknown, name: 'remote-updated' })
+    await persister.whenIdle()
+    expect(shelves.getRecentShelves().find((s) => s.id === 'from-other-device')?.name).toBe(
+      'remote-updated',
+    )
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { proCheckoutUrl, openProCheckout } from './proCheckout';
+import { proCheckoutUrl, openProCheckout, isProCheckoutConfigured } from './proCheckout';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -7,20 +7,18 @@ afterEach(() => {
 });
 
 describe('proCheckoutUrl', () => {
-  it('returns the default checkout URL when no email is given', () => {
-    expect(proCheckoutUrl()).toBe('http://localhost:5173/pro');
+  it('throws when VITE_PRO_CHECKOUT_URL is unset', () => {
+    expect(() => proCheckoutUrl()).toThrow(/VITE_PRO_CHECKOUT_URL/);
+  });
+
+  it('returns the configured URL when no email is given', () => {
+    vi.stubEnv('VITE_PRO_CHECKOUT_URL', 'https://store.lemonsqueezy.com/checkout/buy/abc');
+    expect(proCheckoutUrl()).toBe('https://store.lemonsqueezy.com/checkout/buy/abc');
   });
 
   it('appends the email as the Lemon Squeezy checkout[email] param', () => {
-    const url = new URL(proCheckoutUrl('me@example.com'));
-    expect(url.searchParams.get('checkout[email]')).toBe('me@example.com');
-  });
-
-  it('honors VITE_PRO_CHECKOUT_URL override', () => {
     vi.stubEnv('VITE_PRO_CHECKOUT_URL', 'https://store.lemonsqueezy.com/checkout/buy/abc');
     const url = new URL(proCheckoutUrl('me@example.com'));
-    expect(url.origin).toBe('https://store.lemonsqueezy.com');
-    expect(url.pathname).toBe('/checkout/buy/abc');
     expect(url.searchParams.get('checkout[email]')).toBe('me@example.com');
   });
 
@@ -30,8 +28,29 @@ describe('proCheckoutUrl', () => {
   });
 });
 
+describe('isProCheckoutConfigured', () => {
+  it('is false when unset', () => {
+    expect(isProCheckoutConfigured()).toBe(false);
+  });
+
+  it('is true when set', () => {
+    vi.stubEnv('VITE_PRO_CHECKOUT_URL', 'https://store.lemonsqueezy.com/checkout/buy/abc');
+    expect(isProCheckoutConfigured()).toBe(true);
+  });
+});
+
 describe('openProCheckout', () => {
+  it('does not open a window when the URL is unset', () => {
+    const open = vi.fn();
+    vi.stubGlobal('window', { open } as unknown as Window);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    openProCheckout({ email: 'me@example.com', source: 'test' });
+    expect(open).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
   it('opens the checkout URL in a new tab with the email prefilled', () => {
+    vi.stubEnv('VITE_PRO_CHECKOUT_URL', 'https://store.lemonsqueezy.com/checkout/buy/abc');
     const open = vi.fn();
     vi.stubGlobal('window', { open } as unknown as Window);
     openProCheckout({ email: 'me@example.com', source: 'test' });

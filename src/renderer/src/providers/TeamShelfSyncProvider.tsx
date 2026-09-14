@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../../../convex/_generated/api';
-import type { Id } from '../../../../convex/_generated/dataModel';
+import { api, isNetworkError } from '../lib/apiClient';
 import { useSync } from './SyncProvider';
 import { useTeams } from './TeamsProvider';
 import { selectActiveShelf } from '../hooks/selectors';
@@ -17,9 +15,11 @@ import {
   type SyncedMap,
 } from './teamSync';
 
+const TEAM_SHELF_POLL_MS = 30_000;
+
 /**
  * Reconciles the active team's shelf between the main-process state
- * (UI source of truth) and Convex (server source of truth).
+ * (UI source of truth) and the Cloudflare Worker (server source of truth).
  *
  * Two bookkeeping maps break the sync loop:
  *  - `serverInfo`   — last-seen server rank/version per item (push inputs)
@@ -36,17 +36,8 @@ export function TeamShelfSyncProvider({ children }: { children: ReactNode }) {
   const { activeTeamId } = useTeams();
   const { state: activeShelf } = useLedgeState(selectActiveShelf);
 
-  const remoteSnapshot = useQuery(
-    api.sync.getTeamShelfItems,
-    sessionToken && activeTeamId
-      ? { sessionToken, teamId: activeTeamId as Id<'teams'>, shelfId: TEAM_SHELF_ID }
-      : 'skip',
-  ) as { items: RemoteTeamItemDoc[]; truncated: boolean } | undefined;
-  const remoteDocs = remoteSnapshot?.items;
-  const remoteTruncated = remoteSnapshot?.truncated ?? false;
-
-  const upsertItem = useMutation(api.sync.upsertShelfItem);
-  const deleteItem = useMutation(api.sync.deleteShelfItem);
+  const [remoteDocs, setRemoteDocs] = useState<RemoteTeamItemDoc[] | null>(null);
+  const [remoteTruncated, setRemoteTruncated] = useState(false);
 
   const serverInfoRef = useRef<SyncedMap>(new Map());
   const localBaselineRef = useRef<Map<string, string>>(new Map());
@@ -63,6 +54,7 @@ export function TeamShelfSyncProvider({ children }: { children: ReactNode }) {
   // Mirrors the current team so settled callbacks can detect that the
   // user switched teams while their push/mirror was in flight.
   const activeTeamIdRef = useRef<string | undefined>(activeTeamId);
+  const pollInFlightRef = useRef(false);
 
   // Team context switches are a clean slate: ranks and versions belong
   // to one team's shelf.
@@ -75,11 +67,60 @@ export function TeamShelfSyncProvider({ children }: { children: ReactNode }) {
     // flaky sync on team A silences pushes for team B for up to 30s.
     pushFailuresRef.current = 0;
     pushBackoffUntilRef.current = 0;
+    setRemoteDocs(null);
+    setRemoteTruncated(false);
     setSyncTick((tick) => tick + 1);
   }, [activeTeamId]);
 
+  // Poll the shared team shelf. Convex's reactive subscription is gone;
+  // first-wave refresh is interval + focus + after local mutations.
   useEffect(() => {
-    if (!sessionToken || !activeTeamId || remoteDocs === undefined) {
+    if (!sessionToken || !activeTeamId) {
+      setRemoteDocs(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const pull = async () => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      try {
+        const snapshot = await api.client.listTeamShelfItems(
+          sessionToken,
+          activeTeamId,
+          TEAM_SHELF_ID,
+        );
+        if (cancelled || activeTeamIdRef.current !== activeTeamId) return;
+        setRemoteDocs(snapshot.items as unknown as RemoteTeamItemDoc[]);
+        setRemoteTruncated(snapshot.truncated ?? false);
+      } catch (error) {
+        if (isNetworkError(error)) {
+          return;
+        }
+        console.error('[team-shelf] pull failed', error);
+      } finally {
+        pollInFlightRef.current = false;
+      }
+    };
+
+    void pull();
+    const timer = window.setInterval(() => {
+      void pull();
+    }, TEAM_SHELF_POLL_MS);
+    const onFocus = () => {
+      void pull();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [sessionToken, activeTeamId]);
+
+  useEffect(() => {
+    if (!sessionToken || !activeTeamId || remoteDocs === null) {
       return;
     }
 
@@ -128,22 +169,13 @@ export function TeamShelfSyncProvider({ children }: { children: ReactNode }) {
           for (const itemId of plan.deletes) {
             const info = serverInfoRef.current.get(itemId);
             if (!info) continue; // never made it to the server
-            await deleteItem({
-              sessionToken,
-              teamId: activeTeamId,
-              shelfId: TEAM_SHELF_ID,
-              itemId,
+            await api.client.deleteTeamShelfItem(sessionToken, activeTeamId, itemId, {
               version: info.version + 1,
               serverUpdatedAt: Date.now(),
             });
           }
           for (const upsert of plan.upserts) {
-            await upsertItem({
-              sessionToken,
-              teamId: activeTeamId,
-              shelfId: TEAM_SHELF_ID,
-              ...upsert,
-            });
+            await api.client.upsertTeamShelfItem(sessionToken, activeTeamId, upsert);
           }
         })
         .then(() => {
@@ -222,7 +254,7 @@ export function TeamShelfSyncProvider({ children }: { children: ReactNode }) {
     }
     localBaselineRef.current = remoteFps;
     serverInfoRef.current = syncedFromRemote(remoteDocs);
-  }, [sessionToken, activeTeamId, activeShelf, remoteDocs, remoteTruncated, syncTick, upsertItem, deleteItem]);
+  }, [sessionToken, activeTeamId, activeShelf, remoteDocs, remoteTruncated, syncTick]);
 
   return <>{children}</>;
 }

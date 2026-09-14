@@ -260,9 +260,9 @@ export class ShelfController {
     //      live shelf) -> the personal live shelf is the destination.
     //   2. A recent shelf id matches remote -> that recent entry is the
     //      destination.
-    //   3. Neither -> drop. The user has a different shelf open locally and
-    //      no history of this one; silently adopting it would clobber the
-    //      user's work.
+    //   3. Neither (and a personal live shelf is open) -> insert the
+    //      unknown remote into recents. Never no-op: a shelf created on
+    //      another device must appear in Recents, not vanish.
     const sanitized = sanitizeRemoteFileRefs(remoteShelf)
     const liveShelf = this.deps.stateStore.getPersonalLiveShelf()
     const recentShelf =
@@ -277,7 +277,8 @@ export class ShelfController {
       // first-contact case where the device has never seen this shelf.
       this.deps.stateStore.replacePersonalLiveShelf(sanitized)
     } else {
-      this.deps.stateStore.replaceRecentShelf(sanitized)
+      // Existing recent (replace) or brand-new remote (insert into recents).
+      this.deps.stateStore.upsertRecentShelf(sanitized)
     }
   }
 

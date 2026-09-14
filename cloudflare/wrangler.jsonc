@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ledge-api",
+  "main": "src/index.ts",
+  "account_id": "7e5609be6e14abf45b63106826009ae7",
+  "compatibility_date": "2025-01-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ledge-db",
+      "database_id": "1cea5e7c-f09e-4662-a2f1-424e83b2b401",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "ledge-assets"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
+  "vars": {
+    "EMAIL_FROM": "Ledge <noreply@ledge.app>"
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

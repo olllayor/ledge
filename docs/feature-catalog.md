@@ -199,7 +199,7 @@ Finder drag — are covered by `pnpm native:test` + manual QA).
 
 | # | Feature | User Story | Expected Behaviour | Source | Status | Notes |
 |---|---------|------------|---------------------|--------|--------|-------|
-| 5.5.1 | "Cloud sync is not configured" empty state | As a user without `VITE_CONVEX_URL`, I see a helpful message instead of a broken flow. | `CloudSyncSettings` returns early when `!sync.configured`. | `CloudSyncSettings.tsx` | Pass |  |
+| 5.5.1 | "Cloud sync is not configured" empty state | As a user without `VITE_LEDGE_API_URL`, I see a helpful message instead of a broken flow. | `CloudSyncSettings` returns early when `!sync.configured`. | `CloudSyncSettings.tsx` | Pass |  |
 | 5.5.2 | Send OTP code | As a user, I type my email and click "Send Code". | `sync.requestOtp(email)`; resend cooldown of 60 s. | `CloudSyncSettings.tsx`, `SyncProvider.tsx` | Pass |  |
 | 5.5.3 | Verify OTP code | As a user, I type the 6-digit code and click "Sign In". | `sync.verifyOtp(email, code)`; on success toast. | `CloudSyncSettings.tsx` | Pass |  |
 | 5.5.4 | Signed-in overview | As a user, I see status, plan, device count, storage bar, session days remaining. | Read from `sync.overview`. | `CloudSyncSettings.tsx` | Pass |  |

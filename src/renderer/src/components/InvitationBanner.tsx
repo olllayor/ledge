@@ -7,10 +7,10 @@ export function InvitationBanner() {
 
   if (myPendingInvitations.length === 0) return null;
 
-  async function handleAccept(token: string) {
-    setLoading(token);
+  async function handleAccept(inviteId: string) {
+    setLoading(inviteId);
     try {
-      await acceptInvitation(token);
+      await acceptInvitation(inviteId);
     } catch {
       // silently fail — user can retry
     } finally {
@@ -18,10 +18,10 @@ export function InvitationBanner() {
     }
   }
 
-  async function handleReject(token: string) {
-    setLoading(token);
+  async function handleReject(inviteId: string) {
+    setLoading(inviteId);
     try {
-      await rejectInvitation(token);
+      await rejectInvitation(inviteId);
     } catch {
       // silently fail
     } finally {
@@ -45,15 +45,15 @@ export function InvitationBanner() {
           className="invitation-banner-action is-accept"
           type="button"
           disabled={loading !== null}
-          onClick={() => void handleAccept(invite.token)}
+          onClick={() => void handleAccept(invite.id)}
         >
-          {loading === invite.token ? 'Joining…' : 'Accept'}
+          {loading === invite.id ? 'Joining…' : 'Accept'}
         </button>
         <button
           className="invitation-banner-action is-reject"
           type="button"
           disabled={loading !== null}
-          onClick={() => void handleReject(invite.token)}
+          onClick={() => void handleReject(invite.id)}
         >
           Decline
         </button>
