@@ -78,6 +78,18 @@
       {
         "from": "native/bin/DropShelfNativeAgent",
         "to": "native/DropShelfNativeAgent"
+      },
+      {
+        "from": "build/tray-icon.png",
+        "to": "icons/tray-icon.png"
+      },
+      {
+        "from": "build/tray-icon@2x.png",
+        "to": "icons/tray-icon@2x.png"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icons/icon.png"
       }
     ],
     "mac": {
@@ -89,9 +101,12 @@
       ],
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "extendInfo": {
         "CFBundleDisplayName": "Ledge",
-        "CFBundleName": "Ledge"
+        "CFBundleName": "Ledge",
+        "NSAppleEventsUsageDescription": "Ledge uses System Events to send a paste keystroke when you enable synthetic paste, so clipboard items can be inserted into the frontmost app."
       },
       "electronLanguages": [
         "en"
@@ -101,9 +116,6 @@
     "asar": {
       "smartUnpack": true
     },
-    "asarUnpack": [
-      "**/native/DropShelfNativeAgent"
-    ],
     "npmRebuild": false,
     "nodeGypRebuild": false
   },

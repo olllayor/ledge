@@ -3,6 +3,7 @@ import type { AppState } from '@shared/schema';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { loadRenderer } from './loadRenderer';
 import { resolvePreloadPath } from './preloadPath';
+import { attachRendererCrashRecovery } from './rendererCrashRecovery';
 import { lockDownWebContents } from './webSecurity';
 
 export class QuickPasteWindow {
@@ -53,8 +54,9 @@ export class QuickPasteWindow {
       this.window = null;
     });
 
-    await loadRenderer(this.window, 'quickPaste');
     lockDownWebContents(this.window);
+    attachRendererCrashRecovery(this.window);
+    await loadRenderer(this.window, 'quickPaste');
     return this.window;
   }
 

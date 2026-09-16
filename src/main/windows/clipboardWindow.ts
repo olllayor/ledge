@@ -3,6 +3,7 @@ import type { AppState } from '@shared/schema';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { loadRenderer } from './loadRenderer';
 import { resolvePreloadPath } from './preloadPath';
+import { attachRendererCrashRecovery } from './rendererCrashRecovery';
 import { lockDownWebContents } from './webSecurity';
 
 const DEFAULT_WIDTH = 920;
@@ -58,8 +59,9 @@ export class ClipboardWindow {
     this.window.on('closed', () => {
       this.window = null;
     });
-    await loadRenderer(this.window, 'clipboard');
     lockDownWebContents(this.window);
+    attachRendererCrashRecovery(this.window);
+    await loadRenderer(this.window, 'clipboard');
     return this.window;
   }
 

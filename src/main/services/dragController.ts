@@ -70,10 +70,10 @@ export function startNativeDrag(
 function defaultDragIconImage(paths: string[]): NativeImage {
   const iconCandidates = [
     ...paths,
-    join(app.getAppPath(), 'build', 'app.icns'),
-    join(process.resourcesPath, 'app.icns'),
+    // Packaged: icons shipped via extraResources
+    join(process.resourcesPath, 'icons', 'icon.png'),
+    // Dev: brand-built assets in the repo
     join(app.getAppPath(), 'build', 'icon.png'),
-    join(process.resourcesPath, 'icon.png'),
   ]
 
   for (const candidate of iconCandidates) {

@@ -24,7 +24,7 @@ const rendererCspByMode = {
   serve:
     `default-src 'self' http://localhost:* ws://localhost:*${connectExtra}; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset:${connectExtra}; connect-src 'self' http://localhost:* ws://localhost:*${connectExtra}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`,
   build:
-    `default-src 'self'${connectExtra}; script-src 'self'; style-src 'self'; img-src 'self' data: blob: file: ledge-asset:${connectExtra}; connect-src 'self'${connectExtra}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`,
+    `default-src 'self'${connectExtra}; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: ledge-asset:${connectExtra}; connect-src 'self'${connectExtra}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';`,
 } as const;
 
 export default defineConfig(({ command }) => ({

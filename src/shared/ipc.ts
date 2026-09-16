@@ -3,6 +3,7 @@ import type {
   AppState,
   CreateShelfInput,
   IngestPayload,
+  NotchGeometry,
   PermissionStatus,
   PreferencePatch,
   PreferencesRecord,
@@ -79,6 +80,8 @@ export const IPC_CHANNELS = {
   notchDropoutShow: 'ledge:notch-dropout:show',
   notchDropoutHide: 'ledge:notch-dropout:hide',
   notchDropoutStateChanged: 'ledge:notch-dropout:state-changed',
+  notchDropoutGeometry: 'ledge:notch-dropout:geometry',
+  notchDropoutGeometryGet: 'ledge:notch-dropout:geometry-get',
   notchDropoutDragState: 'ledge:notch-dropout:drag-state',
   // ---- Team sharing ----
   setTeamState: 'ledge:set-team-state',
@@ -266,4 +269,15 @@ export interface LedgeAPI {
   notchDropoutHide(): void;
   notchDropoutDragState(suppressed: boolean): void;
   onNotchDropoutStateChanged(listener: (hint: { state: 'visible' | 'hidden' | 'expanded' | 'collapsed' }) => void): () => void;
+  /**
+   * Measured notch silhouette for the display the panel anchors to. Main
+   * pushes this before each reveal so the renderer can hug the hardware
+   * notch instead of guessing its size. Returned function unsubscribes.
+   */
+  onNotchDropoutGeometry(listener: (geometry: NotchGeometry) => void): () => void;
+  /**
+   * Pull the current geometry. The panel mounts long before the first reveal,
+   * so a push-only channel would leave the very first opening un-shaped.
+   */
+  notchDropoutGeometry(): Promise<NotchGeometry | null>;
 }

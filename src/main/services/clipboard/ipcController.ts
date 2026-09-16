@@ -282,5 +282,6 @@ export class ClipboardIpcController {
         win.hideUnlessCursorInside()
       }
     })
+    this.bus.handle(IPC_CHANNELS.notchDropoutGeometryGet, () => win.getGeometry())
   }
 }

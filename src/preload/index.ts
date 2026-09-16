@@ -28,6 +28,7 @@ import {
   clipboardEntrySchema,
   clipboardSettingsSchema,
   ingestPayloadSchema,
+  notchGeometrySchema,
   permissionStatusSchema,
   preferencePatchSchema,
   preferencesRecordSchema,
@@ -335,6 +336,23 @@ const api: LedgeAPI = {
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.notchDropoutStateChanged, wrapped);
     };
+  },
+  onNotchDropoutGeometry(listener) {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      const parsed = notchGeometrySchema.safeParse(payload);
+      if (!parsed.success) return;
+      listener(parsed.data);
+    };
+    ipcRenderer.on(IPC_CHANNELS.notchDropoutGeometry, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.notchDropoutGeometry, wrapped);
+    };
+  },
+  async notchDropoutGeometry() {
+    const result = await ipcRenderer.invoke(IPC_CHANNELS.notchDropoutGeometryGet);
+    if (result === null || result === undefined) return null;
+    const parsed = notchGeometrySchema.safeParse(result);
+    return parsed.success ? parsed.data : null;
   },
 };
 

@@ -137,9 +137,13 @@ function createRestoreMenuItem(shelf: ShelfRecord, onRestore: (id: string) => vo
 }
 
 function createTrayImage() {
-  const resourcesDir = join(__dirname, '..', '..', 'build')
+  // Packaged icons ship via extraResources; dev loads from the repo build/.
+  const resourcesDir = app.isPackaged
+    ? join(process.resourcesPath, 'icons')
+    : join(app.getAppPath(), 'build')
 
-  // 1. Prefer the dedicated menubar icon (monochrome, pixel-fitted for 16 px)
+  // 1. Prefer the dedicated menubar icon (monochrome, pixel-fitted for 16 px).
+  // createFromPath auto-picks tray-icon@2x.png on Retina when it sits beside the 1x.
   const trayPath = join(resourcesDir, 'tray-icon.png')
   const trayImage = nativeImage.createFromPath(trayPath)
   if (!trayImage.isEmpty()) {
@@ -147,7 +151,7 @@ function createTrayImage() {
     return trayImage
   }
 
-  // 2. Fallback to the generic app icon (only during transition)
+  // 2. Fallback to the generic app icon
   const fallbackPath = join(resourcesDir, 'icon.png')
   const fallback = nativeImage.createFromPath(fallbackPath)
   if (!fallback.isEmpty()) {

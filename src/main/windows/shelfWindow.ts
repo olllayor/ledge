@@ -3,6 +3,7 @@ import type { AppState } from '@shared/schema';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { loadRenderer } from './loadRenderer';
 import { resolvePreloadPath } from './preloadPath';
+import { attachRendererCrashRecovery } from './rendererCrashRecovery';
 import { lockDownWebContents } from './webSecurity';
 
 export class ShelfWindow {
@@ -56,8 +57,9 @@ export class ShelfWindow {
       this.manualBounds = null;
       this.window = null;
     });
-    await loadRenderer(this.window, 'shelf');
     lockDownWebContents(this.window);
+    attachRendererCrashRecovery(this.window);
+    await loadRenderer(this.window, 'shelf');
     return this.window;
   }
 

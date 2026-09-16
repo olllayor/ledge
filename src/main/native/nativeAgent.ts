@@ -6,7 +6,10 @@ import {
   clipboardChangedEventSchema,
   nativeBookmarkResolveSchema,
   nativePermissionStatusSchema,
+  nativeScreenMetricsSnapshotSchema,
+  notchRevealEventSchema,
   shakeDetectedEventSchema,
+  type NativeScreenMetrics,
   type PreferencesRecord,
   type ShakeSensitivity
 } from '@shared/schema'
@@ -95,6 +98,7 @@ export class NativeAgentClient extends EventEmitter {
   private gestureEnabled = false
   private lastPreferences: PreferencesRecord | null = null
   private clipboardObserverIntervalMs: number | null = null
+  private lastNotchRevealEnabled: boolean | null = null
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private nextRestartDelayMs: number
   private shouldRestart = false
@@ -221,6 +225,12 @@ export class NativeAgentClient extends EventEmitter {
       if (this.clipboardObserverIntervalMs !== null && child === this.child) {
         await this.startClipboardObserver(this.clipboardObserverIntervalMs)
       }
+
+      // Same for the reveal gesture: the new helper process starts with it
+      // disarmed, so a restart would silently kill swipe-to-reveal.
+      if (this.lastNotchRevealEnabled !== null && child === this.child) {
+        await this.watchNotchReveal(this.lastNotchRevealEnabled)
+      }
     } catch (error) {
       if (child !== this.child) {
         return
@@ -341,6 +351,39 @@ export class NativeAgentClient extends EventEmitter {
     }
   }
 
+  /**
+   * Measured per-display notch metrics. Empty when the helper is unavailable
+   * or the platform reports nothing usable, so callers fall back to
+   * `resolveNotchGeometry`'s own defaults rather than failing.
+   */
+  async getScreenMetrics(): Promise<NativeScreenMetrics[]> {
+    if (!this.child) {
+      return []
+    }
+
+    const result = await this.call('screen.metrics')
+    return nativeScreenMetricsSchemaList(result)
+  }
+
+  /**
+   * Arm/disarm the swipe-down reveal gesture. Best-effort: the panel still
+   * opens on hover and on the hotkey when the helper refuses.
+   */
+  async watchNotchReveal(enabled: boolean): Promise<void> {
+    // Remember the desired state before the call so a crashed helper is
+    // re-armed with it on restart.
+    this.lastNotchRevealEnabled = enabled
+    if (!this.child) {
+      return
+    }
+
+    try {
+      await this.call('notch.revealWatch', { enabled })
+    } catch {
+      // Reveal gestures are a convenience; never surface a failure banner.
+    }
+  }
+
   async createBookmark(path: string): Promise<string> {
     if (!this.child) {
       return ''
@@ -439,6 +482,15 @@ export class NativeAgentClient extends EventEmitter {
 
     if (message.method === 'gesture.dragEnded') {
       this.emit('dragEnded', message.params ?? {})
+    }
+
+    if (message.method === 'notch.revealRequested') {
+      const parsed = notchRevealEventSchema.safeParse(message.params)
+      if (parsed.success) {
+        this.emit('notchRevealRequested', parsed.data)
+      } else {
+        console.warn('[ledge] nativeAgent: malformed notch.revealRequested params, ignoring.', parsed.error.flatten())
+      }
     }
 
     if (message.method === 'clipboard.changed') {
@@ -649,6 +701,16 @@ function resolveNativeBinary(): string | null {
   }
 
   return null
+}
+
+/**
+ * Tolerate an older helper that predates `screen.metrics` (or a snapshot that
+ * lost a field): metrics are advisory, so a parse failure downgrades to the
+ * fallback geometry instead of throwing into the caller.
+ */
+function nativeScreenMetricsSchemaList(result: unknown): NativeScreenMetrics[] {
+  const parsed = nativeScreenMetricsSnapshotSchema.safeParse(result)
+  return parsed.success ? parsed.data.screens : []
 }
 
 export function sensitivityThresholds(sensitivity: ShakeSensitivity): {

@@ -12,8 +12,8 @@ const renderPath = resolve(repoRoot, 'src/renderer/public/ledge-mark.png')
 const landingLogoPath = resolve(repoRoot, 'landing/assets/logo.png')
 
 if (!existsSync(sourcePath)) {
-  console.warn(`Brand source missing at ${sourcePath}; skipping brand build. Use pnpm brand:build once you add icon-source.png.`)
-  process.exit(0)
+  console.error(`Brand source missing at ${sourcePath}. Add a 1024×1024 icon-source.png, then run pnpm brand:build.`)
+  process.exit(1)
 }
 
 mkdirSync(buildDir, { recursive: true })

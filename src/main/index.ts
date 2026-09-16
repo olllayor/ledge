@@ -2,7 +2,7 @@ import { app, Menu, net, powerMonitor, protocol as protocolModule, screen, shell
 import { execFile } from 'node:child_process'
 import { extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { appStateSchema, type AppState } from '@shared/schema'
+import { appStateSchema, type AppState, type NotchRevealEvent } from '@shared/schema'
 
 function sipsToPngBuffer(icnsPath: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -43,6 +43,7 @@ import { SecureSessionStore } from './services/secureSessionStore'
 import { FEATURE_FLAGS } from './services/featureFlags'
 import { NotchDropoutWindow } from './windows/notchDropoutWindow'
 import { NotchHoverMonitor } from './services/notchHoverMonitor'
+import { NotchMetricsService } from './services/notchMetrics'
 import {
   writeSecondInstanceMarker,
   startSingleInstanceWatch,
@@ -88,6 +89,7 @@ let peekWindow: PeekWindow
 let clipboardWindow: ClipboardWindow
 let notchDropoutWindow: NotchDropoutWindow | null = null
 let notchHoverMonitor: NotchHoverMonitor | null = null
+let notchMetrics: NotchMetricsService | null = null
 let clipboardMonitor: ClipboardMonitor
 let clipboardHistory: ClipboardHistoryService
 let inactivityTimer: InactivityTimer
@@ -237,7 +239,20 @@ app.whenReady().then(async () => {
   clipboardWindow = new ClipboardWindow()
 
   if (FEATURE_FLAGS.useNotchDropout) {
-    notchDropoutWindow = new NotchDropoutWindow()
+    // Measured notch geometry comes from the Swift helper (AppKit is the only
+    // place `safeAreaInsets`/`auxiliaryTopLeftArea` exist). Cached, and only
+    // refreshed on startup or a display change, so the reveal path never waits
+    // on a native round-trip.
+    const metrics = new NotchMetricsService({
+      fetchMetrics: () => nativeAgent.getScreenMetrics(),
+      onError: (error) => {
+        console.warn('[ledge] notch metrics unavailable, using fallback geometry:', error)
+      },
+    })
+    notchMetrics = metrics
+    notchDropoutWindow = new NotchDropoutWindow({
+      resolveGeometry: (display) => metrics.geometryForDisplay(display),
+    })
     notchHoverMonitor = new NotchHoverMonitor({
       onEnterHotZone: () => {
         void notchDropoutWindow?.show()
@@ -258,6 +273,8 @@ app.whenReady().then(async () => {
           point.y <= bounds.y + bounds.height
         )
       },
+      resolveGeometry: (display) => metrics.geometryForDisplay(display),
+      panelBounds: () => notchDropoutWindow?.getPanelBounds() ?? null,
     })
     notchHoverMonitor.start()
   }
@@ -425,6 +442,31 @@ app.whenReady().then(async () => {
   nativeAgent.on('shakeDetected', (event: ShakeDetectedEvent) => {
     void shelfController.handleShakeDetected(event)
   })
+
+  if (FEATURE_FLAGS.useNotchDropout && notchMetrics) {
+    const metrics = notchMetrics
+
+    // Prime the cache so the first reveal already hugs the measured notch.
+    void metrics.refresh()
+
+    // Swipe-down at the top centre reveals the panel (Sapphire's
+    // HiddenNotchRevealMonitor behaviour, driven by the helper's event tap).
+    void nativeAgent.watchNotchReveal(true)
+    nativeAgent.on('notchRevealRequested', (_event: NotchRevealEvent) => {
+      void metrics.refresh()
+      void notchDropoutWindow?.show()
+    })
+
+    // A display added/removed/rescaled invalidates every measurement: drop the
+    // cache, re-measure, and re-anchor the panel.
+    const handleDisplayChange = () => {
+      metrics.invalidate()
+      void metrics.refresh().then(() => notchDropoutWindow?.reposition())
+    }
+    screen.on('display-added', handleDisplayChange)
+    screen.on('display-removed', handleDisplayChange)
+    screen.on('display-metrics-changed', handleDisplayChange)
+  }
 
   // Startup heal (docs/vorssaint-shelf-plan.md Phase 1): one bookmark
   // chance for every dead path on the live shelf before the first

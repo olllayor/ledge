@@ -296,6 +296,55 @@ export const relinkItemInputSchema = z.object({
   itemId: z.string(),
 });
 
+export const screenRectSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+
+/**
+ * Per-display notch metrics reported by the Swift helper. Electron exposes
+ * neither `safeAreaInsets` nor the auxiliary top areas, so the native agent
+ * measures them on the AppKit side and main derives the notch silhouette.
+ *
+ * Coordinates are Quartz/Electron screen points (`y` grows downward from the
+ * main display's top edge), matching `screen.getAllDisplays()`.
+ */
+export const nativeScreenMetricsSchema = z.object({
+  displayId: z.number().int().default(0),
+  frame: screenRectSchema,
+  visibleFrame: screenRectSchema,
+  hasNotch: z.boolean().default(false),
+  notchWidth: z.number().default(0),
+  notchHeight: z.number().default(0),
+  menuBarHeight: z.number().default(0),
+  safeAreaTop: z.number().default(0),
+});
+
+export const nativeScreenMetricsSnapshotSchema = z.object({
+  screens: z.array(nativeScreenMetricsSchema).default([]),
+});
+
+/** Resolved notch silhouette for one display, in Electron screen coordinates. */
+export const notchGeometrySchema = z.object({
+  hasNotch: z.boolean(),
+  menuBarHeight: z.number(),
+  notchWidth: z.number(),
+  notchHeight: z.number(),
+  /** Scale against the 1728×1117 design reference (clamped 0.85–1.10). */
+  scale: z.number(),
+  cornerRadius: z.number(),
+  /** Screen x of the notch centre; the panel is anchored here. */
+  centerX: z.number(),
+  /** Screen y of the top edge the panel is flush against. */
+  top: z.number(),
+});
+
+export const notchRevealEventSchema = z.object({
+  displayId: z.number().int().default(0),
+});
+
 export const syncStatePatchSchema = syncStateSchema.partial();
 
 export type AppState = z.infer<typeof appStateSchema>;
@@ -307,6 +356,9 @@ export type FileBackedShelfItem =
   | z.infer<typeof fileItemSchema>
   | z.infer<typeof folderItemSchema>
   | z.infer<typeof imageAssetItemSchema>;
+export type NativeScreenMetrics = z.infer<typeof nativeScreenMetricsSchema>;
+export type NotchGeometry = z.infer<typeof notchGeometrySchema>;
+export type NotchRevealEvent = z.infer<typeof notchRevealEventSchema>;
 export type PermissionStatus = z.infer<typeof permissionStatusSchema>;
 export type PreferencePatch = z.infer<typeof preferencePatchSchema>;
 export type PreferencesRecord = z.infer<typeof preferencesRecordSchema>;

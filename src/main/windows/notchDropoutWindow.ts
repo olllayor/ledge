@@ -1,19 +1,41 @@
-import { BrowserWindow, screen } from 'electron';
-import type { AppState } from '@shared/schema';
+import { BrowserWindow, screen, type Display } from 'electron';
+import type { AppState, NotchGeometry } from '@shared/schema';
 import { IPC_CHANNELS } from '@shared/ipc';
+import { resolveNotchGeometry, type Rect } from '../services/notchGeometry';
 import { loadRenderer } from './loadRenderer';
 import { resolvePreloadPath } from './preloadPath';
+import { attachRendererCrashRecovery } from './rendererCrashRecovery';
 import { lockDownWebContents } from './webSecurity';
 
 const PANEL_WIDTH = 700;
 const PANEL_HEIGHT = 200;
-const PEEK_BELOW_MENUBAR = 0;
-const PEEK_FALLBACK_MENUBAR_HEIGHT = 32;
+
+export interface NotchDropoutWindowOptions {
+  /**
+   * Resolve the notch silhouette for a display. Defaults to the un-measured
+   * fallback (menu-bar-height band, classic notch width) so the panel keeps
+   * working before the Swift helper answers — or if it never does.
+   */
+  resolveGeometry?: (display: Display) => NotchGeometry;
+  /** Anchor display; defaults to the display under the cursor. */
+  resolveDisplay?: () => Display;
+}
 
 export class NotchDropoutWindow {
   private window: BrowserWindow | null = null;
+  private geometry: NotchGeometry | null = null;
+  private readonly resolveDisplay: () => Display;
+  private readonly resolveGeometry: (display: Display) => NotchGeometry;
   private _suppressHide = false;
   private suppressHideSince = 0;
+
+  constructor(options: NotchDropoutWindowOptions = {}) {
+    this.resolveDisplay =
+      options.resolveDisplay ??
+      (() => screen.getDisplayNearestPoint(screen.getCursorScreenPoint()));
+    this.resolveGeometry =
+      options.resolveGeometry ?? ((display) => resolveNotchGeometry(display, null));
+  }
 
   get suppressHide(): boolean {
     return this._suppressHide;
@@ -95,18 +117,41 @@ export class NotchDropoutWindow {
       this.window = null;
     });
 
-    await loadRenderer(this.window, 'notchDropout');
     lockDownWebContents(this.window);
+    attachRendererCrashRecovery(this.window);
+    await loadRenderer(this.window, 'notchDropout');
     return this.window;
   }
 
   async show(): Promise<void> {
     const window = await this.ensure();
-    this.positionTopCenter(window);
+    this.applyGeometry(window);
     window.show();
     window.webContents.send(IPC_CHANNELS.notchDropoutStateChanged, {
       state: 'visible',
     });
+  }
+
+  /**
+   * Re-anchor the panel to the measured notch. Called on reveal and whenever
+   * macOS reports a display change: a hot-plug must not leave the panel
+   * hugging the notch of a display that is no longer there.
+   */
+  reposition(): void {
+    if (!this.window || this.window.isDestroyed()) return;
+    this.applyGeometry(this.window);
+  }
+
+  /** Latest silhouette pushed to the renderer, or null before the first show. */
+  getGeometry(): NotchGeometry | null {
+    return this.geometry;
+  }
+
+  /** Visible panel bounds in screen coordinates (drives hover hysteresis). */
+  getPanelBounds(): Rect | null {
+    if (!this.window || this.window.isDestroyed() || !this.window.isVisible()) return null;
+    const bounds = this.window.getBounds();
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
   }
 
   hide(): void {
@@ -170,15 +215,30 @@ export class NotchDropoutWindow {
     return this.window;
   }
 
-  private positionTopCenter(window: BrowserWindow): void {
-    const cursor = screen.getCursorScreenPoint();
-    const display = screen.getDisplayNearestPoint(cursor);
-    const { bounds, workArea } = display;
-    const hasMenuBar = workArea.y > bounds.y;
-    const menubarHeight = hasMenuBar ? workArea.y : bounds.y + (bounds.y === 0 ? PEEK_FALLBACK_MENUBAR_HEIGHT : 0);
-    const windowBounds = window.getBounds();
-    const x = Math.round(workArea.x + (workArea.width - windowBounds.width) / 2);
-    const y = menubarHeight + PEEK_BELOW_MENUBAR;
-    window.setBounds({ x, y, width: windowBounds.width, height: windowBounds.height }, false);
+  /**
+   * Anchor the panel to the notch: flush against the top edge on a notched
+   * display, just below the menu bar otherwise. The window stays full-size
+   * (the renderer clips it) so the expanded card is never cut off.
+   */
+  private applyGeometry(window: BrowserWindow): void {
+    const display = this.resolveDisplay();
+    const geometry = this.resolveGeometry(display);
+    this.geometry = geometry;
+
+    const width = Math.max(PANEL_WIDTH, Math.round(geometry.notchWidth));
+    const { bounds } = display;
+    const centeredX = Math.round(geometry.centerX - width / 2);
+    const minX = bounds.x;
+    const maxX = bounds.x + bounds.width - width;
+    const x = Math.round(Math.min(Math.max(centeredX, minX), Math.max(minX, maxX)));
+
+    window.setBounds(
+      { x, y: Math.round(geometry.top), width, height: PANEL_HEIGHT },
+      false,
+    );
+
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.notchDropoutGeometry, geometry);
+    }
   }
 }

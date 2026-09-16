@@ -129,7 +129,7 @@ export function ClipboardSettings({ state, showToast }: { state: AppState; showT
           }
         />
         <SettingsRow
-          title="Synthetic paste (Accessibility)"
+          title="Synthetic paste (Automation)"
           copy="Opt in: after writing to the clipboard, also send a ⌘V keystroke via osascript. May be blocked by some apps."
           trailing={
             <Toggle

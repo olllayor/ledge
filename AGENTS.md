@@ -49,7 +49,9 @@ These are configured in both `tsconfig.json` and `electron.vite.config.ts`. Do n
 
 ## Native Agent
 
-Swift binary communicates via stdout JSON lines. Commands sent via stdin. Handles shake detection, bookmark create/resolve, permission checks. Build with `pnpm native:build` (runs automatically in `pnpm dev`).
+Swift binary communicates via stdout JSON lines. Commands sent via stdin. Handles shake detection, bookmark create/resolve, permission checks, measured notch geometry (`screen.metrics`) and the swipe-to-reveal gesture watch (`notch.revealWatch`). Build with `pnpm native:build` (runs automatically in `pnpm dev`).
+
+See `docs/notch-geometry.md` for how notch measurements, hover hysteresis, and swipe-to-reveal fit together.
 
 ## Cloudflare Backend (Optional)
 
