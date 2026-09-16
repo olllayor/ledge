@@ -5,6 +5,10 @@ name: Release
 # `workflow_dispatch` is the manual escape hatch — it releases the version
 # currently in package.json, creating the tag if it doesn't exist yet.
 #
+# Public releases require Developer ID signing + Apple notarization.
+# Unsigned (ad-hoc) builds are blocked unless the dispatch input
+# `allow_unsigned` is explicitly set to true.
+#
 # See docs/RELEASING.md for the full flow.
 
 on:
@@ -17,6 +21,11 @@ on:
         description: 'Tag to release (e.g. v0.2.0). Defaults to v<package.json version>.'
         required: false
         default: ''
+      allow_unsigned:
+        description: 'Ship an ad-hoc unsigned DMG (only for local/testing; public releases keep this false).'
+        required: false
+        type: boolean
+        default: false
 
 # Coalesce concurrent runs so two tag pushes within seconds don't both try
 # to publish a release.
@@ -27,8 +36,9 @@ concurrency:
 jobs:
   release:
     runs-on: macos-14
-    # Release builds compile Electron + native helper + sign + DMG; allow
-    # up to an hour so a slow Apple notarization doesn’t kill the job.
+    # Release builds compile Electron + native helper + sign + notarize +
+    # DMG; allow up to an hour so a slow Apple notarization doesn’t kill
+    # the job.
     timeout-minutes: 60
     permissions:
       contents: write
@@ -108,40 +118,134 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Configure code signing (optional)
-        # `secrets` is not usable in an `if:` expression, so gate here.
+      - name: Signing & notarization policy
+        id: signing-policy
+        # Public releases (tag pushes and default dispatch) require both
+        # Developer ID signing and Apple notarization. The only escape
+        # hatch is the dispatch input `allow_unsigned=true`, which is
+        # never available on a tag push.
+        #
+        # Secrets are read from the step environment (not ${{ }} spliced
+        # into the script body) and are never echoed — only their
+        # presence is logged. Empty secrets are left unset in GITHUB_ENV:
         # electron-builder treats a *defined-but-empty* CSC_LINK as a real
         # cert path and fails trying to resolve it — worse than leaving it
-        # unset, which correctly falls back to ad-hoc signing. So these are
-        # only exported into the job environment when the secrets actually
-        # have a value. Without an Apple account this step is a no-op and the
-        # build falls back to ad-hoc (unsigned) packaging.
+        # unset, which correctly falls back to ad-hoc signing.
+        env:
+          CSC_LINK_SECRET: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD_SECRET: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD_SECRET: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
+          ALLOW_UNSIGNED_INPUT: ${{ github.event.inputs.allow_unsigned }}
         run: |
-          if [ -n "${{ secrets.CSC_LINK }}" ] && [ -n "${{ secrets.CSC_KEY_PASSWORD }}" ]; then
-            echo "CSC_LINK=${{ secrets.CSC_LINK }}" >> "$GITHUB_ENV"
-            echo "CSC_KEY_PASSWORD=${{ secrets.CSC_KEY_PASSWORD }}" >> "$GITHUB_ENV"
-            echo "Code signing credentials found — configuring."
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${ALLOW_UNSIGNED_INPUT}" = "true" ]; then
+            allow_unsigned=true
           else
-            echo "No code signing credentials configured — building ad-hoc (unsigned)."
+            allow_unsigned=false
           fi
 
+          # Partial CSC config is always a hard error — half-configured
+          # signing is a misconfiguration, not an unsigned-mode choice.
+          if [ -n "${CSC_LINK_SECRET}" ] && [ -z "${CSC_KEY_PASSWORD_SECRET}" ]; then
+            echo "::error::CSC_LINK is set but CSC_KEY_PASSWORD is empty. Set both, or unset both for allow_unsigned mode."
+            exit 1
+          fi
+          if [ -z "${CSC_LINK_SECRET}" ] && [ -n "${CSC_KEY_PASSWORD_SECRET}" ]; then
+            echo "::error::CSC_KEY_PASSWORD is set but CSC_LINK is empty. Set both, or unset both for allow_unsigned mode."
+            exit 1
+          fi
+
+          apple_present=0
+          if [ -n "${APPLE_ID_SECRET}" ]; then
+            apple_present=$((apple_present + 1))
+          fi
+          if [ -n "${APPLE_APP_SPECIFIC_PASSWORD_SECRET}" ]; then
+            apple_present=$((apple_present + 1))
+          fi
+          if [ -n "${APPLE_TEAM_ID_SECRET}" ]; then
+            apple_present=$((apple_present + 1))
+          fi
+          if [ "${apple_present}" -ne 0 ] && [ "${apple_present}" -ne 3 ]; then
+            echo "::error::Partial APPLE_* notarization secrets (need APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID together)."
+            exit 1
+          fi
+
+          has_csc=false
+          if [ -n "${CSC_LINK_SECRET}" ] && [ -n "${CSC_KEY_PASSWORD_SECRET}" ]; then
+            has_csc=true
+          fi
+
+          has_notary=false
+          if [ "${apple_present}" -eq 3 ]; then
+            has_notary=true
+          fi
+
+          if [ "${allow_unsigned}" != "true" ]; then
+            if [ "${has_csc}" != "true" ]; then
+              echo "::error::Code signing is required for public releases but CSC_LINK/CSC_KEY_PASSWORD are not configured." \
+                   "Set the repository secrets, or re-run via workflow_dispatch with allow_unsigned=true for a non-public unsigned build."
+              exit 1
+            fi
+            if [ "${has_notary}" != "true" ]; then
+              echo "::error::Notarization is required for public releases but APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID are not configured." \
+                   "Set the repository secrets, or re-run via workflow_dispatch with allow_unsigned=true for a non-public unsigned build."
+              exit 1
+            fi
+          fi
+
+          # Multiline-safe GITHUB_ENV writes (base64 CSC_LINK may wrap).
+          write_env() {
+            name="$1"
+            value="$2"
+            {
+              printf '%s\n' "${name}<<LEDGE_ENV_EOF"
+              printf '%s\n' "${value}"
+              printf '%s\n' "LEDGE_ENV_EOF"
+            } >> "$GITHUB_ENV"
+          }
+
+          if [ "${has_csc}" = "true" ]; then
+            write_env CSC_LINK "${CSC_LINK_SECRET}"
+            write_env CSC_KEY_PASSWORD "${CSC_KEY_PASSWORD_SECRET}"
+            echo "Code signing credentials found — configuring."
+          else
+            echo "Code signing credentials not configured — ad-hoc (unsigned) packaging."
+          fi
+
+          if [ "${has_notary}" = "true" ]; then
+            # Exported for the whole job so electron-builder auto-notarizes
+            # and staples the .app during Build & Package (before the DMG
+            # is created from that .app). The later DMG step still
+            # notarizes/staples the disk image itself.
+            write_env APPLE_ID "${APPLE_ID_SECRET}"
+            write_env APPLE_APP_SPECIFIC_PASSWORD "${APPLE_APP_SPECIFIC_PASSWORD_SECRET}"
+            write_env APPLE_TEAM_ID "${APPLE_TEAM_ID_SECRET}"
+            echo "Notarization credentials found — configuring."
+          else
+            echo "Notarization credentials not configured — skipping .app notarization during build."
+          fi
+
+          echo "Signing policy: allow_unsigned=${allow_unsigned} has_csc=${has_csc} has_notary=${has_notary}"
+          echo "allow_unsigned=${allow_unsigned}" >> "$GITHUB_OUTPUT"
+          echo "has_csc=${has_csc}" >> "$GITHUB_OUTPUT"
+          echo "has_notary=${has_notary}" >> "$GITHUB_OUTPUT"
+
       - name: Build & Package
+        # With CSC_* in the job env, electron-builder signs the .app.
+        # With APPLE_* in the job env, electron-builder also notarizes and
+        # staples the .app after signing. scripts/build-dmg.mjs then packs
+        # that (already stapled) .app into the DMG.
         run: pnpm dist:release
 
       - name: Notarize DMG
-        # `secrets` is not usable in an `if:` expression, so gate here.
-        # Without an Apple account (no notarization creds) this is a no-op:
-        # the DMG is published unsigned and the job still succeeds.
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # Gate on step output, not on `secrets` (unusable in `if:`).
+        # APPLE_* already live in the job env from the policy step.
+        if: steps.signing-policy.outputs.has_notary == 'true'
         run: |
           set -euo pipefail
-          if [ -z "${APPLE_ID}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD}" ] || [ -z "${APPLE_TEAM_ID}" ]; then
-            echo "No Apple notarization credentials configured — skipping notarization."
-            exit 0
-          fi
           dmg="$(ls dist/*.dmg | head -1)"
           echo "Submitting ${dmg} for notarization…"
           xcrun notarytool submit "${dmg}" \
@@ -150,6 +254,58 @@ jobs:
             --team-id "${APPLE_TEAM_ID}" \
             --wait
           xcrun stapler staple "${dmg}"
+
+      - name: Verify release artifacts
+        # Fail the job on any broken artifact — never publish a DMG whose
+        # .app is unsigned when signing was required, missing the native
+        # helper, or missing its notarization staple.
+        env:
+          HAS_CSC: ${{ steps.signing-policy.outputs.has_csc }}
+          HAS_NOTARY: ${{ steps.signing-policy.outputs.has_notary }}
+        run: |
+          set -euo pipefail
+
+          app_path="$(ls -d dist/mac*/Ledge.app 2>/dev/null | head -1 || true)"
+          if [ -z "${app_path}" ] || [ ! -d "${app_path}" ]; then
+            echo "::error::Packaged Ledge.app not found under dist/mac*."
+            exit 1
+          fi
+
+          dmg="$(ls dist/*.dmg 2>/dev/null | head -1 || true)"
+          if [ -z "${dmg}" ] || [ ! -f "${dmg}" ]; then
+            echo "::error::Release DMG not found under dist/."
+            exit 1
+          fi
+
+          echo "Verifying code signature on ${app_path}…"
+          codesign --verify --deep --strict --verbose=2 "${app_path}"
+
+          native_bin="${app_path}/Contents/Resources/native/DropShelfNativeAgent"
+          if [ ! -x "${native_bin}" ]; then
+            echo "::error::Native agent missing or not executable at ${native_bin}"
+            exit 1
+          fi
+          echo "Native agent present and executable."
+
+          if [ "${HAS_CSC}" = "true" ]; then
+            echo "Confirming Developer ID Application identity…"
+            codesign -dv "${app_path}" 2>&1 | tee /tmp/ledge-codesign-info.txt
+            if ! grep -q "Developer ID Application" /tmp/ledge-codesign-info.txt; then
+              echo "::error::Expected a Developer ID Application signature but none was found (ad-hoc or unexpected identity)."
+              exit 1
+            fi
+          fi
+
+          if [ "${HAS_NOTARY}" = "true" ]; then
+            echo "Assessing Gatekeeper acceptance of ${app_path}…"
+            spctl --assess --type execute --verbose=2 "${app_path}"
+            echo "Validating notarization staple on ${app_path}…"
+            xcrun stapler validate "${app_path}"
+            echo "Validating notarization staple on ${dmg}…"
+            xcrun stapler validate "${dmg}"
+          fi
+
+          echo "All artifact verification checks passed."
 
       - name: List artifacts
         run: ls -R dist/ | head -50

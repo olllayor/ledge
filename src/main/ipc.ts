@@ -1,6 +1,6 @@
 import { ipcMain, screen } from 'electron'
 import { z } from 'zod'
-import { IPC_CHANNELS, type ToastPayload } from '@shared/ipc'
+import { IPC_CHANNELS, teamShelfItemsPatchSchema, type ToastPayload } from '@shared/ipc'
 import {
   createShelfInputSchema,
   preferencePatchSchema,
@@ -23,6 +23,7 @@ import {
 } from '@shared/ipcSchemas'
 import { normalizePreferencePatch } from './services/preferencesSync'
 import { pathsExist, startNativeDrag } from './services/dragController'
+import { broadcastToast } from './services/toastBroadcaster'
 import { ClipboardIpcController } from './services/clipboard/ipcController'
 import type { ShelfActions } from './services/shelfActions'
 import type { ShelfController } from './services/shelfController'
@@ -37,7 +38,7 @@ import type { ShelfItemOps } from './services/shelfItemOps'
 import type { ShelfContextMenus } from './services/contextMenus'
 import type { SecureSessionStore } from './services/secureSessionStore'
 import type { ClipboardWindow } from './windows/clipboardWindow'
-import { decideRemoteShelfApply } from './remoteShelf'
+import { decideRemoteShelfApply, sanitizeRemoteItem } from './remoteShelf'
 import { syncSessionSchema } from '@shared/ipc'
 
 export interface IpcRegistrarDeps {
@@ -137,6 +138,10 @@ export class IpcRegistrar {
       this.deps.onInactivityTick()
       return this.deps.broadcastState()
     })
+    ipcMain.handle(IPC_CHANNELS.toggleShelfPin, async () => {
+      this.deps.shelfController.togglePinned()
+      return this.deps.broadcastState()
+    })
     ipcMain.handle(IPC_CHANNELS.renameShelf, async (_event, input: unknown) =>
       this.deps.shelfOps.rename(renameShelfInputSchema.parse(input).name))
     ipcMain.handle(IPC_CHANNELS.clearShelf, async () => this.deps.shelfOps.clear())
@@ -197,7 +202,15 @@ export class IpcRegistrar {
   private registerPreferencesIpc(): void {
     ipcMain.handle(IPC_CHANNELS.getPreferences, async () => this.deps.stateStore.getPreferences())
     ipcMain.handle(IPC_CHANNELS.setPreferences, async (_event, patch: unknown) => {
-      this.deps.stateStore.setPreferences(normalizePreferencePatch(preferencePatchSchema.parse(patch)))
+      let normalized: ReturnType<typeof normalizePreferencePatch>
+      try {
+        normalized = normalizePreferencePatch(preferencePatchSchema.parse(patch))
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid preferences patch'
+        broadcastToast(message, 'error')
+        throw error
+      }
+      this.deps.stateStore.setPreferences(normalized)
       this.deps.preferencesSync.sync()
       await this.deps.nativeAgent.configureGesture(this.deps.stateStore.getPreferences())
       this.deps.broadcastState()
@@ -215,6 +228,15 @@ export class IpcRegistrar {
     })
     ipcMain.handle(IPC_CHANNELS.setTeamState, async (_event, patch: unknown) => {
       this.deps.stateStore.setTeamState(teamStateSchema.partial().parse(patch))
+      return this.deps.broadcastState()
+    })
+    ipcMain.handle(IPC_CHANNELS.applyTeamShelfItems, async (_event, patch: unknown) => {
+      const parsed = teamShelfItemsPatchSchema.parse(patch)
+      // Cloud-sourced items must never carry local file paths — same
+      // invariant as the personal remote-shelf path. Sanitize before the
+      // snapshot reaches the state store / ledge-asset protocol.
+      const items = parsed.items.map((item) => sanitizeRemoteItem(item))
+      this.deps.stateStore.applyTeamShelfItems(parsed.teamId, items)
       return this.deps.broadcastState()
     })
     ipcMain.handle(IPC_CHANNELS.syncSessionGet, async () => this.deps.secureSessionStore.get())
@@ -241,10 +263,21 @@ export class IpcRegistrar {
       }
       return this.deps.broadcastState()
     })
+    // A tombstoned remote shelf (deleted on another device) must vanish
+    // locally too. Forgets the watermark so a future re-create syncs as
+    // first contact again.
+    ipcMain.handle(IPC_CHANNELS.removeSyncedShelf, async (_event, shelfId: unknown) => {
+      const parsed = z.string().min(1).parse(shelfId)
+      this.deps.remoteShelfWatermarks.delete(parsed)
+      this.deps.shelfController.removeSyncedShelfLocally(parsed)
+      return this.deps.broadcastState()
+    })
   }
 
   private findLocalShelf(id: string) {
-    const live = this.deps.stateStore.getLiveShelf()
+    // Personal slot only — whole-shelf cloud sync never touches team
+    // shelves, and `getLiveShelf()` is team-aware.
+    const live = this.deps.stateStore.getPersonalLiveShelf()
     if (live?.id === id) return live
     return this.deps.stateStore.getRecentShelves().find((shelf) => shelf.id === id) ?? null
   }

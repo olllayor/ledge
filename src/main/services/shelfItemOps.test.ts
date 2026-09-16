@@ -7,8 +7,14 @@ import { StateStore } from './stateStore'
 import type { AppState, ShelfItemRecord } from '@shared/schema'
 
 const tempDirs: string[] = []
+const stores: StateStore[] = []
 
 afterEach(async () => {
+  // Flush pending persistence writes before the temp dirs are removed —
+  // otherwise the async writer races teardown, logs a persistence error
+  // after the worker's console RPC closed, and vitest reports an
+  // EnvironmentTeardownError.
+  await Promise.allSettled(stores.splice(0).map((store) => store.whenIdle()))
   await Promise.all(
     tempDirs.splice(0).map((path) =>
       rm(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 }),
@@ -25,13 +31,17 @@ async function buildHarness(): Promise<{
   const dir = await mkdtemp(join(tmpdir(), 'shelf-item-ops-'))
   tempDirs.push(dir)
   const stateStore = new StateStore(dir)
+  stores.push(stateStore)
   const broadcast = vi.fn((): AppState => stateStore.snapshot({
     nativeHelperAvailable: false,
     accessibilityTrusted: false,
     shakeReady: false,
     lastError: '',
     shortcutRegistered: false,
-    shortcutError: ''
+    shortcutError: '',
+    loginItemOpenAtLogin: false,
+    loginItemWasOpenedAtLogin: false,
+    loginItemWasOpenedAsHidden: false
   }))
   const tick = vi.fn()
   const ops = new ShelfItemOps(stateStore, {

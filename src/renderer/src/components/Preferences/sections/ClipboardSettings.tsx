@@ -1,5 +1,6 @@
 import type { AppState } from '@shared/schema';
 import { useState, useEffect, useCallback } from 'react';
+import { normalizeExcludedBundleIds } from '@shared/preferences';
 import { IconClipboard } from '../../PreferencesIcons';
 import { SettingsGroup, SettingsRow, Toggle, Picker, type ShowToast } from '../primitives';
 import { ShortcutRecorder } from '../shortcutRecorder';
@@ -26,12 +27,23 @@ export function ClipboardSettings({ state, showToast }: { state: AppState; showT
   );
 
   const submitIgnoredApps = useCallback(() => {
-    const list = ignoredApps
-      .split(/[\n,]/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    void updateSettings({ ignoreBundleIds: list });
-  }, [ignoredApps, updateSettings]);
+    const raw = ignoredApps.split(/[\n,]/).map((entry) => entry.trim()).filter(Boolean);
+    const { normalized, invalid } = normalizeExcludedBundleIds(raw);
+    if (invalid.length > 0) {
+      showToast(
+        invalid.length === 1
+          ? `Invalid bundle ID: ${invalid[0]}`
+          : `Invalid bundle IDs: ${invalid.join(', ')}`,
+        'error',
+      );
+      return;
+    }
+    // Only persist if the normalized set actually changed — avoids
+    // no-op writes when the user blurs without editing.
+    const current = settings.ignoreBundleIds;
+    if (normalized.length === current.length && normalized.every((v, i) => v === current[i])) return;
+    void updateSettings({ ignoreBundleIds: normalized });
+  }, [ignoredApps, settings.ignoreBundleIds, showToast, updateSettings]);
 
   return (
     <>
@@ -75,6 +87,17 @@ export function ClipboardSettings({ state, showToast }: { state: AppState; showT
           }
         />
         <SettingsRow
+          title="Skip secret-looking text"
+          copy="Also skip plain text that looks like a credential (password/token words or an unbroken mixed-character string). Links are never skipped."
+          trailing={
+            <Toggle
+              checked={settings.skipSensitiveText}
+              onChange={(checked) => void updateSettings({ skipSensitiveText: checked })}
+              disabled={!settings.enabled}
+            />
+          }
+        />
+        <SettingsRow
           title="Ignored apps"
           copy="One bundle id per line. Pastes from these apps are skipped."
           fullWidth
@@ -106,7 +129,7 @@ export function ClipboardSettings({ state, showToast }: { state: AppState; showT
           }
         />
         <SettingsRow
-          title="Synthetic paste (Accessibility)"
+          title="Synthetic paste (Automation)"
           copy="Opt in: after writing to the clipboard, also send a ⌘V keystroke via osascript. May be blocked by some apps."
           trailing={
             <Toggle

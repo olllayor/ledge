@@ -47,7 +47,6 @@ export function ActivationSettings({ state, showToast }: { state: AppState; show
           icon={<IconKeyboard />}
           title="Global shortcut"
           copy="Summon a shelf from anywhere with a keyboard shortcut."
-          trailing={<span />}
           fullWidth
         >
           <div className="settings-field" style={{ padding: '8px 0 12px' }}>

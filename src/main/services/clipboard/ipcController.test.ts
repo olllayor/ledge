@@ -205,6 +205,13 @@ describe('ClipboardIpcController', () => {
     expect(reregisterShortcuts).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts skipSensitiveText (regression: strict schema omitted the field)', async () => {
+    const c = new ClipboardIpcController(deps)
+    c.registerAll()
+    await bus.call(IPC_CHANNELS.clipboardSettingsUpdate, { skipSensitiveText: false })
+    expect(deps.stateStore.updateClipboardSettings).toHaveBeenCalledWith({ skipSensitiveText: false })
+  })
+
   it('rejects an invalid settings patch', async () => {
     const c = new ClipboardIpcController(deps)
     c.registerAll()

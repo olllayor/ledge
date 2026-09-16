@@ -62,24 +62,33 @@ export function hexFromText(text: string): string | null {
  * Light heuristic — proper language detection is out of scope. Catches
  * the common cases: brace + newline patterns, two-space indent, and
  * the standard `function` / `const` / `def` / `class` keywords.
+ * Keyword alone is noisy (e.g. "function of cell" is prose) so we
+ * require keyword + code punctuation.
  */
 export function looksLikeCode(text: string): boolean {
   if (text.length < 16) return false
   if (/\n\s{2,}/.test(text)) return true
-  if (/\bfunction\b|\bconst\b|\blet\b|\bimport\b|\bdef\b|\bclass\b/.test(text)) return true
+  if (/\bfunction\b|\bconst\b|\blet\b|\bimport\b|\bdef\b|\bclass\b/.test(text) && /[=;{}()[\]:]/.test(text)) return true
   if (/[{}\[\];].*\n/.test(text)) return true
   return false
 }
 
 /**
  * Decide the best "kind" for a text-only pasteboard. Order is:
- * color > code > url > text. Returns null if the text is empty.
+ * color > url > code > text. URL before code so a URL containing
+ * `function` etc. is not misclassified as code.
+ * Bare hex without # is only color if it contains a hex letter
+ * (so `123456` is text, `aabbcc` is color, `#123456` always color).
  */
 export function classifyText(text: string): 'color' | 'code' | 'url' | 'text' | null {
   const trimmed = text.trim()
   if (!trimmed) return null
-  if (hexFromText(trimmed)) return 'color'
-  if (looksLikeCode(trimmed)) return 'code'
+  const hex = hexFromText(trimmed)
+  if (hex) {
+    const hasHash = trimmed.startsWith('#')
+    const hasHexLetter = /[a-fA-F]/.test(trimmed)
+    if (hasHash || hasHexLetter) return 'color'
+  }
   try {
     const url = new URL(trimmed)
     if (url.protocol === 'http:' || url.protocol === 'https:') {
@@ -88,6 +97,7 @@ export function classifyText(text: string): 'color' | 'code' | 'url' | 'text' | 
   } catch {
     // not a URL
   }
+  if (looksLikeCode(trimmed)) return 'code'
   return 'text'
 }
 

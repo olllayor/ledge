@@ -18,6 +18,7 @@ interface FakeLedge {
 function makeState(): AppState {
   return {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: {} as AppState['preferences'],
     sync: {} as AppState['sync'],
@@ -26,6 +27,7 @@ function makeState(): AppState {
     clipboardCategories: [],
     clipboardSettings: {} as AppState['clipboardSettings'],
     team: { activeTeamId: null },
+    shelfPinned: false,
   } as AppState;
 }
 

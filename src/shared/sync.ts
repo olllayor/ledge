@@ -72,6 +72,52 @@ export function serializeShelfForCloud(shelf: ShelfRecord): CloudShelfRecord {
   };
 }
 
+/**
+ * File flags as the Worker actually returns them: paths and bookmarks are
+ * stripped on store, so only the safety flags (and optional R2 key) survive.
+ * Local `FileRef` still requires `originalPath`, so a raw wire payload
+ * cannot be fed to `shelfRecordSchema` without reconstruction.
+ */
+type CloudFileFlagsWire = {
+  isStale?: boolean;
+  isMissing?: boolean;
+  originalPath?: string;
+  resolvedPath?: string;
+  cloudStorageKey?: string;
+};
+
+type CloudItemWire = Omit<CloudShelfItem, 'file'> & { file?: CloudFileFlagsWire };
+
+/**
+ * Rebuild local shelf items from a cloud wire payload.
+ *
+ * The Worker strips path fields on store, so file-backed items arrive as
+ * flags only. Fill the full `FileRef` shape with empty paths and
+ * `isMissing: true` — the same invariant `sanitizeRemoteItem` enforces —
+ * so the local schema accepts the snapshot and the UI offers Relink.
+ */
+export function coerceCloudItemsToLocal(items: CloudItemWire[]): ShelfItemRecord[] {
+  return items.map((item): ShelfItemRecord => {
+    if (!('file' in item) || item.file === undefined) {
+      return item as ShelfItemRecord;
+    }
+
+    return {
+      ...item,
+      // Paths from another device are meaningless (and unsafe to trust)
+      // here. Always force missing so the UI offers Relink — same
+      // invariant as teamSync.remoteToLocalItems and sanitizeRemoteItem.
+      file: {
+        originalPath: '',
+        resolvedPath: '',
+        bookmarkBase64: '',
+        isStale: true,
+        isMissing: true,
+      },
+    } as ShelfItemRecord;
+  });
+}
+
 export function estimateImportedImageStorageBytes(shelves: ShelfRecord[]): number {
   return shelves.reduce((total, shelf) => {
     return (

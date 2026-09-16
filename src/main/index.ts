@@ -1,8 +1,22 @@
-import { app, Menu, net, protocol as protocolModule, screen, shell } from 'electron'
-import { execFileSync } from 'node:child_process'
+import { app, Menu, net, powerMonitor, protocol as protocolModule, screen, shell } from 'electron'
+import { execFile } from 'node:child_process'
 import { extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { appStateSchema, type AppState } from '@shared/schema'
+import { appStateSchema, type AppState, type NotchRevealEvent } from '@shared/schema'
+
+function sipsToPngBuffer(icnsPath: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'sips',
+      ['-s', 'format', 'png', '--out', '/dev/stdout', icnsPath],
+      { encoding: 'buffer', maxBuffer: 10 * 1024 * 1024 } as never,
+      (error, stdout) => {
+        if (error) reject(error)
+        else resolve(stdout as unknown as Buffer)
+      },
+    )
+  })
+}
 import { NativeAgentClient, type ShakeDetectedEvent } from './native/nativeAgent'
 import { detectPayloadFromText } from './services/payloads'
 import { StateStore } from './services/stateStore'
@@ -19,6 +33,7 @@ import { ShelfActions } from './services/shelfActions'
 import { ShelfItemOps } from './services/shelfItemOps'
 import { ShelfContextMenus } from './services/contextMenus'
 import { ClipboardHistoryService } from './services/clipboardHistory'
+import { ShelfHealer, createNodeHealerDeps } from './services/shelfHealer'
 import { PreferencesSyncService } from './services/preferencesSync'
 import { resolveAllowedAssetPath } from './services/assetPathResolver'
 import { broadcastToast, createThrottledToast } from './services/toastBroadcaster'
@@ -28,6 +43,21 @@ import { SecureSessionStore } from './services/secureSessionStore'
 import { FEATURE_FLAGS } from './services/featureFlags'
 import { NotchDropoutWindow } from './windows/notchDropoutWindow'
 import { NotchHoverMonitor } from './services/notchHoverMonitor'
+import { NotchMetricsService } from './services/notchMetrics'
+import {
+  writeSecondInstanceMarker,
+  startSingleInstanceWatch,
+} from './services/singleInstance'
+
+// Menu-bar utility: exactly one instance ever runs. A second launch
+// (Finder, Spotlight, login-item racing a manual start) writes a
+// resurface signal for the primary and quits before touching state,
+// windows, or global shortcuts.
+let gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  writeSecondInstanceMarker(app.getPath('userData'))
+  app.quit()
+}
 
 const PROJECT_URL = 'https://github.com/olllayor/ledge'
 const WHATS_NEW_URL = `${PROJECT_URL}/releases`
@@ -59,6 +89,7 @@ let peekWindow: PeekWindow
 let clipboardWindow: ClipboardWindow
 let notchDropoutWindow: NotchDropoutWindow | null = null
 let notchHoverMonitor: NotchHoverMonitor | null = null
+let notchMetrics: NotchMetricsService | null = null
 let clipboardMonitor: ClipboardMonitor
 let clipboardHistory: ClipboardHistoryService
 let inactivityTimer: InactivityTimer
@@ -69,6 +100,7 @@ let contextMenus: ShelfContextMenus
 let preferencesSync: PreferencesSyncService
 let ipcRegistrar: IpcRegistrar
 let isFlushingStateForQuit = false
+let hasFlushedStateForQuit = false
 
 const persistenceErrorToast = createThrottledToast(PERSISTENCE_ERROR_TOAST_THROTTLE_MS)
 
@@ -99,10 +131,12 @@ protocolModule.registerSchemesAsPrivileged([
     },
   },
 ])
-
 function tickInactivity(): void {
+  // A pinned shelf opts out of auto-retract entirely.
   const shouldArm =
-    stateStore.getPreferences().shelfInteraction.autoRetract && shelfWindow.isVisible()
+    !shelfController?.isPinned &&
+    stateStore.getPreferences().shelfInteraction.autoRetract &&
+    shelfWindow.isVisible()
   if (shouldArm) {
     inactivityTimer.reset()
   } else {
@@ -111,17 +145,18 @@ function tickInactivity(): void {
 }
 
 function broadcastState(): AppState {
-  // The state is already validated when it is written to disk. We re-parse
-  // on broadcast as a defense-in-depth check, but a parse failure must not
-  // be able to crash the IPC handler or wedge the renderer; in that case
-  // we fall back to the raw snapshot so the UI still receives an update.
+  // StateStore.snapshot() already returns a validated AppState (parse on
+  // read + persister load). Re-parsing the whole graph (clipboardHistory
+  // up to 200 items, shelves) on every broadcast was hot-path waste.
+  // Keep a dev-only assert so corruption still surfaces in development
+  // without paying zod cost in production.
   const snapshot = stateStore.snapshot(preferencesSync.currentPermissionStatus())
-  let state: AppState
-  try {
-    state = appStateSchema.parse(snapshot)
-  } catch (error) {
-    console.error('[ledge] broadcastState: state validation failed; broadcasting raw snapshot.', error)
-    state = snapshot as AppState
+  const state: AppState = { ...snapshot, shelfPinned: shelfController?.isPinned ?? false }
+  if (process.env.NODE_ENV !== 'production') {
+    const parsed = appStateSchema.safeParse(state)
+    if (!parsed.success) {
+      console.error('[ledge] broadcastState: state validation failed; broadcasting raw snapshot.', parsed.error)
+    }
   }
   tray.update(state)
   shelfWindow.sendState(state)
@@ -134,6 +169,13 @@ function broadcastState(): AppState {
 }
 
 app.whenReady().then(async () => {
+  // Losing the race: `app.quit()` was requested above but whenReady can
+  // still resolve first. Bail before any state store, native helper,
+  // window, or global shortcut wiring happens.
+  if (!gotSingleInstanceLock) {
+    return
+  }
+
   if (process.platform === 'darwin' && app.dock) {
     app.dock.hide()
   }
@@ -159,8 +201,8 @@ app.whenReady().then(async () => {
 
     if (extname(allowedPath).toLowerCase() === '.icns') {
       try {
-        const pngBuffer = execFileSync('sips', ['-s', 'format', 'png', '--out', '/dev/stdout', allowedPath])
-        return new Response(pngBuffer, {
+        const pngBuffer = await sipsToPngBuffer(allowedPath)
+        return new Response(pngBuffer as unknown as BodyInit, {
           headers: { 'Content-Type': 'image/png' },
         })
       } catch (err) {
@@ -197,7 +239,20 @@ app.whenReady().then(async () => {
   clipboardWindow = new ClipboardWindow()
 
   if (FEATURE_FLAGS.useNotchDropout) {
-    notchDropoutWindow = new NotchDropoutWindow()
+    // Measured notch geometry comes from the Swift helper (AppKit is the only
+    // place `safeAreaInsets`/`auxiliaryTopLeftArea` exist). Cached, and only
+    // refreshed on startup or a display change, so the reveal path never waits
+    // on a native round-trip.
+    const metrics = new NotchMetricsService({
+      fetchMetrics: () => nativeAgent.getScreenMetrics(),
+      onError: (error) => {
+        console.warn('[ledge] notch metrics unavailable, using fallback geometry:', error)
+      },
+    })
+    notchMetrics = metrics
+    notchDropoutWindow = new NotchDropoutWindow({
+      resolveGeometry: (display) => metrics.geometryForDisplay(display),
+    })
     notchHoverMonitor = new NotchHoverMonitor({
       onEnterHotZone: () => {
         void notchDropoutWindow?.show()
@@ -218,6 +273,8 @@ app.whenReady().then(async () => {
           point.y <= bounds.y + bounds.height
         )
       },
+      resolveGeometry: (display) => metrics.geometryForDisplay(display),
+      panelBounds: () => notchDropoutWindow?.getPanelBounds() ?? null,
     })
     notchHoverMonitor.start()
   }
@@ -234,6 +291,7 @@ app.whenReady().then(async () => {
   })
   inactivityTimer = new InactivityTimer(() => {
     if (
+      !shelfController?.isPinned &&
       stateStore.getPreferences().shelfInteraction.autoRetract &&
       shelfWindow.isVisible()
     ) {
@@ -339,7 +397,8 @@ app.whenReady().then(async () => {
       peekWindow,
       notchDropoutWindow: FEATURE_FLAGS.useNotchDropout ? (notchDropoutWindow ?? undefined) : undefined,
       broadcastState: () => broadcastState(),
-      reregisterShortcuts: () => preferencesSync.sync()
+      reregisterShortcuts: () => preferencesSync.sync(),
+      onHistoryCleared: () => clipboardHistory.invalidatePendingCaptures()
     }),
     secureSessionStore,
     broadcastState: () => broadcastState(),
@@ -348,6 +407,20 @@ app.whenReady().then(async () => {
     getAppVersion: () => app.getVersion(),
   })
   ipcRegistrar.registerAll()
+
+  startSingleInstanceWatch({
+    userDataDir: app.getPath('userData'),
+    onSignal: () => {
+      // A second launch means the user reached for Ledge while it was
+      // already running. Mid-work (a live shelf exists) we stay out of
+      // the way; otherwise surface Settings, mirroring `activate`.
+      if (stateStore.getLiveShelf()) {
+        console.log('[ledge] second instance launch ignored (live shelf)')
+        return
+      }
+      void preferencesWindow.show()
+    },
+  })
 
   // The Swift helper is the primary clipboard observer. The TS format-hash
   // poller runs only while the helper is down: running both double-captures
@@ -369,6 +442,48 @@ app.whenReady().then(async () => {
   nativeAgent.on('shakeDetected', (event: ShakeDetectedEvent) => {
     void shelfController.handleShakeDetected(event)
   })
+
+  if (FEATURE_FLAGS.useNotchDropout && notchMetrics) {
+    const metrics = notchMetrics
+
+    // Prime the cache so the first reveal already hugs the measured notch.
+    void metrics.refresh()
+
+    // Swipe-down at the top centre reveals the panel (Sapphire's
+    // HiddenNotchRevealMonitor behaviour, driven by the helper's event tap).
+    void nativeAgent.watchNotchReveal(true)
+    nativeAgent.on('notchRevealRequested', (_event: NotchRevealEvent) => {
+      void metrics.refresh()
+      void notchDropoutWindow?.show()
+    })
+
+    // A display added/removed/rescaled invalidates every measurement: drop the
+    // cache, re-measure, and re-anchor the panel.
+    const handleDisplayChange = () => {
+      metrics.invalidate()
+      void metrics.refresh().then(() => notchDropoutWindow?.reposition())
+    }
+    screen.on('display-added', handleDisplayChange)
+    screen.on('display-removed', handleDisplayChange)
+    screen.on('display-metrics-changed', handleDisplayChange)
+  }
+
+  // Startup heal (docs/vorssaint-shelf-plan.md Phase 1): one bookmark
+  // chance for every dead path on the live shelf before the first
+  // broadcast. Native helper is up, so resolution is real. Persisting
+  // happens inside the healer only when something healed.
+  const shelfHealer = new ShelfHealer({
+    stateStore,
+    ...createNodeHealerDeps((bookmarkBase64, originalPath) =>
+      nativeAgent.resolveBookmark(bookmarkBase64, originalPath),
+    ),
+  })
+  try {
+    await shelfHealer.healPersonalLiveShelf()
+  } catch (error) {
+    console.error('[ledge] startup shelf heal failed:', error)
+  }
+
   nativeAgent.on('clipboardChanged', (event) => {
     if (event && typeof event === 'object' && 'changeCount' in event) {
       clipboardMonitor.notifyFromNative(
@@ -382,6 +497,19 @@ app.whenReady().then(async () => {
   preferencesSync.sync()
   await nativeAgent.configureGesture(stateStore.getPreferences())
   broadcastState()
+
+  powerMonitor.on('resume', () => {
+    // After wake, macOS may have recycled the status item and the Swift
+    // helper can be mid-respawn (it auto-restarts on unexpected exit);
+    // re-assert the tray cheaply and push fresh state to any open UI.
+    tray.reassert()
+    broadcastState()
+  })
+})
+
+app.on('window-all-closed', () => {
+  // Menu-bar utility: closing every window must never quit the app.
+  // Tray Quit (and Cmd+Q) are the only exits.
 })
 
 app.on('activate', () => {
@@ -402,15 +530,24 @@ app.on('before-quit', (event) => {
   // Without this, a quick drop-then-quit (or any IPC reply that
   // triggered a save) can leave state.json half-written as a
   // `.tmp-PID` sibling; the next launch would then trip the
-  // corruption handler and lose the most recent change. The first
-  // time `before-quit` fires, we cancel the default quit, flush,
-  // and re-quit. Subsequent firings (the re-quit) pass through.
+  // corruption handler and lose the most recent change.
+  //
+  // Three cases:
+  //   1. Flush already finished — this is the re-quit; allow it.
+  //   2. Flush still in flight — swallow the extra quit (double Cmd+Q,
+  //      tray Quit + Cmd+Q) so we don't abandon the write.
+  //   3. First quit — cancel, flush, then re-quit.
+  //
   // Shut the helper down first: this clears the auto-restart timer so a
   // dying child can't respawn mid-quit, and reaps the process so it never
   // outlives the app.
   clipboardMonitor?.stop()
   nativeAgent?.stop()
+  if (hasFlushedStateForQuit) {
+    return
+  }
   if (isFlushingStateForQuit) {
+    event.preventDefault()
     return
   }
   if (!stateStore || stateStore.whenIdle === undefined) {
@@ -432,6 +569,8 @@ app.on('before-quit', (event) => {
     if (timeoutHandle !== null) {
       clearTimeout(timeoutHandle)
     }
+    hasFlushedStateForQuit = true
+    isFlushingStateForQuit = false
     app.quit()
   })
 })

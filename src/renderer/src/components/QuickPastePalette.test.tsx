@@ -28,6 +28,7 @@ function buildEntry(overrides: Partial<ClipboardEntry> = {}): ClipboardEntry {
 function buildState(): AppState {
   return {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: {
       launchAtLogin: false,
@@ -45,7 +46,10 @@ function buildState(): AppState {
       shakeReady: true,
       lastError: '',
       shortcutRegistered: true,
-      shortcutError: ''
+      shortcutError: '',
+      loginItemOpenAtLogin: false,
+      loginItemWasOpenedAtLogin: false,
+      loginItemWasOpenedAsHidden: false
     },
     sync: {
       enabled: false,
@@ -63,12 +67,14 @@ function buildState(): AppState {
       enabled: true,
       historyLimit: 200,
       ignoreConcealedItems: true,
+      skipSensitiveText: true,
       ignoreBundleIds: [],
       quickPasteHotkey: 'CommandOrControl+Shift+V',
       peekHotkey: '',
       syntheticPasteEnabled: false
     },
-    team: { activeTeamId: null }
+    team: { activeTeamId: null },
+    shelfPinned: false
   };
 }
 
@@ -110,11 +116,27 @@ afterEach(() => {
 });
 
 describe('QuickPastePalette (user stories 7.1-7.13)', () => {
-  it('7.1/7.2 renders "Pasting to <App>" when previousBundleId is set', async () => {
+  it('7.1/7.2 renders "Pasting to <App>" when previousBundleId is set and synthetic enabled', async () => {
+    const state = buildState();
+    state.clipboardSettings.syntheticPasteEnabled = true;
     render(<QuickPastePalette />);
+    stateListeners.forEach((cb) => cb(state));
+    await waitFor(() => {
+      // Wait for state to propagate to the component
+      expect(document.body.textContent).toContain('Quick paste');
+    });
     hintListeners.forEach((cb) => cb({ hint: 'shown', previousBundleId: 'com.figma.Desktop' }));
     await waitFor(() => {
       expect(document.body.textContent).toContain('Pasting to');
+    });
+  });
+
+  it('7.1b renders "Copy for <App>" when synthetic disabled', async () => {
+    render(<QuickPastePalette />);
+    hintListeners.forEach((cb) => cb({ hint: 'shown', previousBundleId: 'com.figma.Desktop' }));
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('Copy for');
+      expect(document.body.textContent).toContain('press ⌘V');
     });
   });
 

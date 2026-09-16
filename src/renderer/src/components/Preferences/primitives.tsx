@@ -18,6 +18,11 @@ export interface SettingsRowProps {
   icon?: ReactNode;
   title: ReactNode;
   copy?: ReactNode;
+  /**
+   * Right-aligned control. Optional — a row that has nothing to place on
+   * the right simply omits it; passing a filler <span /> to preserve
+   * layout is unnecessary because .settings-row-body already flexes.
+   */
   trailing?: ReactNode;
   fullWidth?: boolean;
   children?: ReactNode;

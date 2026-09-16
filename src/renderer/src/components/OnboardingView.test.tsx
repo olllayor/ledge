@@ -7,6 +7,7 @@ import type { AppState } from '@shared/schema';
 function buildState(): AppState {
   return {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: {
       launchAtLogin: false,
@@ -24,7 +25,10 @@ function buildState(): AppState {
       shakeReady: true,
       lastError: '',
       shortcutRegistered: true,
-      shortcutError: ''
+      shortcutError: '',
+      loginItemOpenAtLogin: false,
+      loginItemWasOpenedAtLogin: false,
+      loginItemWasOpenedAsHidden: false
     },
     sync: {
       enabled: false,
@@ -42,12 +46,14 @@ function buildState(): AppState {
       enabled: false,
       historyLimit: 200,
       ignoreConcealedItems: true,
+      skipSensitiveText: true,
       ignoreBundleIds: [],
       quickPasteHotkey: 'CommandOrControl+Shift+V',
       peekHotkey: '',
       syntheticPasteEnabled: false
     },
-    team: { activeTeamId: null }
+    team: { activeTeamId: null },
+    shelfPinned: false
   };
 }
 

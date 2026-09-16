@@ -26,7 +26,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -116,13 +116,28 @@ function classify(subject) {
 
 function buildSection(commits) {
   const groups = { Added: [], Fixed: [], Performance: [], Changed: [] };
+  let unprefixed = 0
   for (const c of commits) {
     const meta = classify(c.subject);
-    const label = USER_FACING_SECTIONS[meta.type];
-    if (!label) continue;
+    let label = USER_FACING_SECTIONS[meta.type];
+    let rest = meta.rest
+    if (!label) {
+      if (meta.type === 'other') {
+        // Keep unprefixed work visible but flag it — the new commitlint
+        // gate will prevent future drift.
+        label = 'Changed'
+        rest = c.subject
+        unprefixed++
+      } else {
+        continue
+      }
+    }
     const scopePrefix = meta.scope ? `**${meta.scope}**: ` : '';
     const bang = meta.bang ? ' ⚠️ BREAKING' : '';
-    groups[label].push(`- ${scopePrefix}${meta.rest}${bang} (\`${c.sha.slice(0, 7)}\`)`);
+    groups[label].push(`- ${scopePrefix}${rest}${bang} (\`${c.sha.slice(0, 7)}\`)`);
+  }
+  if (unprefixed > 0) {
+    console.warn(`build-changelog: ${unprefixed} commit(s) without conventional prefix were bucketed as Changed — run pnpm commitlint to enforce prefixes.`)
   }
   const out = [];
   for (const [label, items] of Object.entries(groups)) {
@@ -164,6 +179,51 @@ function findUnreleasedSection(changelog) {
   return { start: idx, end };
 }
 
+const SECTION_ORDER = ['Added', 'Fixed', 'Performance', 'Changed'];
+
+function parseSectionBody(body) {
+  const sections = new Map();
+  let current = null;
+  for (const line of body.split('\n')) {
+    const heading = line.match(/^### (.+)$/);
+    if (heading) {
+      current = heading[1];
+      if (!sections.has(current)) sections.set(current, []);
+      continue;
+    }
+    if (!current || line.trim() === '') continue;
+    sections.get(current).push(line);
+  }
+  return sections;
+}
+
+function mergeSectionBodies(existingBody, newBody) {
+  const existing = parseSectionBody(existingBody);
+  const incoming = parseSectionBody(newBody);
+  const labels = [...existing.keys(), ...[...incoming.keys()].filter((k) => !existing.has(k))];
+  labels.sort((a, b) => {
+    const ai = SECTION_ORDER.indexOf(a);
+    const bi = SECTION_ORDER.indexOf(b);
+    if (ai === -1 && bi === -1) return 0;
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+  const out = [];
+  for (const label of labels) {
+    const lines = [...(existing.get(label) ?? [])];
+    const seen = new Set(lines);
+    for (const line of incoming.get(label) ?? []) {
+      if (seen.has(line)) continue;
+      lines.push(line);
+      seen.add(line);
+    }
+    if (lines.length === 0) continue;
+    out.push(`### ${label}`, ...lines, '');
+  }
+  return out.join('\n');
+}
+
 function upsertUnreleased(existing, sectionBody) {
   const section = findUnreleasedSection(existing);
   if (!section) {
@@ -172,11 +232,11 @@ function upsertUnreleased(existing, sectionBody) {
   }
   const head = existing.slice(0, section.start);
   const tail = existing.slice(section.end);
-  const headingLine = existing
-    .slice(section.start, section.end)
-    .split('\n')[0]
-    .trimEnd();
-  const rebuilt = `${headingLine}\n\n${sectionBody}\n`;
+  const unreleased = existing.slice(section.start, section.end);
+  const headingLine = unreleased.split('\n')[0].trimEnd();
+  const existingBody = unreleased.slice(unreleased.indexOf('\n') + 1);
+  const mergedBody = mergeSectionBodies(existingBody, sectionBody);
+  const rebuilt = `${headingLine}\n\n${mergedBody}\n`;
   return head + rebuilt + tail;
 }
 
@@ -225,4 +285,11 @@ function main() {
   );
 }
 
-main();
+export { mergeSectionBodies, upsertUnreleased };
+
+const isDirectRun =
+  process.argv[1] != null &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (isDirectRun) {
+  main();
+}

@@ -27,6 +27,16 @@ describe('validateGlobalShortcut', () => {
   it('rejects missing non-modifier keys', () => {
     expect(validateGlobalShortcut('Command+Shift')).toBe('Shortcut needs a non-modifier key.')
   })
+
+  it('rejects shortcuts without any modifier key', () => {
+    // A bare letter would be captured system-wide, in every app.
+    expect(validateGlobalShortcut('A')).toBe(
+      'Shortcut must include at least one modifier key (Cmd, Ctrl, Option, or Shift).',
+    )
+    expect(validateGlobalShortcut('F5')).toBe(
+      'Shortcut must include at least one modifier key (Cmd, Ctrl, Option, or Shift).',
+    )
+  })
 })
 
 describe('isOpenPathSuccess', () => {

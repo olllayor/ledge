@@ -3,6 +3,7 @@ import type { AppState } from '@shared/schema';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { loadRenderer } from './loadRenderer';
 import { resolvePreloadPath } from './preloadPath';
+import { attachRendererCrashRecovery } from './rendererCrashRecovery';
 import { lockDownWebContents } from './webSecurity';
 
 const COLLAPSED_WIDTH = 280;
@@ -36,6 +37,9 @@ export class PeekWindow {
         preload: resolvePreloadPath(),
         contextIsolation: true,
         sandbox: true,
+        // Hotkey surface: instant thumbnail render after idle must not
+        // wait for Chromium's backgrounded-renderer ramp.
+        backgroundThrottling: false,
       },
     });
 
@@ -48,8 +52,9 @@ export class PeekWindow {
       this.window = null;
     });
 
-    await loadRenderer(this.window, 'peek');
     lockDownWebContents(this.window);
+    attachRendererCrashRecovery(this.window);
+    await loadRenderer(this.window, 'peek');
     return this.window;
   }
 

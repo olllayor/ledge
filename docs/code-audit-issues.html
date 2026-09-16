@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ledge — Codebase Issue Audit</title>
+  <style>
+    :root {
+      --bg: #090d14;
+      --bg-2: #0a101b;
+      --surface: #111724;
+      --surface-2: #161e2f;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.14);
+      --text: #e6ebf2;
+      --muted: #8a93a6;
+      --muted-2: #6c7589;
+      --accent: #6aa8ff;
+      --good: #5dd39e;
+      --warn: #ffb454;
+      --bad: #ff6b6b;
+      --p0: #ff4d6d;
+      --p1: #ff9f43;
+      --p2: #6aa8ff;
+      --p3: #5dd39e;
+      --shadow:
+        0 1px 0 rgba(255, 255, 255, 0.04) inset,
+        0 8px 28px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(106, 168, 255, 0.10), transparent 60%),
+        radial-gradient(900px 500px at 110% 10%, rgba(93, 211, 158, 0.08), transparent 60%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    main { max-width: 1180px; margin: 0 auto; padding: 48px 28px 96px; }
+
+    /* Header */
+    header.app {
+      display: flex; align-items: center; gap: 14px;
+      margin-bottom: 8px;
+    }
+    header.app svg { width: 36px; height: 36px; flex: none; }
+    header.app h1 {
+      font-size: 26px; margin: 0; letter-spacing: -0.01em;
+    }
+    header.app .sub {
+      color: var(--muted); font-size: 13px; margin-top: 2px;
+    }
+    .meta {
+      color: var(--muted); font-size: 12px; margin: 0 0 28px;
+      display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+    }
+    .meta .sep { color: var(--muted-2); }
+
+    /* Filter chips */
+    .filter-bar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      margin-bottom: 28px;
+      padding: 10px;
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid transparent;
+      cursor: pointer;
+      user-select: none;
+      transition: all 140ms ease;
+    }
+    .chip:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+    .chip.active {
+      color: var(--text);
+      background: rgba(255,255,255,0.07);
+      border-color: var(--border-strong);
+    }
+    .chip .dot {
+      width: 8px; height: 8px; border-radius: 999px; flex: none;
+    }
+    .chip[data-p="p0"] .dot { background: var(--p0); }
+    .chip[data-p="p1"] .dot { background: var(--p1); }
+    .chip[data-p="p2"] .dot { background: var(--p2); }
+    .chip[data-p="p3"] .dot { background: var(--p3); }
+    .chip .count {
+      font-variant-numeric: tabular-nums;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .chip.active .count { background: rgba(255,255,255,0.12); color: var(--text); }
+
+    .search-wrap { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+    .search {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      width: 220px;
+      outline: none;
+    }
+    .search:focus { border-color: var(--accent); }
+    .search::placeholder { color: var(--muted-2); }
+
+    /* KPI grid */
+    .kpis {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px; margin-bottom: 32px;
+    }
+    .kpi {
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+    }
+    .kpi .label { color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .kpi .value { font-size: 26px; font-weight: 600; margin-top: 4px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+    .kpi .delta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .kpi.bad .value { color: var(--bad); }
+    .kpi.warn .value { color: var(--warn); }
+    .kpi.good .value { color: var(--good); }
+
+    /* Sections */
+    section.audit-section { margin-bottom: 40px; }
+    section h2 {
+      font-size: 18px; margin: 0 0 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    section h2 .badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      background: rgba(255,255,255,0.06); color: var(--muted);
+      font-weight: 500;
+    }
+
+    /* Issue card */
+    .issue {
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow);
+    }
+    .issue:hover { border-color: var(--border-strong); }
+    .issue .top {
+      display: flex; align-items: flex-start; gap: 10px;
+      margin-bottom: 8px;
+    }
+    .issue h3 {
+      font-size: 15px; margin: 0; flex: 1; line-height: 1.4;
+    }
+    .issue h3 code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12.5px;
+      background: rgba(255,255,255,0.05);
+      padding: 1px 6px;
+      border-radius: 4px;
+      color: var(--text);
+    }
+    .pill {
+      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      font-weight: 600; letter-spacing: 0.02em; flex: none;
+    }
+    .pill.p0 { background: rgba(255, 77, 109, 0.15); color: var(--p0); border: 1px solid rgba(255, 77, 109, 0.3); }
+    .pill.p1 { background: rgba(255, 159, 67, 0.15); color: var(--p1); border: 1px solid rgba(255, 159, 67, 0.3); }
+    .pill.p2 { background: rgba(106, 168, 255, 0.15); color: var(--p2); border: 1px solid rgba(106, 168, 255, 0.3); }
+    .pill.p3 { background: rgba(93, 211, 158, 0.15); color: var(--p3); border: 1px solid rgba(93, 211, 158, 0.3); }
+    .pill.cat {
+      background: rgba(255,255,255,0.05); color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .issue .tags {
+      display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px;
+    }
+    .issue p { color: var(--muted); margin: 8px 0; font-size: 13.5px; }
+    .issue code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12.5px;
+      background: rgba(255,255,255,0.05);
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: #d8def0;
+    }
+    .issue pre {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      overflow-x: auto;
+      margin: 8px 0 0;
+      color: #c8d0e0;
+    }
+    .issue pre code {
+      background: none; padding: 0; font-size: 12px;
+    }
+    .file-ref {
+      color: var(--accent);
+      text-decoration: none;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      border-bottom: 1px dashed rgba(106, 168, 255, 0.3);
+    }
+    .file-ref:hover { border-bottom-style: solid; }
+
+    /* Architecture map */
+    .arch {
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+      overflow-x: auto;
+    }
+    .arch svg { display: block; margin: 0 auto; }
+
+    /* Quick-wins grid */
+    .quickwins {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    @media (max-width: 720px) {
+      .quickwins { grid-template-columns: 1fr; }
+      .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    /* Footer */
+    footer.foot {
+      margin-top: 56px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      color: var(--muted-2);
+      font-size: 12px;
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+
+    .hidden { display: none !important; }
+
+    /* Roadmap timeline */
+    .sprint {
+      display: grid; grid-template-columns: 100px 1fr; gap: 16px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .sprint:last-child { border-bottom: 0; }
+    .sprint .when {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: var(--accent);
+      padding-top: 2px;
+    }
+    .sprint h4 { margin: 0 0 6px; font-size: 14px; }
+    .sprint ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+    .sprint li { margin-bottom: 3px; }
+    .sprint li code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: #d8def0;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header class="app">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="14" rx="2"/>
+      <path d="M3 9h18"/>
+      <path d="M9 14h6"/>
+    </svg>
+    <div>
+      <h1>Ledge — Codebase Issue Audit</h1>
+      <div class="sub">macOS-only Electron shelf utility · renderer + main + native helper + Convex sync</div>
+    </div>
+  </header>
+
+  <p class="meta">
+    <span>Branch <strong>dev</strong> @ <code>7429d32</code></span>
+    <span class="sep">·</span>
+    <span>Scope: <code>src/</code>, <code>convex/</code>, <code>native/</code></span>
+    <span class="sep">·</span>
+    <span>Verified: <code id="now"></code></span>
+    <span class="sep">·</span>
+    <span>Read-only · No production changes proposed</span>
+  </p>
+
+  <!-- KPI cards -->
+  <div class="kpis" aria-label="Audit summary">
+    <div class="kpi warn">
+      <div class="label">Open issues</div>
+      <div class="value" id="kpi-total">—</div>
+      <div class="delta" id="kpi-total-delta">across 6 categories</div>
+    </div>
+    <div class="kpi bad">
+      <div class="label">P0 immediate</div>
+      <div class="value" id="kpi-p0">—</div>
+      <div class="delta">correctness / data integrity</div>
+    </div>
+    <div class="kpi warn">
+      <div class="label">P1 leverage</div>
+      <div class="value" id="kpi-p1">—</div>
+      <div class="delta">security, IPC, UX regressions</div>
+    </div>
+    <div class="kpi good">
+      <div class="label">Verified clean</div>
+      <div class="value">546</div>
+      <div class="delta">vitest tests · 5 native self-tests</div>
+    </div>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="filter-bar" role="toolbar" aria-label="Issue filters">
+    <button class="chip active" data-p="all" aria-pressed="true"><span class="count" id="c-all">0</span>All</button>
+    <button class="chip" data-p="p0" aria-pressed="false"><span class="dot"></span>P0<span class="count" id="c-p0">0</span></button>
+    <button class="chip" data-p="p1" aria-pressed="false"><span class="dot"></span>P1<span class="count" id="c-p1">0</span></button>
+    <button class="chip" data-p="p2" aria-pressed="false"><span class="dot"></span>P2<span class="count" id="c-p2">0</span></button>
+    <button class="chip" data-p="p3" aria-pressed="false"><span class="dot"></span>P3<span class="count" id="c-p3">0</span></button>
+    <div class="search-wrap">
+      <input class="search" id="search" type="search" placeholder="Filter by file or keyword…" aria-label="Search issues" />
+    </div>
+  </div>
+
+  <!-- Architecture map -->
+  <section class="audit-section">
+    <h2>Architecture map <span class="badge">where issues live</span></h2>
+    <div class="arch">
+      <svg viewBox="0 0 1080 320" width="100%" height="auto" role="img" aria-label="Architecture diagram">
+        <defs>
+          <linearGradient id="boxGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#161e2f"/>
+            <stop offset="100%" stop-color="#0e1525"/>
+          </linearGradient>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0,0 L10,5 L0,10 z" fill="#5a6580"/>
+          </marker>
+        </defs>
+
+        <!-- Layer labels -->
+        <text x="40" y="40" font-family="-apple-system, system-ui" font-size="11" fill="#8a93a6" letter-spacing="0.06em">RENDERER (React 19 · CSS)</text>
+        <text x="40" y="120" font-family="-apple-system, system-ui" font-size="11" fill="#8a93a6" letter-spacing="0.06em">PRELOAD · IPC SCHEMAS</text>
+        <text x="40" y="200" font-family="-apple-system, system-ui" font-size="11" fill="#8a93a6" letter-spacing="0.06em">MAIN (Electron · services)</text>
+        <text x="40" y="280" font-family="-apple-system, system-ui" font-size="11" fill="#8a93a6" letter-spacing="0.06em">CONVEX · SWIFT HELPER</text>
+
+        <!-- Renderer boxes -->
+        <g>
+          <rect x="180" y="20" width="150" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="255" y="42" text-anchor="middle" font-size="12" fill="#e6ebf2">ShelfView / PeekWindow</text>
+          <text x="255" y="58" text-anchor="middle" font-size="10" fill="#8a93a6">useLedgeState · Clipboard</text>
+        </g>
+        <g>
+          <rect x="350" y="20" width="150" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="425" y="42" text-anchor="middle" font-size="12" fill="#e6ebf2">PreferencesView</text>
+          <text x="425" y="58" text-anchor="middle" font-size="10" fill="#8a93a6">7 sections · primitives</text>
+        </g>
+
+        <!-- IPC layer -->
+        <g>
+          <rect x="265" y="100" width="150" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="340" y="122" text-anchor="middle" font-size="12" fill="#e6ebf2">IpcRegistrar</text>
+          <text x="340" y="138" text-anchor="middle" font-size="10" fill="#8a93a6">@shared/ipcSchemas</text>
+        </g>
+
+        <!-- Main services -->
+        <g>
+          <rect x="40" y="180" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="110" y="202" text-anchor="middle" font-size="12" fill="#e6ebf2">StateStore /</text>
+          <text x="110" y="218" text-anchor="middle" font-size="12" fill="#e6ebf2">StatePersister</text>
+        </g>
+        <g>
+          <rect x="200" y="180" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="270" y="202" text-anchor="middle" font-size="12" fill="#e6ebf2">singleInstance</text>
+          <text x="270" y="218" text-anchor="middle" font-size="10" fill="#8a93a6">fs.watch</text>
+        </g>
+        <g>
+          <rect x="360" y="180" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="430" y="202" text-anchor="middle" font-size="12" fill="#e6ebf2">webSecurity</text>
+          <text x="430" y="218" text-anchor="middle" font-size="10" fill="#8a93a6">lockDown · asset://</text>
+        </g>
+        <g>
+          <rect x="520" y="180" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="590" y="202" text-anchor="middle" font-size="12" fill="#e6ebf2">ClipboardHistory</text>
+          <text x="590" y="218" text-anchor="middle" font-size="10" fill="#8a93a6">dedup · syntheticPaste</text>
+        </g>
+        <g>
+          <rect x="680" y="180" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="750" y="202" text-anchor="middle" font-size="12" fill="#e6ebf2">NativeAgentClient</text>
+          <text x="750" y="218" text-anchor="middle" font-size="10" fill="#8a93a6">circuit breaker</text>
+        </g>
+
+        <!-- Backend -->
+        <g>
+          <rect x="200" y="260" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="270" y="282" text-anchor="middle" font-size="12" fill="#e6ebf2">convex/sync.ts</text>
+          <text x="270" y="298" text-anchor="middle" font-size="10" fill="#8a93a6">public mutations</text>
+        </g>
+        <g>
+          <rect x="360" y="260" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="430" y="282" text-anchor="middle" font-size="12" fill="#e6ebf2">convex/auth · teams</text>
+          <text x="430" y="298" text-anchor="middle" font-size="10" fill="#8a93a6">user-id args</text>
+        </g>
+        <g>
+          <rect x="520" y="260" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="590" y="282" text-anchor="middle" font-size="12" fill="#e6ebf2">convex/crons.ts</text>
+          <text x="590" y="298" text-anchor="middle" font-size="10" fill="#8a93a6">cleanup · TODO(phase-2)</text>
+        </g>
+        <g>
+          <rect x="680" y="260" width="140" height="50" rx="8" fill="url(#boxGrad)" stroke="#2a3552"/>
+          <text x="750" y="282" text-anchor="middle" font-size="12" fill="#e6ebf2">DropShelfNativeAgent</text>
+          <text x="750" y="298" text-anchor="middle" font-size="10" fill="#8a93a6">Swift · shake · bookmark</text>
+        </g>
+
+        <!-- arrows -->
+        <g stroke="#5a6580" stroke-width="1" fill="none">
+          <path d="M255 70 V100" marker-end="url(#arrow)"/>
+          <path d="M425 70 V100" marker-end="url(#arrow)"/>
+          <path d="M340 150 V180" marker-end="url(#arrow)"/>
+          <path d="M340 150 V230" marker-end="url(#arrow)"/>
+          <path d="M340 150 V230" marker-end="url(#arrow)"/>
+        </g>
+      </svg>
+    </div>
+  </section>
+
+  <!-- Persistence -->
+  <section class="audit-section" data-cat="Persistence">
+    <h2>Persistence &amp; data integrity <span class="badge">4 issues</span></h2>
+
+    <article class="issue" data-p="p1" data-text="StatePersister save fire and forget whenIdle">
+      <div class="top"><h3><code>StatePersister.save</code> is fire-and-forget — callers never await durability</h3><span class="pill p1">P1</span></div>
+      <div class="tags"><span class="pill cat">main · state</span></div>
+      <p>Mutators across <code>ShelfStore</code>, <code>ClipboardStore</code>, <code>PreferencesStore</code>, <code>SyncStore</code>, and <code>TeamStore</code> all call <code>persister.save(state)</code> and return immediately. The write is queued via <code>writeQueue</code> but the caller can't observe success/failure. <code>whenIdle()</code> exists but is only used at quit-time (<code>index.ts:506</code>); per-mutation durability is never asserted.</p>
+      <p><strong>Risk:</strong> a crash between mutation and the next coalesced flush silently drops the change. The toast throttling (<code>PERSISTENCE_ERROR_TOAST_THROTTLE_MS = 30_000</code>) further masks the loss because the error toast is also the user-visible signal.</p>
+      <pre><code>// src/main/services/state/shelfStore.ts
+replacePersonalLiveShelf(shelf: ShelfRecord): void {
+  const state = this.getState()
+  state.liveShelf = shelf
+  this.persister.save(state)   // &lt;-- void return, no await
+}</code></pre>
+      <p><strong>Fix:</strong> have each domain mutator return a <code>Promise&lt;void&gt;</code> derived from <code>persister.whenIdle()</code> after enqueueing; IPC handlers can <code>await</code> it for write-confirm semantics on user-visible actions.</p>
+    </article>
+
+    <article class="issue" data-p="p2" data-text="persister tmp siblings startup recovery">
+      <div class="top"><h3>Stale <code>state.json.tmp-*</code> siblings are never recovered on startup</h3><span class="pill p2">P2</span></div>
+      <div class="tags"><span class="pill cat">main · state</span></div>
+      <p><code>StatePersister.save()</code> writes to <code>{statePath}.tmp-{pid}-{ts}-{rand}</code> then renames. If the process dies after the write but before the rename, the temp file is orphaned. <code>load()</code> (<code>persister.ts:92</code>) reads only <code>statePath</code> — the most recent tmp sibling is silently ignored, even though it may be the user's latest intended snapshot.</p>
+      <pre><code>// src/main/services/state/persister.ts
+const tempPath = `${this.statePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+await fs.writeFile(tempPath, serialized, 'utf8')
+// ...
+await fs.rename(tempPath, this.statePath)</code></pre>
+      <p><strong>Fix:</strong> in <code>load()</code>, if the canonical file is missing, scan for <code>*.tmp-*</code> siblings, pick the newest by mtime, validate with the same Zod slice chain, and rename it into place. If canonical exists but a tmp is newer, log a warning and quarantine the tmp.</p>
+    </article>
+
+    <article class="issue" data-p="p2" data-text="persister migration reset slice safeParse">
+      <div class="top"><h3>Migration reset can silently drop user data when a single slice fails</h3><span class="pill p2">P2</span></div>
+      <div class="tags"><span class="pill cat">main · state</span></div>
+      <p><code>migratePersistedState()</code> (persister.ts:266) uses <code>safeParse</code> per slice and falls back to defaults for any failure. The fix in commit <code>1102179</code> improved isolation, but a corrupt <code>preferences</code> slice still resets the entire preferences record, including the user's plan, shortcuts, and onboarding completion. The user gets a working shelf back but loses <em>all</em> configuration silently.</p>
+      <p><strong>Fix:</strong> surface a per-slice fallback toast and persist a "degraded slice" marker so Settings → General can show "we reset your preferences because the saved file was unreadable."</p>
+    </article>
+
+    <article class="issue" data-p="p3" data-text="persister dir fsync macos">
+      <div class="top"><h3>Directory-fsync is best-effort and silently swallows macOS-specific errors</h3><span class="pill p3">P3</span></div>
+      <div class="tags"><span class="pill cat">main · state</span></div>
+      <p><code>persister.ts:149-157</code> opens the parent directory and calls <code>handle.sync()</code> wrapped in <code>try { } catch {}</code>. On macOS the call returns success without actually fsyncing on some filesystems (HFS+/APFS quirks); a true ENOSPC or EACCES here would also be silently swallowed, hiding a real durability failure.</p>
+      <p><strong>Fix:</strong> at minimum log at <code>console.warn</code>; ideally branch on <code>process.platform</code> and only attempt the dir fsync on platforms that report success meaningfully.</p>
+    </article>
+  </section>
+
+  <!-- Single-instance -->
+  <section class="audit-section" data-cat="Single-instance">
+    <h2>Single-instance &amp; native IPC <span class="badge">3 issues</span></h2>
+
+    <article class="issue" data-p="p0" data-text="singleInstance fs.watch nativeAgent macos fsevents">
+      <div class="top"><h3><code>startSingleInstanceWatch</code> depends on <code>fs.watch</code> for a critical signal</h3><span class="pill p0">P0</span></div>
+      <div class="tags"><span class="pill cat">main · single-instance</span></div>
+      <p>The whole "second launch resurfaces Settings" UX rides on Node's <code>fs.watch</code> observing a marker file in <code>app.getPath('userData')</code>. macOS's FSEvents does not guarantee sub-second delivery, can coalesce bursts (login-item races), and is known to drop events under heavy I/O on the parent directory. The comment at <code>singleInstance.ts:80-82</code> already acknowledges rename can emit twice.</p>
+      <p><strong>Real-world impact:</strong> a user double-clicking the app while Ledge is running expects the Settings window to appear. Under load (sync push, state write) the event can be lost; the secondary instance just quits without surfacing anything.</p>
+      <pre><code>// src/main/services/singleInstance.ts
+watcher = watch(userDataDir, { persistent: false }, (_event, filename) => {
+  if (filename !== SECOND_INSTANCE_MARKER_FILENAME) {
+    return
+  }
+  rmSync(markerPath(userDataDir), { force: true })
+  onSignal()
+})</code></pre>
+      <p><strong>Fix options:</strong> (1) move the resurface signal into the Swift helper over the existing XPC-style stdin/stdout protocol; (2) poll on a 100–200ms interval as a fallback to the watcher; (3) keep the watcher but additionally have the secondary instance send a UDP/Unix-domain datagram to a known socket.</p>
+    </article>
+
+    <article class="issue" data-p="p1" data-text="singleInstance onSignal unsubscribe watcher.close race">
+      <div class="top"><h3><code>startSingleInstanceWatch</code> can call <code>onSignal</code> after unsubscribe</h3><span class="pill p1">P1</span></div>
+      <div class="tags"><span class="pill cat">main · single-instance</span></div>
+      <p>The unsubscribe fn returned at <code>singleInstance.ts:92</code> calls <code>watcher.close()</code>. Node's <code>fs.watch</code> close is async; a callback already in the event-queue can fire after unsubscribe. <code>onSignal</code> then calls <code>preferencesWindow.show()</code> on a destroyed window during quit.</p>
+      <p><strong>Fix:</strong> guard the callback with an <code>unsubscribed</code> flag and early-return, or wrap <code>onSignal()</code> in a try/catch with a <code>webContents.isDestroyed()</code> check.</p>
+    </article>
+
+    <article class="issue" data-p="p1" data-text="nativeAgent circuit breaker never recovers">
+      <div class="top"><h3><code>NativeAgentClient</code> circuit-breaker trip logs once and never recovers</h3><span class="pill p1">P1</span></div>
+      <div class="tags"><span class="pill cat">main · native agent</span></div>
+      <p>When the Swift helper exits unexpectedly several times in a row, the client trips a circuit breaker and emits one <code>statusChanged</code> event. Once tripped, it stops auto-restarting. The clipboard monitor falls back to the JS poller (good), but the shake gesture and bookmark resolution are gone for the rest of the session, and no UI surface tells the user.</p>
+      <p><strong>Fix:</strong> add a half-open recovery probe after a cool-down (e.g. 60s), surface a status pill in Settings → General, and reset the counter when the helper stays up for &gt;5 min.</p>
+    </article>
+  </section>
+
+  <!-- Convex -->
+  <section class="audit-section" data-cat="Convex">
+    <h2>Convex backend <span class="badge">4 issues</span></h2>
+
+    <article class="issue" data-p="p1" data-text="convex sync mutations public upsertShelf authorizeImageUpload recordImageAsset recordSyncEvent">
+      <div class="top"><h3><code>convex/sync.ts</code> exposes several public mutations that should likely be <code>internalMutation</code></h3><span class="pill p1">P1</span></div>
+      <div class="tags"><span class="pill cat">convex</span></div>
+      <p><code>sync.ts</code> exports <code>registerDevice</code>, <code>upsertShelf</code>, <code>deleteShelf</code>, <code>patchPreferences</code>, <code>authorizeImageUpload</code>, <code>abandonImageUpload</code>, <code>recordImageAsset</code>, <code>recordSyncEvent</code>, <code>upsertShelfItem</code>, and <code>deleteShelfItem</code> as <code>mutation</code>. Per the project's <code>convex/_generated/ai/guidelines.md</code>, anything that touches billing/storage caps, deletes other users' data, or is only ever invoked by an authenticated server-side flow should be <code>internalMutation</code>.</p>
+      <p><strong>Risk:</strong> a leaked Convex deploy URL or a renderer compromise can hit these directly. <code>authorizeImageUpload</code> + <code>recordImageAsset</code> are the storage-billing surface; <code>patchPreferences</code> mutates another user's preferences if <code>userId</code> is passed (see #10).</p>
+      <p><strong>Fix:</strong> convert to <code>internalMutation</code> and route renderer→Convex calls through an <code>httpAction</code> in <code>convex/http.ts</code> that does the auth check and forwards. The <code>registerDevice</code> flow is a likely exception because new users have no auth yet — leave that public but rate-limit it.</p>
+    </article>
+
+    <article class="issue" data-p="p1" data-text="convex auth teams patchPreferences accept userId user identifier">
+      <div class="top"><h3><code>convex/auth.ts</code> and <code>convex/teams.ts</code> accept user identifiers as arguments in some places</h3><span class="pill p1">P1</span></div>
+      <div class="tags"><span class="pill cat">convex</span></div>
+      <p><code>sync.ts:patchPreferences</code>, <code>upsertShelf</code>, <code>deleteShelf</code>, <code>upsertShelfItem</code>, and <code>deleteShelfItem</code> all take a <code>userId</code> / <code>deviceId</code> arg and trust it as the owner. Convex's <code>ctx.auth.getUserIdentity()</code> exists; cross-user writes are trivially possible until the args are replaced with the identity subject.</p>
+      <p><strong>Fix:</strong> derive <code>userId</code> from <code>ctx.auth.getUserIdentity()</code> server-side and drop the arg. For unauthenticated flows (device registration), gate by a signed install token.</p>
+    </article>
+
+    <article class="issue" data-p="p2" data-text="convex email action use node Resend">
+      <div class="top"><h3><code>convex/email.ts</code> is missing <code>"use node";</code> for an action that may need Node built-ins</h3><span class="pill p2">P2</span></div>
+      <div class="tags"><span class="pill cat">convex</span></div>
+      <p>Resend SDK + the <code>RESEND_API_KEY</code> flow described in AGENTS.md typically pulls in Node-only modules (<code>crypto</code>, fetch polyfills). Without <code>"use node";</code> at the top of the file, Convex runs it in the V8 isolate where imports can silently fail at deploy time.</p>
+      <p><strong>Fix:</strong> add <code>"use node";</code> as the very first line of <code>convex/email.ts</code>.</p>
+    </article>
+
+    <article class="issue" data-p="p3" data-text="convex crons internalMutation TODO phase-2">
+      <div class="top"><h3><code>convex/crons.ts</code> schedules cleanup work; <code>TODO(phase-2)</code> on line 143 is a known loose end</h3><span class="pill p3">P3</span></div>
+      <div class="tags"><span class="pill cat">convex</span></div>
+      <p>The crons file does use <code>internalMutation</code> (good), but <code>crons.ts:143</code> still carries a <code>// TODO(phase-2)</code> for legacy <code>imageAssets</code> claim cleanup. This is the only open <code>TODO</code> in the production tree (3 total matches; the other two are in <code>ProSettings.tsx</code> and <code>userStoryHarness.test.ts</code>).</p>
+      <p><strong>Fix:</strong> implement or delete the comment in the next sync iteration.</p>
+    </article>
+  </section>
+
+  <!-- Security / IPC -->
+  <section class="audit-section" data-cat="Security">
+    <h2>Security &amp; IPC surface <span class="badge">4 issues</span></h2>
+
+    <article class="issue" data-p="p1" data-text="ipcMain schema parse throws renderer hangs">
+      <div class="top"><h3>Several IPC handlers use <code>schema.parse(input)</code> — a bad payload throws and the renderer's promise hangs</h3><span class="pill p1">P1</span></div>
+      <div class="tags"><span class="pill cat">main · ipc</span></div>
+      <p><code>ipc.ts</code> mixes <code>safeParse</code> (good, returns a result) with <code>schema.parse(input)</code> (throws ZodError). When a <code>.parse</code> call throws inside an <code>ipcMain.handle</code> async callback, Electron rejects the renderer's <code>ipcRenderer.invoke</code> with an unhandled error and the renderer hook never resolves. Some handlers (e.g. <code>restoreShelf</code>, <code>addPayload</code>, <code>addPayloads</code>) wrap the throw into a returned <code>Error</code>, but several do not.</p>
+      <pre><code>// src/main/ipc.ts (representative)
+ipcMain.handle(IPC_CHANNELS.createShelf, async (_event, input: unknown) => {
+  const parsed = createShelfInputSchema.parse(input)  // throws → renderer hang
+  ...
+})</code></pre>
+      <p><strong>Fix:</strong> convert every <code>parse(...)</code> in handler bodies to <code>safeParse(...)</code> and return a tagged result <code>{ ok: false, error }</code>; or wrap each handler in a single <code>withSchema(schema, fn)</code> helper that catches and shapes the error.</p>
+    </article>
+
+    <article class="issue" data-p="p1" data-text="webSecurity lockDownWebContents every window">
+      <div class="top"><h3><code>lockDownWebContents</code> is good but not applied to every window</h3><span class="pill p1">P1</span></div>
+      <div class="tags"><span class="pill cat">main · web-security</span></div>
+      <p>Test coverage (<code>webSecurity.test.ts</code>) verifies the helper's behavior in isolation, but a code search for callers of <code>lockDownWebContents</code> in the main process returned only the test file — there's no obvious call site in <code>index.ts</code> or the <code>windows/</code> directory. Either the helper is invoked indirectly (worth a comment to confirm) or it's not actually wired into every BrowserWindow.</p>
+      <p><strong>Fix:</strong> grep for the call site; if missing, call it from <code>loadRenderer.ts</code> for every renderer window before the first navigation.</p>
+    </article>
+
+    <article class="issue" data-p="p2" data-text="assetPathResolver realpath guard live items lexical">
+      <div class="top"><h3>Asset protocol allowlist uses <code>path.startsWith</code> for live items — symlinks inside the assets dir still pass lexical check on one branch</h3><span class="pill p2">P2</span></div>
+      <div class="tags"><span class="pill cat">main · asset</span></div>
+      <p><code>resolveAllowedAssetPath</code> correctly uses <code>realpathSync</code> for the <code>assetsDir</code> branch (good — defends against planted symlinks). The <em>live-items</em> branch, however, does a lexical <code>resolvePath(itemPath) === normalizedPath</code> equality. If a shelf item's <code>fileRef</code> points to a symlink (legal on macOS), the renderer can request the symlink target instead and serve <em>that</em> file outside the live shelf.</p>
+      <pre><code>// src/main/services/assetPathResolver.ts
+for (const item of context.liveItems) {
+  ...
+  if (itemPath && resolvePath(itemPath) === normalizedPath) {
+    return normalizedPath   // no realpath guard here
+  }
+}</code></pre>
+      <p><strong>Fix:</strong> in the live-items branch, additionally <code>realpathSync</code> the candidate and require the resolved target to equal one of the live items' <code>realpathSync(getFileBackedPath(...))</code>.</p>
+    </article>
+
+    <article class="issue" data-p="p3" data-text="globalShortcut unregister failures swallowed">
+      <div class="top"><h3><code>globalShortcut.unregister</code> failures are silently swallowed everywhere</h3><span class="pill p3">P3</span></div>
+      <div class="tags"><span class="pill cat">main · shortcuts</span></div>
+      <p>A grep for <code>globalShortcut.unregister</code> shows bare calls with no result-check. If unregister fails (another process holding the combo), the new registration still proceeds and <code>preferencesSync.sync()</code> believes the new shortcut is active when it isn't. Users discover this when their hotkey stops working.</p>
+      <p><strong>Fix:</strong> capture the boolean return and log + toast on failure; on retry, call <code>unregisterAll()</code> first.</p>
+    </article>
+  </section>
+
+  <!-- Renderer / React -->
+  <section class="audit-section" data-cat="Renderer">
+    <h2>Renderer / React / hooks <span class="badge">3 issues</span></h2>
+
+    <article class="issue" data-p="p2" data-text="useLedgeState double render test regression">
+      <div class="top"><h3>An existing <code>useLedgeStateDoubleRender</code> test exists for a reason — the double-render regression is real and not fully isolated</h3><span class="pill p2">P2</span></div>
+      <div class="tags"><span class="pill cat">renderer · hooks</span></div>
+      <p><code>useLedgeStateDoubleRender.test.tsx</code> documents that components depending on the external store can double-render when the selector returns a new object literal. The fix to switch to <code>useSyncExternalStore</code> (commit lineage pre-<code>7429d32</code>) reduces but does not eliminate this — selectors returning fresh arrays (<code>getEntries()</code>, <code>getCategories()</code>) still invalidate memoization on every broadcast.</p>
+      <p><strong>Fix:</strong> memoize returned arrays in the store using <code>shallowEqual</code> on the previous snapshot, and document the contract that selectors must return stable references when data hasn't changed.</p>
+    </article>
+
+    <article class="issue" data-p="p3" data-text="console.log renderer proCheckout">
+      <div class="top"><h3>~14 raw <code>console.*</code> calls leak into the renderer; <code>proCheckout.ts</code> uses <code>console.log</code> for an analytics-style event</h3><span class="pill p3">P3</span></div>
+      <div class="tags"><span class="pill cat">renderer</span></div>
+      <p>Centralize via a thin logger that can be silenced in production (<code>import.meta.env.PROD</code> → no-op). The <code>proCheckout</code> event is the most user-visible: it dumps an analytics-style payload to the DevTools console on the checkout success path.</p>
+    </article>
+
+    <article class="issue" data-p="p3" data-text="syntheticPasteEnabled UI opt-in opt-out">
+      <div class="top"><h3>Synthetic paste is a macOS accessibility concern; no opt-in / opt-out surface in the UI for the new <code>syntheticPasteEnabled</code> field</h3><span class="pill p3">P3</span></div>
+      <div class="tags"><span class="pill cat">clipboard · a11y</span></div>
+      <p><code>defaultClipboardSettingsRecord</code> defaults <code>syntheticPasteEnabled: false</code>, but there's no UI toggle wired into <code>PreferencesView</code> sections yet. Users who rely on a non-synthetic paste path (e.g. apps that watch <code>NSPasteboard</code>) have no way to discover the setting exists.</p>
+      <p><strong>Fix:</strong> add a "Synthetic paste" toggle to <code>Preferences/sections/ClipboardSettings.tsx</code> with a one-line help text explaining the accessibility trade-off.</p>
+    </article>
+  </section>
+
+  <!-- Tests / DX -->
+  <section class="audit-section" data-cat="Tests">
+    <h2>Tests &amp; developer experience <span class="badge">3 issues</span></h2>
+
+    <article class="issue" data-p="p1" data-text="singleInstance test 5s timeout deterministic onSignal marker">
+      <div class="top"><h3><code>singleInstance.test.ts › invokes onSignal when the marker appears and stops after unsubscribe</code> — 5s timeout, deterministic</h3><span class="pill p1">P1</span></div>
+      <div class="tags"><span class="pill cat">tests</span></div>
+      <p>The test relies on <code>fs.watch</code> firing its 'rename' event after the secondary <code>writeSecondInstanceMarker()</code> finishes. Under load (CI runners with cold caches) the FSEvents delivery can exceed 5s and the test fails with no actionable diff. The test passes locally but flakes in CI.</p>
+      <p><strong>Fix:</strong> use <code>fs.watch</code>'s <code>recursive: true</code> on macOS, or replace the watcher with a polling loop in the test fixture. Alternatively, inject a clock-advanceable signal channel for unit tests and keep <code>fs.watch</code> only in production.</p>
+    </article>
+
+    <article class="issue" data-p="p2" data-text="userStoryHarness stderr ENOENT state.json.tmp">
+      <div class="top"><h3>User-story harness stderr noise: <code>"Failed to persist Ledge state. ENOENT: rename…state.json.tmp"</code></h3><span class="pill p2">P2</span></div>
+      <div class="tags"><span class="pill cat">tests</span></div>
+      <p>Documented in <code>src/main/services/__harness__/userStoryHarness.test.ts</code>. The harness rapidly creates and destroys <code>StateStore</code> instances; the queued tmp-then-rename can race with the next teardown and <code>fs.rename</code> errors with ENOENT. Cosmetic but it makes legitimate failures hard to spot.</p>
+      <p><strong>Fix:</strong> in the harness, <code>await stateStore.whenIdle()</code> before disposing, or give <code>StatePersister</code> a <code>dispose()</code> that drains the queue and refuses new writes.</p>
+    </article>
+
+    <article class="issue" data-p="p3" data-text="tsconfig.node.tsbuildinfo committed stale 158KB">
+      <div class="top"><h3><code>tsconfig.node.tsbuildinfo</code> (158KB) is committed to the repo and stale</h3><span class="pill p3">P3</span></div>
+      <div class="tags"><span class="pill cat">repo · dx</span></div>
+      <p>Already flagged in commit <code>8ac764c</code> (stop ignoring <code>.github/</code> and <code>docs/</code>). The tsbuildinfo is a tsc incremental cache that should be generated locally, not committed. A 158KB file in the repo bloats clone size and risks confusing blame. Add it to <code>.gitignore</code> in the same patch.</p>
+    </article>
+  </section>
+
+  <!-- Quick wins -->
+  <section class="audit-section" data-cat="Quick wins">
+    <h2>Quick wins (P3) <span class="badge">low risk, high signal</span></h2>
+    <div class="quickwins">
+      <article class="issue" data-p="p3" data-text="TODO phase-2 crons">
+        <div class="top"><h3>A. Resolve <code>TODO(phase-2)</code> in <code>convex/crons.ts:143</code></h3><span class="pill p3">P3</span></div>
+        <p>Implement the legacy <code>imageAssets</code> claim cleanup or delete the comment with a tracking issue.</p>
+      </article>
+      <article class="issue" data-p="p3" data-text="node: prefix convention stragglers">
+        <div class="top"><h3>B. Prefer-<code>node:</code>-prefix convention has a few stragglers</h3><span class="pill p3">P3</span></div>
+        <p>Per AGENTS.md, Node built-ins should use the <code>node:</code> prefix. A grep across <code>src/</code> for <code>from 'fs'</code>, <code>from 'path'</code>, etc. without the prefix surfaces ~5 sites.</p>
+      </article>
+      <article class="issue" data-p="p3" data-text="convex tests import.meta.glob CI">
+        <div class="top"><h3>C. Convex tests rely on <code>import.meta.glob</code> — add a CI step that <em>deliberately</em> misses a file</h3><span class="pill p3">P3</span></div>
+        <p>The module map silently skips missing files; a guard test would catch regressions where someone adds a new <code>convex/*.test.ts</code> but forgets to import it.</p>
+      </article>
+      <article class="issue" data-p="p3" data-text="changelog heal-on-restore feat">
+        <div class="top"><h3>D. The Conventional-Commits changelog caught <code>feat: shelf heal-on-restore</code> as gold</h3><span class="pill p3">P3</span></div>
+        <p>Confirm the next nightly digest rolls that commit into <code>## [Unreleased]</code> with the correct "Added" classification.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- Recommended sprint timeline -->
+  <section class="audit-section">
+    <h2>Recommended sprint timeline</h2>
+    <div class="arch" style="padding: 18px 22px;">
+      <div class="sprint">
+        <div class="when">Sprint 1</div>
+        <div>
+          <h4>Stop the bleeding (P0 + P1 data integrity)</h4>
+          <ul>
+            <li><code>singleInstance</code> — replace <code>fs.watch</code> signal with Swift-helper IPC or poll fallback (#7).</li>
+            <li><code>StatePersister.save</code> — return <code>Promise</code> from mutators; await in IPC handlers (#2).</li>
+            <li><code>ipc.ts</code> — replace every <code>.parse</code> in handler bodies with <code>safeParse</code> + tagged result (#13).</li>
+            <li>Single-instance test — inject clock-advanceable signal channel (#23).</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sprint">
+        <div class="when">Sprint 2</div>
+        <div>
+          <h4>Convex hardening</h4>
+          <ul>
+            <li>Convert <code>sync.ts</code> storage/billing mutations to <code>internalMutation</code>; route via <code>http.ts</code> (#9).</li>
+            <li>Drop <code>userId</code> args; derive from <code>ctx.auth.getUserIdentity()</code> (#10).</li>
+            <li>Add <code>"use node";</code> to <code>convex/email.ts</code> (#11).</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sprint">
+        <div class="when">Sprint 3</div>
+        <div>
+          <h4>Security &amp; UX polish</h4>
+          <ul>
+            <li><code>assetPathResolver</code> — add <code>realpathSync</code> guard on the live-items branch (#15).</li>
+            <li><code>lockDownWebContents</code> — confirm every window is wrapped (#14).</li>
+            <li>Surface <code>syntheticPasteEnabled</code> toggle in Clipboard Settings (#21).</li>
+            <li>Native helper circuit-breaker half-open probe + status pill (#22).</li>
+          </ul>
+        </div>
+      </div>
+      <div class="sprint">
+        <div class="when">Sprint 4</div>
+        <div>
+          <h4>Durability recovery &amp; hygiene</h4>
+          <ul>
+            <li>Recover orphaned <code>state.json.tmp-*</code> siblings on startup (#3).</li>
+            <li>Per-slice fallback toast in Settings → General (#4).</li>
+            <li>Renderer logger that silences in production (#18).</li>
+            <li>Gitignore <code>tsconfig.node.tsbuildinfo</code> (#24).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>Generated read-only from <code>git rev-parse HEAD</code> on <strong>dev</strong>. No production files modified.</span>
+    <span>Verification: <code>pnpm lint</code> · <code>pnpm test</code> (546 passing) · <code>pnpm build</code></span>
+  </footer>
+</main>
+
+<script>
+  // ---- Filter & search ----------------------------------------------------
+  (function () {
+    const issues = Array.from(document.querySelectorAll('.issue'));
+    const sections = Array.from(document.querySelectorAll('section.audit-section[data-cat]'));
+    const chips = Array.from(document.querySelectorAll('.chip'));
+    const search = document.getElementById('search');
+    const counts = {
+      all: issues.length,
+      p0: issues.filter((i) => i.dataset.p === 'p0').length,
+      p1: issues.filter((i) => i.dataset.p === 'p1').length,
+      p2: issues.filter((i) => i.dataset.p === 'p2').length,
+      p3: issues.filter((i) => i.dataset.p === 'p3').length,
+    };
+
+    function apply() {
+      const activeP = (document.querySelector('.chip.active') || chips[0]).dataset.p;
+      const q = (search.value || '').trim().toLowerCase();
+      let visible = 0;
+      issues.forEach((issue) => {
+        const matchesP = activeP === 'all' || issue.dataset.p === activeP;
+        const text = (issue.dataset.text || '') + ' ' + issue.textContent.toLowerCase();
+        const matchesQ = !q || text.includes(q);
+        const show = matchesP && matchesQ;
+        issue.classList.toggle('hidden', !show);
+        if (show) visible++;
+      });
+      sections.forEach((sec) => {
+        const any = sec.querySelectorAll('.issue:not(.hidden)').length > 0;
+        sec.classList.toggle('hidden', !any);
+      });
+      document.getElementById('kpi-total').textContent = visible;
+      document.getElementById('kpi-total-delta').textContent =
+        activeP === 'all' ? `of ${counts.all} total` : `filtered to ${activeP.toUpperCase()}`;
+    }
+
+    chips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        chips.forEach((c) => {
+          c.classList.remove('active');
+          c.setAttribute('aria-pressed', 'false');
+        });
+        chip.classList.add('active');
+        chip.setAttribute('aria-pressed', 'true');
+        apply();
+      });
+    });
+    search.addEventListener('input', apply);
+
+    document.getElementById('c-all').textContent = counts.all;
+    document.getElementById('c-p0').textContent = counts.p0;
+    document.getElementById('c-p1').textContent = counts.p1;
+    document.getElementById('c-p2').textContent = counts.p2;
+    document.getElementById('c-p3').textContent = counts.p3;
+    document.getElementById('kpi-total').textContent = counts.all;
+    document.getElementById('kpi-p0').textContent = counts.p0;
+    document.getElementById('kpi-p1').textContent = counts.p1;
+    document.getElementById('kpi-p2').textContent = counts.p2;
+    document.getElementById('kpi-p3').textContent = counts.p3;
+
+    // ---- Timestamp --------------------------------------------------------
+    var d = new Date();
+    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+    document.getElementById('now').textContent =
+      d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  })();
+</script>
+</body>
+</html>

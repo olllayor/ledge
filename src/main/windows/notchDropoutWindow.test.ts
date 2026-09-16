@@ -14,6 +14,7 @@ const mockBrowserWindowInstance = {
   webContents: {
     send: vi.fn(),
     on: vi.fn(),
+    isDestroyed: vi.fn(() => false),
   },
 }
 
@@ -62,7 +63,7 @@ describe('NotchDropoutWindow', () => {
     vi.restoreAllMocks()
   })
 
-  it('positionTopCenter places window below menu bar', async () => {
+  it('anchors below the menu bar when no notch metrics are available', async () => {
     await window.show()
 
     expect(mockBrowserWindowInstance.setBounds).toHaveBeenCalledWith(
@@ -121,5 +122,74 @@ describe('NotchDropoutWindow', () => {
     expect(window.suppressHide).toBe(false)
     window.suppressHide = true
     expect(window.suppressHide).toBe(true)
+  })
+
+  const notchedGeometry = {
+    hasNotch: true,
+    menuBarHeight: 38,
+    notchWidth: 204,
+    notchHeight: 38,
+    scale: 1,
+    cornerRadius: 10,
+    centerX: 864,
+    top: 0,
+  }
+
+  it('anchors flush to the top on a notched display and pushes the geometry', async () => {
+    const notched = new NotchDropoutWindow({ resolveGeometry: () => notchedGeometry })
+
+    await notched.show()
+
+    expect(mockBrowserWindowInstance.setBounds).toHaveBeenCalledWith(
+      { x: 864 - 350, y: 0, width: 700, height: 200 },
+      false,
+    )
+    expect(mockBrowserWindowInstance.webContents.send).toHaveBeenCalledWith(
+      'ledge:notch-dropout:geometry',
+      notchedGeometry,
+    )
+    expect(notched.getGeometry()).toEqual(notchedGeometry)
+  })
+
+  it('clamps the anchored x inside the display bounds', async () => {
+    const notched = new NotchDropoutWindow({
+      resolveGeometry: () => ({ ...notchedGeometry, centerX: 50 }),
+    })
+
+    await notched.show()
+
+    expect(mockBrowserWindowInstance.setBounds).toHaveBeenCalledWith(
+      expect.objectContaining({ x: 0 }),
+      false,
+    )
+  })
+
+  it('exposes panel bounds only while the panel is visible', async () => {
+    const notched = new NotchDropoutWindow()
+
+    expect(notched.getPanelBounds()).toBeNull()
+
+    await notched.show()
+    mockBrowserWindowInstance.isVisible.mockReturnValue(true)
+
+    expect(notched.getPanelBounds()).toEqual({ x: 370, y: 25, width: 700, height: 200 })
+  })
+
+  it('reposition() re-anchors the panel to the new geometry', async () => {
+    let top = 0
+    const notched = new NotchDropoutWindow({
+      resolveGeometry: () => ({ ...notchedGeometry, top }),
+    })
+
+    await notched.show()
+    vi.clearAllMocks()
+
+    top = 38
+    notched.reposition()
+
+    expect(mockBrowserWindowInstance.setBounds).toHaveBeenCalledWith(
+      expect.objectContaining({ y: 38 }),
+      false,
+    )
   })
 })

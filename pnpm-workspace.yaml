@@ -1,0 +1,7 @@
+packages:
+  - cloudflare
+
+onlyBuiltDependencies:
+  - electron
+  - electron-winstaller
+  - esbuild

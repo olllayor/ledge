@@ -2,6 +2,8 @@ node_modules/
 .DS_Store
 dist/
 out/
+cloudflare/.wrangler/
+cloudflare/.dev.vars
 native/bin/
 native/DropShelfNativeAgent/.build/
 native/DropShelfNativeAgent/.swiftpm/

@@ -1,6 +1,6 @@
 import type { AppState } from '@shared/schema';
 import { useState, useEffect } from 'react';
-import { IconMonitor, IconShake } from '../../PreferencesIcons';
+import { IconShake } from '../../PreferencesIcons';
 import { SettingsGroup, SettingsRow, Toggle, StatusPill, type ShowToast } from '../primitives';
 
 
@@ -31,15 +31,6 @@ export function GeneralSettings({ state, showToast }: { state: AppState; showToa
 
   return (
     <>
-      <SettingsGroup title="Appearance">
-        <SettingsRow
-          icon={<IconMonitor />}
-          title="Show in menu bar"
-          copy="Ledge is a menu-bar-only app. The tray icon is always present."
-          trailing={<StatusPill label="Always on" variant="good" />}
-        />
-      </SettingsGroup>
-
       <SettingsGroup title="Startup">
         <SettingsRow
           title="Launch at login"
@@ -51,26 +42,44 @@ export function GeneralSettings({ state, showToast }: { state: AppState; showToa
             />
           }
         />
+        {preferences.launchAtLogin ? (
+          <SettingsRow
+            title="Login item status"
+            copy={
+              state.permissionStatus.loginItemOpenAtLogin
+                ? state.permissionStatus.loginItemWasOpenedAsHidden
+                  ? 'Ledge starts hidden in the background at login — tray icon only, no windows.'
+                  : 'Ledge will start at your next login.'
+                : 'macOS hasn’t confirmed the login item yet. Check System Settings › General › Login Items.'
+            }
+            trailing={
+              <StatusPill
+                label={
+                  state.permissionStatus.loginItemOpenAtLogin ? 'Starts hidden' : 'Check Login Items'
+                }
+                variant={state.permissionStatus.loginItemOpenAtLogin ? 'good' : 'warn'}
+              />
+            }
+          />
+        ) : null}
       </SettingsGroup>
 
       <SettingsGroup title="Shake Gesture">
         <SettingsRow
           icon={<IconShake />}
           title="Excluded applications"
-          copy="Skip shake detection in these apps. Enter one bundle ID per line (e.g. com.apple.Safari)."
-          trailing={<span />}
+          copy="Skip shake detection in these apps. One bundle ID per line or comma-separated (e.g. com.apple.Safari)."
           fullWidth
         >
           <div className="settings-field" style={{ padding: '8px 0 12px' }}>
             <textarea
-              className="pref-input"
+              className="settings-textarea"
               rows={4}
               value={excludedDraft}
               onChange={(e) => { setExcludedDraft(e.target.value); setExcludedError(''); }}
               onBlur={() => void saveExcluded()}
               placeholder="com.apple.Safari&#10;com.apple.Terminal"
               spellCheck={false}
-              style={{ resize: 'vertical', fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace", fontSize: '0.78rem' }}
             />
             {excludedError ? <p className="pref-status is-error">{excludedError}</p> : null}
             <p className="pref-help">One bundle identifier per line or comma-separated.</p>

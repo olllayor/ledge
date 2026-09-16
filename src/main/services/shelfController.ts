@@ -2,6 +2,7 @@ import { clipboard, screen } from 'electron'
 import { isFileBackedItem } from '@shared/fileUtils'
 import { type IngestPayload, type ShelfItemRecord, type ShelfRecord } from '@shared/schema'
 import { ImportedImageTooLargeError, detectPayloadFromText, payloadToItems, refreshFileRef } from './payloads'
+import { ShelfCapacityError } from '@shared/shelfLimits'
 import { broadcastToast } from './toastBroadcaster'
 import type { StateStore } from './stateStore'
 import type { NativeAgentClient, ShakeDetectedEvent } from '../native/nativeAgent'
@@ -29,7 +30,22 @@ export interface AddPayloadsOptions {
  * (it positions and shows the shelf) but does not own any windows.
  */
 export class ShelfController {
+  private pinned = false
+
   constructor(private readonly deps: ShelfControllerDeps) {}
+
+  /** Runtime-only pin (never persisted): opts the shelf out of auto-retract. */
+  get isPinned(): boolean {
+    return this.pinned
+  }
+
+  togglePinned(): boolean {
+    this.pinned = !this.pinned
+    // Re-evaluate arming so un-pinning restarts the retract countdown
+    // and pinning clears it immediately.
+    this.deps.onInactivityTick()
+    return this.pinned
+  }
 
   async createShelf(
     reason: ShelfRecord['origin'],
@@ -139,7 +155,17 @@ export class ShelfController {
     }
 
     this.deps.stateStore.ensureLiveShelf(options.origin ?? 'manual')
-    this.deps.stateStore.appendItems(allItems)
+    try {
+      this.deps.stateStore.appendItems(allItems)
+    } catch (error) {
+      // Shelf-full is a user-facing limit, not an internal bug: surface
+      // it and keep the shelf (and its window flow) intact.
+      if (error instanceof ShelfCapacityError) {
+        broadcastToast(error.message, 'error')
+        return false
+      }
+      throw error
+    }
     if (this.deps.shelfWindow.isVisible()) {
       await this.deps.shelfWindow.show(options.inactive ?? false)
     } else {
@@ -185,9 +211,33 @@ export class ShelfController {
       }),
     )
 
+    // Re-read the live shelf before replacing: payloads added while the
+    // bookmark refresh was in flight (drop onto the already-visible
+    // window, tray drop) live in stateStore's live shelf, and writing
+    // back the stale pre-await snapshot would silently drop them.
+    const currentLive = this.deps.stateStore.getPersonalLiveShelf()
+    const addedDuringRefresh = currentLive?.id === shelf.id ? currentLive.items : []
+    const snapshotById = new Map(shelf.items.map((item) => [item.id, item]))
+    const refreshedById = new Map(refreshedItems.map((item) => [item.id, item]))
+
+    // Refreshed bookmark data wins for untouched items; locally-changed
+    // items and brand-new additions keep their live versions.
+    const mergedItems = refreshedItems.map((refreshed) => {
+      const liveItem = addedDuringRefresh.find((candidate) => candidate.id === refreshed.id)
+      const snapshotItem = snapshotById.get(refreshed.id)
+      return liveItem && JSON.stringify(liveItem) !== JSON.stringify(snapshotItem)
+        ? liveItem
+        : refreshed
+    })
+    for (const liveItem of addedDuringRefresh) {
+      if (!refreshedById.has(liveItem.id)) {
+        mergedItems.push(liveItem)
+      }
+    }
+
     this.deps.stateStore.replaceLiveShelf({
       ...shelf,
-      items: refreshedItems,
+      items: mergedItems,
     })
 
     this.deps.shelfWindow.resetPosition()
@@ -203,16 +253,18 @@ export class ShelfController {
    * sanitizes and writes.
    */
   applyRemoteShelfSnapshot(remoteShelf: ShelfRecord): void {
-    // Routing:
-    //   1. Live shelf id matches remote (or there is no live shelf) -> the
-    //      live shelf is the destination.
+    // Personal-slot routing only: whole-shelf cloud sync has no team
+    // concept, so a team shelf being open must not redirect (or
+    // clobber) remote personal shelves.
+    //   1. Personal live shelf id matches remote (or there is no personal
+    //      live shelf) -> the personal live shelf is the destination.
     //   2. A recent shelf id matches remote -> that recent entry is the
     //      destination.
-    //   3. Neither -> drop. The user has a different shelf open locally and
-    //      no history of this one; silently adopting it would clobber the
-    //      user's work.
+    //   3. Neither (and a personal live shelf is open) -> insert the
+    //      unknown remote into recents. Never no-op: a shelf created on
+    //      another device must appear in Recents, not vanish.
     const sanitized = sanitizeRemoteFileRefs(remoteShelf)
-    const liveShelf = this.deps.stateStore.getLiveShelf()
+    const liveShelf = this.deps.stateStore.getPersonalLiveShelf()
     const recentShelf =
       liveShelf?.id === remoteShelf.id
         ? null
@@ -220,12 +272,13 @@ export class ShelfController {
     const local = liveShelf?.id === remoteShelf.id ? liveShelf : recentShelf
 
     if (local === liveShelf || (!local && !liveShelf)) {
-      // No live shelf, or the live shelf's id matches the remote. In both
-      // cases the live shelf is the destination — including the
+      // No personal live shelf, or its id matches the remote. In both
+      // cases the personal live shelf is the destination — including the
       // first-contact case where the device has never seen this shelf.
-      this.deps.stateStore.replaceLiveShelf(sanitized)
+      this.deps.stateStore.replacePersonalLiveShelf(sanitized)
     } else {
-      this.deps.stateStore.replaceRecentShelf(sanitized)
+      // Existing recent (replace) or brand-new remote (insert into recents).
+      this.deps.stateStore.upsertRecentShelf(sanitized)
     }
   }
 
@@ -234,6 +287,22 @@ export class ShelfController {
     this.deps.shelfWindow.resetPosition()
     this.deps.shelfWindow.hide()
     this.deps.onInactivityTick()
+  }
+
+  /**
+   * Drop every local copy of a shelf that the cloud reports as deleted
+   * (tombstoned on another device). If it is the shelf currently open,
+   * closing it is part of honoring the deletion — the user deleted it
+   * themselves on another device.
+   */
+  removeSyncedShelfLocally(shelfId: string): void {
+    if (this.deps.stateStore.getPersonalLiveShelf()?.id === shelfId) {
+      this.deps.stateStore.replaceLiveShelf(null)
+      this.deps.shelfWindow.resetPosition()
+      this.deps.shelfWindow.hide()
+      this.deps.onInactivityTick()
+    }
+    this.deps.stateStore.removeRecentShelf(shelfId)
   }
 }
 

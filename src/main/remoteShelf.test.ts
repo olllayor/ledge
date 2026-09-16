@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeRemoteFileRefs } from './remoteShelf';
+import { sanitizeRemoteFileRefs, sanitizeRemoteItem } from './remoteShelf';
 import type { ShelfRecord } from '@shared/schema';
 
 function makeFileShelf(originalPath: string, resolvedPath: string): ShelfRecord {
@@ -138,6 +138,32 @@ describe('sanitizeRemoteFileRefs', () => {
     if (item.kind !== 'folder') throw new Error('expected folder');
     expect(item.file.originalPath).toBe('');
     expect(item.file.resolvedPath).toBe('');
+  });
+
+  it('sanitizeRemoteItem strips paths on a standalone team item', () => {
+    const item = {
+      id: 'team-item-1',
+      kind: 'file' as const,
+      createdAt: '2025-01-01T00:00:00.000Z',
+      order: 0,
+      title: 'team.png',
+      subtitle: '',
+      preview: { summary: 'PNG', detail: '' },
+      file: {
+        originalPath: '~/.ssh/id_rsa',
+        resolvedPath: '/Users/victim/.ssh/id_rsa',
+        bookmarkBase64: 'BM0',
+        isStale: false,
+        isMissing: false,
+      },
+      mimeType: 'image/png',
+    };
+    const sanitized = sanitizeRemoteItem(item);
+    expect(sanitized.file.originalPath).toBe('');
+    expect(sanitized.file.resolvedPath).toBe('');
+    expect(sanitized.file.bookmarkBase64).toBe('');
+    expect(sanitized.file.isMissing).toBe(true);
+    expect(sanitized.file.isStale).toBe(true);
   });
 });
 

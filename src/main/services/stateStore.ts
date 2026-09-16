@@ -58,6 +58,7 @@ export class StateStore {
 
     const defaultState: PersistedState = {
       liveShelf: null,
+      teamLiveShelves: {},
       recentShelves: [],
       preferences: defaultPreferences(),
       sync: defaultSyncStateRecord(),
@@ -89,6 +90,11 @@ export class StateStore {
     this.sync.ensureDeviceId()
   }
 
+  // `liveShelf` in the snapshot is always the PERSONAL slot. The cloud
+  // sync layer treats it as the user's personal shelf (push, reclaim,
+  // remote-apply), so it must never carry team context. The renderer
+  // picks the active-context shelf in `selectShelfView` using
+  // `team.activeTeamId` + `teamLiveShelves`.
   snapshot(permissionStatus: PermissionStatus): AppState {
     return appStateSchema.parse({
       ...this.persisted,
@@ -104,6 +110,14 @@ export class StateStore {
 
   getLiveShelf() {
     return this.shelves.getLiveShelf()
+  }
+
+  getPersonalLiveShelf() {
+    return this.shelves.getPersonalLiveShelf()
+  }
+
+  replacePersonalLiveShelf(shelf: Parameters<ShelfStore['replacePersonalLiveShelf']>[0]) {
+    return this.shelves.replacePersonalLiveShelf(shelf)
   }
 
   getRecentShelves() {
@@ -148,6 +162,14 @@ export class StateStore {
 
   replaceRecentShelf(shelf: Parameters<ShelfStore['replaceRecentShelf']>[0]) {
     return this.shelves.replaceRecentShelf(shelf)
+  }
+
+  upsertRecentShelf(shelf: Parameters<ShelfStore['upsertRecentShelf']>[0]) {
+    return this.shelves.upsertRecentShelf(shelf)
+  }
+
+  removeRecentShelf(id: string) {
+    return this.shelves.removeRecentShelf(id)
   }
 
   closeShelf() {
@@ -201,6 +223,13 @@ export class StateStore {
     return this.team.set(patch)
   }
 
+  applyTeamShelfItems(
+    teamId: Parameters<ShelfStore['applyTeamShelfItems']>[0],
+    items: Parameters<ShelfStore['applyTeamShelfItems']>[1],
+  ) {
+    return this.shelves.applyTeamShelfItems(teamId, items)
+  }
+
   // ---- Clipboard facade (delegated to `ClipboardStore`) ----
 
   getClipboardEntries() {
@@ -223,8 +252,16 @@ export class StateStore {
     return this.clipboard.removeEntry(id)
   }
 
+  toggleClipboardEntryPin(id: string) {
+    return this.clipboard.togglePin(id)
+  }
+
   clearClipboardHistory() {
     return this.clipboard.clearHistory()
+  }
+
+  restoreClipboardHistory(entries: Parameters<ClipboardStore['restoreHistory']>[0]) {
+    return this.clipboard.restoreHistory(entries)
   }
 
   pruneClipboardHistory() {

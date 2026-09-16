@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { syncDeviceLimitForPlan, syncShelfLimitForPlan } from './syncUtils'
-import { serializeShelfForCloud } from './sync'
+import { coerceCloudItemsToLocal, serializeShelfForCloud } from './sync'
+import { shelfRecordSchema } from './schema'
 import type { ShelfRecord } from './schema'
 
 describe('sync helpers', () => {
@@ -49,5 +50,42 @@ describe('sync helpers', () => {
         isMissing: false
       }
     })
+  })
+
+  it('coerces path-stripped cloud file items into schema-valid local items', () => {
+    // What the Worker actually returns after sanitizeFileFlags.
+    const wireItems = [
+      {
+        id: 'item-1',
+        kind: 'file' as const,
+        createdAt: '2026-05-09T00:00:00.000Z',
+        order: 0,
+        title: 'project.pdf',
+        subtitle: '',
+        preview: { summary: 'PDF', detail: '' },
+        mimeType: 'application/pdf',
+        file: { isStale: false, isMissing: false },
+      },
+    ]
+
+    const local = coerceCloudItemsToLocal(wireItems)
+    const item = local[0]
+    expect(item.kind).toBe('file')
+    if (item.kind !== 'file') throw new Error('expected file item')
+    expect(item.file.originalPath).toBe('')
+    expect(item.file.bookmarkBase64).toBe('')
+    expect(item.file.isMissing).toBe(true)
+    expect(item.file.isStale).toBe(true)
+
+    const shelf: ShelfRecord = {
+      id: 'shelf-1',
+      name: 'Shelf',
+      color: 'wave',
+      createdAt: '2026-05-09T00:00:00.000Z',
+      updatedAt: '2026-05-09T00:00:00.000Z',
+      origin: 'manual',
+      items: local,
+    }
+    expect(shelfRecordSchema.safeParse(shelf).success).toBe(true)
   })
 })

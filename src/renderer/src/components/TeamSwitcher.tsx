@@ -7,7 +7,7 @@ export function TeamSwitcher() {
   const popupRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
 
-  const activeTeam = myTeams.find((t) => t._id === activeTeamId);
+  const activeTeam = myTeams.find((t) => t.id === activeTeamId);
   const label = activeTeam ? activeTeam.name : 'Personal';
 
   useEffect(() => {
@@ -84,12 +84,12 @@ export function TeamSwitcher() {
           {myTeams.length > 0 && <div className="team-switcher-divider" />}
           {myTeams.map((t) => (
             <button
-              key={t._id}
-              className={`team-switcher-option${t._id === activeTeamId ? ' is-active' : ''}`}
+              key={t.id}
+              className={`team-switcher-option${t.id === activeTeamId ? ' is-active' : ''}`}
               type="button"
               role="option"
-              aria-selected={t._id === activeTeamId}
-              onClick={() => void handleSelect(t._id)}
+              aria-selected={t.id === activeTeamId}
+              onClick={() => void handleSelect(t.id)}
             >
               {t.name}
             </button>

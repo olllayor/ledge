@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { fileRefSchema, shelfItemBaseSchema } from './commonSchemas';
+import { MAX_TEXT_PAYLOAD_LENGTH } from './shelfLimits';
+
+// Re-exported so ingest call sites and tests share one source of truth.
+export { MAX_ITEMS_PER_SHELF, MAX_TEXT_PAYLOAD_LENGTH } from './shelfLimits';
 
 export const shelfColorSchema = z.enum(['ember', 'wave', 'forest', 'sand']);
 export const shelfOriginSchema = z.enum(['shake', 'tray', 'shortcut', 'manual', 'restore']);
@@ -36,9 +40,9 @@ export const imageAssetItemSchema = shelfItemBaseSchema.extend({
   mimeType: z.string().default('image/png'),
 });
 
-// Keep the ShelfItemRecord union in sync with convex/sharedSchemas.ts —
-// adding a kind here requires adding it there too, otherwise drag-out from
-// the clipboard into a real shelf will fail Convex sync silently.
+// Keep the ShelfItemRecord union in sync with cloudflare/src/sanitize.ts —
+// adding a kind here requires a matching sanitizer rule, otherwise drag-out
+// from the clipboard into a real shelf will fail cloud sync silently.
 export const textItemSchema = shelfItemBaseSchema.extend({
   kind: z.literal('text'),
   text: z.string(),
@@ -111,6 +115,11 @@ export const permissionStatusSchema = z.object({
   lastError: z.string().default(''),
   shortcutRegistered: z.boolean().default(false),
   shortcutError: z.string().default(''),
+  // OS-owned login-item truth, mirrored for the Settings UI. Always
+  // false in dev builds (read-back is packaged-only, matching sync()).
+  loginItemOpenAtLogin: z.boolean().default(false),
+  loginItemWasOpenedAtLogin: z.boolean().default(false),
+  loginItemWasOpenedAsHidden: z.boolean().default(false),
 });
 
 export const syncStatusSchema = z.enum([
@@ -161,7 +170,14 @@ export const clipboardEntrySchema = z.object({
   // 64x64 PNG data URI generated at capture for image items; lets
   // ClipboardView render thumbnails without re-decoding the full payload.
   thumbnailDataUri: z.string().optional(),
+  // SHA-256 of the captured PNG bytes (image entries only). Every capture
+  // writes a fresh uuid-named asset file, so path-based dedup can never
+  // match; content hashes make re-copied screenshots dedupable.
+  imageSha256: z.string().optional(),
   categoryIds: z.array(z.string()).default([]),
+  // Pinned entries survive both the age cutoff and the count limit;
+  // null means unpinned (the common case).
+  pinnedAt: z.string().optional(),
 });
 
 export const clipboardCategorySchema = z.object({
@@ -171,20 +187,37 @@ export const clipboardCategorySchema = z.object({
   createdAt: z.string(),
 });
 
+// Field types without defaults — shared by the full settings schema and
+// the IPC update-patch schema so they cannot drift (see ipcSchemas.ts).
+export const clipboardSettingsFields = {
+  enabled: z.boolean(),
+  historyLimit: z.number().int().positive().max(2000),
+  ignoreConcealedItems: z.boolean(),
+  // Heuristic secret-shape skip for apps that never mark the
+  // pasteboard as concealed (see clipboard/sensitiveText.ts).
+  skipSensitiveText: z.boolean(),
+  ignoreBundleIds: z.array(z.string()),
+  quickPasteHotkey: z.string(),
+  peekHotkey: z.string(),
+  syntheticPasteEnabled: z.boolean(),
+} as const;
+
 export const clipboardSettingsSchema = z.object({
-  enabled: z.boolean().default(true),
-  historyLimit: z.number().int().positive().max(2000).default(200),
-  ignoreConcealedItems: z.boolean().default(true),
-  ignoreBundleIds: z.array(z.string()).default([]),
-  quickPasteHotkey: z.string().default('CommandOrControl+Shift+V'),
-  peekHotkey: z.string().default(''),
-  syntheticPasteEnabled: z.boolean().default(false),
+  enabled: clipboardSettingsFields.enabled.default(false),
+  historyLimit: clipboardSettingsFields.historyLimit.default(200),
+  ignoreConcealedItems: clipboardSettingsFields.ignoreConcealedItems.default(true),
+  skipSensitiveText: clipboardSettingsFields.skipSensitiveText.default(true),
+  ignoreBundleIds: clipboardSettingsFields.ignoreBundleIds.default([]),
+  quickPasteHotkey: clipboardSettingsFields.quickPasteHotkey.default('CommandOrControl+Shift+V'),
+  peekHotkey: clipboardSettingsFields.peekHotkey.default(''),
+  syntheticPasteEnabled: clipboardSettingsFields.syntheticPasteEnabled.default(false),
 });
 
 export const defaultClipboardSettings = {
   enabled: false,
   historyLimit: 200,
   ignoreConcealedItems: true,
+  skipSensitiveText: true,
   ignoreBundleIds: [] as string[],
   quickPasteHotkey: 'CommandOrControl+Shift+V',
   peekHotkey: '',
@@ -199,6 +232,7 @@ export type TeamState = z.infer<typeof teamStateSchema>;
 
 export const appStateSchema = z.object({
   liveShelf: shelfRecordSchema.nullable(),
+  teamLiveShelves: z.record(z.string(), shelfRecordSchema).default({}),
   recentShelves: z.array(shelfRecordSchema).max(10).default([]),
   preferences: preferencesRecordSchema,
   permissionStatus: permissionStatusSchema,
@@ -207,6 +241,9 @@ export const appStateSchema = z.object({
   clipboardHistory: z.array(clipboardEntrySchema).default([]),
   clipboardCategories: z.array(clipboardCategorySchema).default([]),
   clipboardSettings: clipboardSettingsSchema.default(defaultClipboardSettings),
+  // Runtime-only: never persisted. Composed by the orchestrator on each
+  // broadcast so renderer + tray can reflect pin state.
+  shelfPinned: z.boolean().default(false),
 });
 
 export const fileDropPayloadSchema = z.object({
@@ -216,7 +253,7 @@ export const fileDropPayloadSchema = z.object({
 
 export const textPayloadSchema = z.object({
   kind: z.literal('text'),
-  text: z.string().min(1),
+  text: z.string().min(1).max(MAX_TEXT_PAYLOAD_LENGTH),
 });
 
 export const urlPayloadSchema = z.object({
@@ -259,6 +296,55 @@ export const relinkItemInputSchema = z.object({
   itemId: z.string(),
 });
 
+export const screenRectSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+
+/**
+ * Per-display notch metrics reported by the Swift helper. Electron exposes
+ * neither `safeAreaInsets` nor the auxiliary top areas, so the native agent
+ * measures them on the AppKit side and main derives the notch silhouette.
+ *
+ * Coordinates are Quartz/Electron screen points (`y` grows downward from the
+ * main display's top edge), matching `screen.getAllDisplays()`.
+ */
+export const nativeScreenMetricsSchema = z.object({
+  displayId: z.number().int().default(0),
+  frame: screenRectSchema,
+  visibleFrame: screenRectSchema,
+  hasNotch: z.boolean().default(false),
+  notchWidth: z.number().default(0),
+  notchHeight: z.number().default(0),
+  menuBarHeight: z.number().default(0),
+  safeAreaTop: z.number().default(0),
+});
+
+export const nativeScreenMetricsSnapshotSchema = z.object({
+  screens: z.array(nativeScreenMetricsSchema).default([]),
+});
+
+/** Resolved notch silhouette for one display, in Electron screen coordinates. */
+export const notchGeometrySchema = z.object({
+  hasNotch: z.boolean(),
+  menuBarHeight: z.number(),
+  notchWidth: z.number(),
+  notchHeight: z.number(),
+  /** Scale against the 1728×1117 design reference (clamped 0.85–1.10). */
+  scale: z.number(),
+  cornerRadius: z.number(),
+  /** Screen x of the notch centre; the panel is anchored here. */
+  centerX: z.number(),
+  /** Screen y of the top edge the panel is flush against. */
+  top: z.number(),
+});
+
+export const notchRevealEventSchema = z.object({
+  displayId: z.number().int().default(0),
+});
+
 export const syncStatePatchSchema = syncStateSchema.partial();
 
 export type AppState = z.infer<typeof appStateSchema>;
@@ -270,6 +356,9 @@ export type FileBackedShelfItem =
   | z.infer<typeof fileItemSchema>
   | z.infer<typeof folderItemSchema>
   | z.infer<typeof imageAssetItemSchema>;
+export type NativeScreenMetrics = z.infer<typeof nativeScreenMetricsSchema>;
+export type NotchGeometry = z.infer<typeof notchGeometrySchema>;
+export type NotchRevealEvent = z.infer<typeof notchRevealEventSchema>;
 export type PermissionStatus = z.infer<typeof permissionStatusSchema>;
 export type PreferencePatch = z.infer<typeof preferencePatchSchema>;
 export type PreferencesRecord = z.infer<typeof preferencesRecordSchema>;

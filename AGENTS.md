@@ -1,10 +1,6 @@
 # Ledge — Agent Guide
 
-macOS-only Electron shelf utility (menu bar, React, Swift native helper, optional Convex sync).
-
-## Critical: Convex Code
-
-Before writing any Convex code, read `convex/_generated/ai/guidelines.md`. It overrides training data defaults. All Convex functions require argument validators. Use `internal*` variants for private functions.
+macOS-only Electron shelf utility (menu bar, React, Swift native helper, optional Cloudflare sync).
 
 ## Commands
 
@@ -29,7 +25,7 @@ Verification order: `pnpm lint` → `pnpm test` → `pnpm build`.
 | Renderer | `src/renderer/` | React UI, CSS (no Tailwind) |
 | Shared | `src/shared/` | Zod schemas, IPC contracts |
 | Native | `native/DropShelfNativeAgent/` | Swift binary, stdout JSON protocol |
-| Backend | `convex/` | Optional cloud sync, auth, billing |
+| Backend | `cloudflare/` | Cloudflare Worker (Hono) + D1 + R2 — auth, sync, billing, teams |
 | Scripts | `scripts/` | Branding, native build, DMG, size report, changelog |
 | Automation | `.github/workflows/` | CI, release, nightly changelog digest |
 
@@ -53,22 +49,32 @@ These are configured in both `tsconfig.json` and `electron.vite.config.ts`. Do n
 
 ## Native Agent
 
-Swift binary communicates via stdout JSON lines. Commands sent via stdin. Handles shake detection, bookmark create/resolve, permission checks. Build with `pnpm native:build` (runs automatically in `pnpm dev`).
+Swift binary communicates via stdout JSON lines. Commands sent via stdin. Handles shake detection, bookmark create/resolve, permission checks, measured notch geometry (`screen.metrics`) and the swipe-to-reveal gesture watch (`notch.revealWatch`). Build with `pnpm native:build` (runs automatically in `pnpm dev`).
 
-## Convex Backend (Optional)
+See `docs/notch-geometry.md` for how notch measurements, hover hysteresis, and swipe-to-reveal fit together.
 
-Cloud sync is optional — local shelf works without it. Key env vars:
-- `VITE_CONVEX_URL` — for dev with sync
-- `RESEND_API_KEY`, `EMAIL_FROM` — email OTP (Resend)
-- `LEMON_SQUEEZY_API_KEY`, `LEMON_SQUEEZY_WEBHOOK_SECRET` — billing
+## Cloudflare Backend (Optional)
 
-Run `pnpm convex:dev` for local Convex dev. Tests in `convex/*.test.ts` use `convex-test` with `@edge-runtime/vm`.
+Cloud sync is optional — local shelf works without it. The Worker lives in `cloudflare/`.
+
+Key env vars:
+- `VITE_LEDGE_API_URL` — Worker origin (renderer cloud features)
+- `VITE_PRO_CHECKOUT_URL` — Lemon Squeezy checkout page
+- Worker secrets: `RESEND_API_KEY` (preferred email), `EMAIL_FROM` (from-address), `LEMON_SQUEEZY_API_KEY`, `LEMON_SQUEEZY_WEBHOOK_SECRET`. Email send order: Resend → Cloudflare `send_email` binding → console log.
+
+```bash
+pnpm --filter ledge-cloudflare dev
+pnpm --filter ledge-cloudflare db:migrate:local
+pnpm --filter ledge-cloudflare test
+```
+
+See `docs/cf-migration.md` for API contract and design rules.
 
 ## Testing
 
 - Unit tests: `*.test.ts` colocated with source
 - Run single test: `pnpm vitest run src/path/to/file.test.ts`
-- Convex tests: `convex/*.test.ts` (require `import.meta.glob` module map)
+- Worker tests: `pnpm --filter ledge-cloudflare test`
 - Native test: `pnpm native:test` (Swift self-test)
 
 ## Build Gotchas

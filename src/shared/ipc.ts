@@ -3,6 +3,7 @@ import type {
   AppState,
   CreateShelfInput,
   IngestPayload,
+  NotchGeometry,
   PermissionStatus,
   PreferencePatch,
   PreferencesRecord,
@@ -13,7 +14,7 @@ import type {
   ClipboardEntry,
   ClipboardSettings,
 } from './schema';
-import { clipboardSettingsSchema } from './schema';
+import { shelfItemSchema } from './schema';
 
 export const IPC_CHANNELS = {
   getState: 'ledge:get-state',
@@ -22,11 +23,13 @@ export const IPC_CHANNELS = {
   addPayload: 'ledge:add-payload',
   addPayloads: 'ledge:add-payloads',
   closeShelf: 'ledge:close-shelf',
+  toggleShelfPin: 'ledge:toggle-shelf-pin',
   getPreferences: 'ledge:get-preferences',
   setPreferences: 'ledge:set-preferences',
   setSyncState: 'ledge:set-sync-state',
   getSyncBackfillCandidates: 'ledge:get-sync-backfill-candidates',
   applyRemoteShelf: 'ledge:apply-remote-shelf',
+  removeSyncedShelf: 'ledge:remove-synced-shelf',
   relinkItem: 'ledge:relink-item',
   getRecentShelves: 'ledge:get-recent-shelves',
   getPermissionStatus: 'ledge:get-permission-status',
@@ -68,16 +71,21 @@ export const IPC_CHANNELS = {
   clipboardEntryAssign: 'ledge:clipboard-entry:assign',
   clipboardEntryUnassign: 'ledge:clipboard-entry:unassign',
   clipboardEntryRemove: 'ledge:clipboard-entry:remove',
+  clipboardEntryTogglePin: 'ledge:clipboard-entry:toggle-pin',
   clipboardEntryClearAll: 'ledge:clipboard-entry:clear-all',
+  clipboardHistoryRestore: 'ledge:clipboard-history:restore',
   clipboardPruneNow: 'ledge:clipboard-prune-now',
   clipboardWindowShow: 'ledge:clipboard-window:show',
   // ---- Notch dropout (replaces peek window) ----
   notchDropoutShow: 'ledge:notch-dropout:show',
   notchDropoutHide: 'ledge:notch-dropout:hide',
   notchDropoutStateChanged: 'ledge:notch-dropout:state-changed',
+  notchDropoutGeometry: 'ledge:notch-dropout:geometry',
+  notchDropoutGeometryGet: 'ledge:notch-dropout:geometry-get',
   notchDropoutDragState: 'ledge:notch-dropout:drag-state',
   // ---- Team sharing ----
   setTeamState: 'ledge:set-team-state',
+  applyTeamShelfItems: 'ledge:apply-team-shelf-items',
   // ---- Secure cloud-sync session (OS-keychain backed, main process) ----
   syncSessionGet: 'ledge:sync-session:get',
   syncSessionSet: 'ledge:sync-session:set',
@@ -89,6 +97,15 @@ export const syncSessionSchema = z.object({
   email: z.string(),
 });
 export type SyncSession = z.infer<typeof syncSessionSchema>;
+
+// Mirror write for team shelf sync: the renderer has pulled a fresh
+// snapshot from `api.sync.getTeamShelfItems` and wants the local team
+// shelf (offline cache + UI source) to reflect it.
+export const teamShelfItemsPatchSchema = z.object({
+  teamId: z.string().min(1),
+  items: z.array(shelfItemSchema).max(1000),
+});
+export type TeamShelfItemsPatch = z.infer<typeof teamShelfItemsPatchSchema>;
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -147,8 +164,17 @@ export const clipboardEntryRemoveInputSchema = z.object({
   entryId: z.string(),
 });
 
-export const clipboardSettingsUpdateInputSchema = clipboardSettingsSchema.partial();
-export type ClipboardSettingsUpdatePayload = z.infer<typeof clipboardSettingsUpdateInputSchema>;
+export const clipboardEntryTogglePinInputSchema = z.object({
+  entryId: z.string(),
+});
+
+// Canonical restore schema lives in ipcSchemas.ts (bounded); this file's
+// earlier inline copy drifted (no .max(2000)) and had no importers.
+export { clipboardHistoryRestoreInputSchema } from './ipcSchemas';
+
+// Same derived schema as main — one source of truth for clipboard settings patches.
+export { clipboardSettingsUpdateSchema as clipboardSettingsUpdateInputSchema } from './ipcSchemas';
+export type ClipboardSettingsUpdatePayload = Partial<ClipboardSettings>;
 
 export type StateListener = (state: AppState) => void;
 
@@ -170,11 +196,14 @@ export interface LedgeAPI {
   addPayload(payload: IngestPayload): Promise<AppState>;
   addPayloads(payloads: IngestPayload[]): Promise<AppState>;
   closeShelf(): Promise<AppState>;
+  toggleShelfPin(): Promise<AppState>;
   getPreferences(): Promise<PreferencesRecord>;
   setPreferences(patch: PreferencePatch): Promise<PreferencesRecord>;
   setSyncState(patch: SyncStatePatch): Promise<AppState>;
   getSyncBackfillCandidates(): Promise<ShelfRecord[]>;
   applyRemoteShelf(shelf: ShelfRecord): Promise<AppState>;
+  removeSyncedShelf(shelfId: string): Promise<AppState>;
+  applyTeamShelfItems(patch: TeamShelfItemsPatch): Promise<AppState>;
   relinkItem(itemId: string): Promise<AppState>;
   getRecentShelves(): Promise<ShelfRecord[]>;
   getPermissionStatus(): Promise<PermissionStatus>;
@@ -209,7 +238,10 @@ export interface LedgeAPI {
   clipboardEntryAssign(payload: { entryId: string; categoryId: string }): Promise<void>;
   clipboardEntryUnassign(payload: { entryId: string; categoryId: string }): Promise<void>;
   clipboardEntryRemove(payload: { entryId: string }): Promise<void>;
+  /** Toggles the pin; resolves with the resulting pinned state. */
+  clipboardEntryTogglePin(payload: { entryId: string }): Promise<boolean>;
   clipboardEntryClearAll(): Promise<void>;
+  clipboardHistoryRestore(entries: ClipboardEntry[]): Promise<void>;
   clipboardPruneNow(): Promise<void>;
   clipboardWindowShow(): void;
   clipboardStartItemDrag(payload: { entryId: string }): boolean;
@@ -237,4 +269,15 @@ export interface LedgeAPI {
   notchDropoutHide(): void;
   notchDropoutDragState(suppressed: boolean): void;
   onNotchDropoutStateChanged(listener: (hint: { state: 'visible' | 'hidden' | 'expanded' | 'collapsed' }) => void): () => void;
+  /**
+   * Measured notch silhouette for the display the panel anchors to. Main
+   * pushes this before each reveal so the renderer can hug the hardware
+   * notch instead of guessing its size. Returned function unsubscribes.
+   */
+  onNotchDropoutGeometry(listener: (geometry: NotchGeometry) => void): () => void;
+  /**
+   * Pull the current geometry. The panel mounts long before the first reveal,
+   * so a push-only channel would leave the very first opening un-shaped.
+   */
+  notchDropoutGeometry(): Promise<NotchGeometry | null>;
 }

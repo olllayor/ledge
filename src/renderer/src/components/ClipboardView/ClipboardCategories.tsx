@@ -35,7 +35,7 @@ function CategoriesImpl({
         onRename={onRename}
         onRemove={onRemove}
       />
-      <CategoryForm onCreate={onCreate} />
+      <CategoryForm onCreate={onCreate} categories={categories} />
     </aside>
   )
 }

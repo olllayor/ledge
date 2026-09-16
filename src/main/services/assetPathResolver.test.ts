@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isPathInside, resolveAllowedAssetPath } from './assetPathResolver';
@@ -92,6 +92,28 @@ describe('resolveAllowedAssetPath', () => {
         liveItems: [],
       });
       expect(result).toBe(file);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects a symlink inside assetsDir that escapes to an outside file', () => {
+    const { dir, cleanup } = makeTempDir();
+    try {
+      const assetsDir = join(dir, 'assets');
+      mkdirSync(assetsDir, { recursive: true });
+      const secret = join(dir, 'secret.png');
+      writeFileSync(secret, 'fake');
+      const link = join(assetsDir, 'innocent.png');
+      symlinkSync(secret, link);
+
+      // Lexically inside assetsDir — the old resolve+prefix check passed it.
+      expect(isPathInside(assetsDir, link)).toBe(true);
+      const result = resolveAllowedAssetPath(link, {
+        assetsDir,
+        liveItems: [],
+      });
+      expect(result).toBeNull();
     } finally {
       cleanup();
     }

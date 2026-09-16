@@ -1,6 +1,6 @@
 import { IconLock, IconStar } from './PreferencesIcons';
 import { useSync } from '../providers/SyncProvider';
-import { openProCheckout } from '../lib/proCheckout';
+import { isProCheckoutConfigured, openProCheckout } from '../lib/proCheckout';
 
 interface ProUpgradePromptProps {
   message: string;
@@ -10,6 +10,7 @@ interface ProUpgradePromptProps {
 
 export function ProUpgradePrompt({ message, ctaLabel = 'Upgrade to Pro', source }: ProUpgradePromptProps) {
   const { email } = useSync();
+  const configured = isProCheckoutConfigured();
   const handleClick = () => {
     openProCheckout({ email, source });
   };
@@ -21,8 +22,13 @@ export function ProUpgradePrompt({ message, ctaLabel = 'Upgrade to Pro', source 
       </span>
       <div className="pro-upgrade-prompt-body">
         <p className="pro-upgrade-prompt-message">{message}</p>
-        <button className="pro-upgrade-prompt-cta" type="button" onClick={handleClick}>
-          {ctaLabel}
+        <button
+          className="pro-upgrade-prompt-cta"
+          type="button"
+          disabled={!configured}
+          onClick={handleClick}
+        >
+          {configured ? ctaLabel : 'Checkout not configured'}
         </button>
       </div>
     </div>

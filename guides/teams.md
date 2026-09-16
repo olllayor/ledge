@@ -85,7 +85,7 @@ The next phase will add shared shelf editing:
 
 | Problem | Solution |
 |---------|----------|
-| "Cloud Sync is not configured" | Set `VITE_CONVEX_URL` or check Preferences → Cloud Sync. |
+| "Cloud Sync is not configured" | Set `VITE_LEDGE_API_URL` or check Preferences → Cloud Sync. |
 | "Sign in to use teams" | Go to Preferences → Cloud Sync and sign in. |
 | No "Teams" in Preferences | Teams only appears when Cloud Sync is configured and you're signed in. |
 | Invitation not showing up | The other user must sign in to Cloud Sync with the invited email. |

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AppState } from '@shared/schema';
+import { displayShortcut } from './Preferences/shortcutRecorder';
 import {
   IconKeyboard,
   IconShake,
@@ -113,7 +114,7 @@ export function OnboardingView({ state, onComplete }: OnboardingViewProps) {
     }
   };
 
-  const shortcut = state.preferences.globalShortcut || '⌘⇧Space';
+  const shortcut = displayShortcut(state.preferences.globalShortcut || 'Command+Shift+Space');
 
   const currentStepLocked =
     (step === 0 && !step1Done) ||

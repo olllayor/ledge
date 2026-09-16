@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { NotchDropoutView } from './NotchDropoutView'
 
 interface MockLedge {
+  getState: ReturnType<typeof vi.fn>
   clipboardGetRecent: ReturnType<typeof vi.fn>
   subscribeState: ReturnType<typeof vi.fn>
   onNotchDropoutStateChanged: ReturnType<typeof vi.fn>
@@ -11,6 +12,8 @@ interface MockLedge {
   clipboardStartItemDrag: ReturnType<typeof vi.fn>
   notchDropoutDragState: ReturnType<typeof vi.fn>
   notchDropoutHide: ReturnType<typeof vi.fn>
+  notchDropoutGeometry: ReturnType<typeof vi.fn>
+  onNotchDropoutGeometry: ReturnType<typeof vi.fn>
   showToast: ReturnType<typeof vi.fn>
 }
 
@@ -20,11 +23,14 @@ function getLedge(): MockLedge {
 
 let stateListeners: Array<(state: { clipboardHistory: unknown[] }) => void> = []
 let hintListeners: Array<(hint: { state: string }) => void> = []
+let geometryListeners: Array<(geometry: unknown) => void> = []
 
 function setupLedgeBridge() {
   stateListeners = []
   hintListeners = []
+  geometryListeners = []
   const ledge: MockLedge = {
+    getState: vi.fn(async () => ({ clipboardHistory: [] })),
     clipboardGetRecent: vi.fn(async () => []),
     subscribeState: vi.fn((cb: (state: { clipboardHistory: unknown[] }) => void) => {
       stateListeners.push(cb)
@@ -42,6 +48,13 @@ function setupLedgeBridge() {
     clipboardStartItemDrag: vi.fn(() => true),
     notchDropoutDragState: vi.fn(),
     notchDropoutHide: vi.fn(),
+    notchDropoutGeometry: vi.fn(async () => null),
+    onNotchDropoutGeometry: vi.fn((cb: (geometry: unknown) => void) => {
+      geometryListeners.push(cb)
+      return () => {
+        geometryListeners = geometryListeners.filter((l) => l !== cb)
+      }
+    }),
     showToast: vi.fn(),
   }
   ;(window as unknown as { ledge: MockLedge }).ledge = ledge
@@ -117,5 +130,91 @@ describe('NotchDropoutView', () => {
   it('subscribes to notch dropout state changes', () => {
     render(<NotchDropoutView />)
     expect(getLedge().onNotchDropoutStateChanged).toHaveBeenCalled()
+  })
+
+  const notchedGeometry = {
+    hasNotch: true,
+    menuBarHeight: 38,
+    notchWidth: 204,
+    notchHeight: 38,
+    scale: 1,
+    cornerRadius: 10,
+    centerX: 864,
+    top: 0,
+  }
+
+  it('shapes the collapsed band around the measured notch', async () => {
+    getLedge().notchDropoutGeometry.mockResolvedValue(notchedGeometry)
+
+    render(<NotchDropoutView />)
+
+    const main = await waitFor(() => {
+      const element = document.querySelector('.notch-dropout')
+      expect(element?.getAttribute('data-notch')).toBe('true')
+      return element as HTMLElement
+    })
+
+    // The spacer is exactly the hardware cut-out width.
+    expect(main.style.getPropertyValue('--notch-width')).toBe('204px')
+    expect(main.style.getPropertyValue('--notch-height')).toBe('38px')
+    expect(document.querySelector('.notch-dropout-band-gap')).toBeTruthy()
+    // The legacy header is replaced by the band in the notched layout.
+    expect(document.querySelector('.notch-dropout-header')).toBeNull()
+  })
+
+  it('applies pushed geometry updates', async () => {
+    render(<NotchDropoutView />)
+
+    await waitFor(() => {
+      expect(getLedge().onNotchDropoutGeometry).toHaveBeenCalled()
+    })
+
+    await act(async () => {
+      geometryListeners.forEach((listener) => listener(notchedGeometry))
+    })
+
+    expect(document.querySelector('.notch-dropout-band-gap')).toBeTruthy()
+  })
+
+  it('keeps the header layout when the display has no notch', async () => {
+    getLedge().notchDropoutGeometry.mockResolvedValue({
+      ...notchedGeometry,
+      hasNotch: false,
+    })
+
+    render(<NotchDropoutView />)
+
+    await waitFor(() => {
+      expect(document.querySelector('.notch-dropout')?.getAttribute('data-notch')).toBe('false')
+    })
+    expect(document.querySelector('.notch-dropout-band-gap')).toBeNull()
+    expect(screen.getByText('Clipboard')).toBeTruthy()
+  })
+
+  it('fills the expanded body with clipboard rows on a notched display', async () => {
+    const entries = Array.from({ length: 6 }, (_, i) => ({
+      id: `e${i}`,
+      item: { kind: 'text', text: `entry-${i}`, title: `Entry ${i}` },
+      capturedAt: new Date().toISOString(),
+      categoryIds: [],
+    }))
+    getLedge().getState.mockResolvedValue({ clipboardHistory: entries })
+    getLedge().notchDropoutGeometry.mockResolvedValue(notchedGeometry)
+
+    const { container } = render(<NotchDropoutView />)
+    await waitFor(() => {
+      expect(container.querySelector('.notch-dropout')?.getAttribute('data-notch')).toBe('true')
+      expect(container.querySelectorAll('.notch-dropout-thumb').length).toBeGreaterThan(0)
+    })
+
+    const main = container.querySelector('.notch-dropout')!
+    expect(container.querySelector('.notch-dropout-body')).toBeNull()
+
+    await act(async () => {
+      fireEvent.mouseEnter(main)
+    })
+
+    expect(container.querySelector('.notch-dropout-body')).toBeTruthy()
+    expect(container.querySelectorAll('.notch-dropout-row').length).toBe(6)
   })
 })

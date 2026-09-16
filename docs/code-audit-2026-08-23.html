@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledge code audit, 2026-08-23</title>
+<style>
+  :root {
+    --ink: #1a1a1a; --muted: #5f6b76; --line: #e3e8ec;
+    --bg: #ffffff; --panel: #f6f8fa;
+    --s1: #b3261e; --s1-bg: #fdf2f1;
+    --s2: #9a6500; --s2-bg: #fff8ea;
+    --s3: #4a5560; --s3-bg: #f2f4f6;
+    --ok: #1a7f37; --code: #d6336c;
+  }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 48px 24px 80px; }
+  main { max-width: 1060px; margin: 0 auto; }
+  h1 { font-size: 26px; letter-spacing: -0.02em; margin: 0 0 4px; }
+  h2 { font-size: 19px; letter-spacing: -0.01em; margin: 44px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p { margin: 8px 0; }
+  .meta { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  code { font: 12px/1.5 "SF Mono", ui-monospace, Menlo, monospace; color: var(--code); background: #faf5f7; padding: 0 3px; border-radius: 3px; }
+  .verdict { border: 1px solid var(--line); border-left: 4px solid var(--s1); background: var(--panel); border-radius: 8px; padding: 16px 20px; margin: 20px 0; }
+  .verdict strong { display: block; margin-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 13.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td.id { white-space: nowrap; font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12px; }
+  tr.s1 td:first-child { box-shadow: inset 3px 0 0 var(--s1); }
+  tr.s2 td:first-child { box-shadow: inset 3px 0 0 var(--s2); }
+  tr.s3 td:first-child { box-shadow: inset 3px 0 0 var(--s3); }
+  .tag { display: inline-block; font: 11px/1.7 "SF Mono", ui-monospace, Menlo, monospace; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
+  .tag.s1 { background: var(--s1-bg); color: var(--s1); }
+  .tag.s2 { background: var(--s2-bg); color: var(--s2); }
+  .tag.s3 { background: var(--s3-bg); color: var(--s3); }
+  .tag.ok { background: #eaf6ee; color: var(--ok); }
+  .counts { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
+  .count { flex: 1 1 120px; border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; background: var(--panel); }
+  .count b { display: block; font-size: 26px; letter-spacing: -0.02em; }
+  .count span { color: var(--muted); font-size: 12.5px; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 5px 0; }
+  .phase { border: 1px solid var(--line); border-radius: 8px; padding: 4px 20px 14px; margin: 14px 0; }
+  .phase h3 { margin-top: 16px; }
+  footer { margin-top: 60px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Ledge code audit</h1>
+<p class="meta">
+  Date 2026-08-23 &middot; branch <code>dev</code>, HEAD <code>1102179</code>, 44 files modified uncommitted (+2490/&minus;916) &middot; version 0.6.0<br>
+  Verified today: <code>pnpm lint</code> pass &middot; 575/575 vitest pass &middot; native self-test 5/5 &middot; <code>pnpm build</code> pass.<br>
+  Method: four parallel source audits (preferences/native/persistence, clipboard subsystem, shelf/windows/tray/security,
+  cloud sync/teams/billing) cross-checked against the working tree including the uncommitted diff.
+</p>
+
+<div class="verdict">
+  <strong>Verdict: not ready to release.</strong>
+  Core architecture is in good shape. State persistence, IPC validation, window lockdown, and the user-story harness are
+  all solid. What holds the release back comes in two groups: regressions from the uncommitted ShelfView rewrite
+  (drag-out is dead code now, auto-retract ignores user activity) and five security or data-integrity holes in the cloud
+  layer (personal-shelf access control, order-id license escalation, webhook dedupe, team-shelf truncation deletes, plus
+  an always-zero global table scan added in this same diff). None are hard to fix. One focused week covers P0 and most
+  of P1.
+</div>
+
+<h2>Scorecard</h2>
+<div class="counts">
+  <div class="count"><b>11</b><span>S1 blockers</span></div>
+  <div class="count"><b>30</b><span>S2 fix next cycle</span></div>
+  <div class="count"><b>27</b><span>S3 backlog</span></div>
+  <div class="count"><b>168</b><span>catalog stories harness-covered</span></div>
+</div>
+
+<h2>Feature area health</h2>
+<table>
+  <tr><th>Area</th><th>Status</th><th>Summary</th></tr>
+  <tr class="s1"><td>1. Shelf lifecycle</td><td><span class="tag s1">Regressed</span></td><td>Uncommitted rewrite killed drag-out export and the interaction ping that feeds auto-retract.</td></tr>
+  <tr><td>2. Item ingest</td><td><span class="tag ok">Healthy</span></td><td>Payload classification, size caps, bookmark resolution all check out.</td></tr>
+  <tr class="s1"><td>3. Item actions</td><td><span class="tag s1">Broken in diff</span></td><td>Same drag-out defect as area 1; rest of the action surface is fine.</td></tr>
+  <tr><td>4. Tray and windows</td><td><span class="tag ok">Mostly healthy</span></td><td>Lockdown coverage on all six windows confirmed. Empty drop-text creates a junk item; off-screen bounds restore.</td></tr>
+  <tr class="s2"><td>5. Preferences</td><td><span class="tag s2">Gaps</span></td><td>Modifier-less global shortcuts accepted end to end; register-failure paths silent; login-item read-back races.</td></tr>
+  <tr class="s2"><td>6. Clipboard history</td><td><span class="tag s2">Correctness</span></td><td>Dedup strips categories and regenerates ids; image dedup can never match; restore bypasses limits; undo drops concurrent captures.</td></tr>
+  <tr class="s1"><td>7. Quick paste</td><td><span class="tag s1">Guards dead</span></td><td>Renderer sends app name where bundle id is expected, so paste-into-self and ignore-list checks never match.</td></tr>
+  <tr class="s2"><td>8. Peek and notch</td><td><span class="tag s2">Races</span></td><td>No error boundary on standalone entries; notch drag-suppression releases too early.</td></tr>
+  <tr><td>9. Onboarding</td><td><span class="tag ok">Fine</span></td><td>Cosmetic label drift only.</td></tr>
+  <tr class="s2"><td>10. Native helper</td><td><span class="tag s2">Robustness</span></td><td>Timeout circuit breaker never kills a hung helper; clipboard event payloads skip zod validation.</td></tr>
+  <tr><td>11. Persistence</td><td><span class="tag ok">Strong</span></td><td>Atomic writes, fsync, quarantine, quit-flush verified. One migration fragility to fix before the next format bump.</td></tr>
+  <tr class="s2"><td>12. Web security</td><td><span class="tag s2">One hole</span></td><td>Symlink inside assetsDir escapes the allowlist. Traversal, lockdown, protocol otherwise held.</td></tr>
+  <tr><td>13. IPC contracts</td><td><span class="tag ok">Solid</span></td><td>Zod at every handler; duplicated drifted schema exports to delete.</td></tr>
+  <tr class="s1"><td>14. Cloud sync and billing</td><td><span class="tag s1">Weakest area</span></td><td>Five S1-class holes below. Client side leans on silent catches and string-matched errors.</td></tr>
+</table>
+
+<h2>S1 findings, fix before any release</h2>
+<table>
+  <tr><th>ID</th><th>Location</th><th>Problem</th><th>Fix</th></tr>
+  <tr class="s1"><td class="id">F01</td><td><code>src/renderer/src/components/ShelfView.tsx:710</code></td><td>Shelf drag-out is dead in the uncommitted diff. <code>handleHeroDragStart</code> calls <code>preventDefault()</code> and sets an exporting veil but never invokes <code>window.ledge.startItemDrag</code>/<code>startItemsDrag</code>. The old export handler has no remaining callers.</td><td>Restore an export path that calls the bridge before the veil renders.</td></tr>
+  <tr class="s1"><td class="id">F02</td><td><code>ShelfView.tsx</code> (uncommitted diff)</td><td>The diff deleted <code>pingInteraction</code>. With auto-retract on, the timer expires 60 s after the last IPC mutation even while the user is actively hovering and reading. The shelf retracts under the cursor.</td><td>Re-add a ping on pointer/key activity, or stop arming retract from visibility alone.</td></tr>
+  <tr class="s1"><td class="id">F03</td><td><code>src/renderer/src/components/QuickPastePalette.tsx:135</code></td><td>Sends <code>previousAppName</code> ("Safari") where main expects <code>previousBundleId</code>. Both safety guards (paste-into-self, ignore-list) compare reverse-DNS ids and never match. Synthetic Cmd+V can fire into Ledge itself or into blacklisted apps.</td><td>Pass <code>previousBundleId</code>; the hint payload already carries it (<code>preload/index.ts:250</code>).</td></tr>
+  <tr class="s1"><td class="id">F04</td><td><code>src/main/services/state/clipboardStore.ts:60</code></td><td>Dedup splices the older duplicate then unshifts a fresh entry built with <code>categoryIds ?? []</code> and a new <code>randomUUID()</code>. Re-copying content strips the user's category tags and invalidates selected-card ids and undo snapshots.</td><td>On dedup keep the original id and merge category assignments into the promoted entry.</td></tr>
+  <tr class="s1"><td class="id">F05</td><td><code>convex/sync.ts:765</code>, also :581, :678</td><td>Personal shelves (<code>teamId: ""</code>) have no userId scoping in <code>listShelfItems</code>, <code>upsertShelfItem</code>, <code>deleteShelfItem</code>. Any authenticated user can read, write, or delete another user's items given a shelf id.</td><td>Add ownership check for personal shelves in all three functions.</td></tr>
+  <tr class="s1"><td class="id">F06</td><td><code>src/main/services/state/teamStore.ts</code> (<code>getTeamShelfItems</code>)</td><td>Caps at <code>.take(500)</code> with no pagination. A truncated remote snapshot drives both mirror-down (locally drops tail items) and <code>buildTeamPushPlan.deletes</code>, which deletes teammates' real items once a shelf exceeds 500 rows.</td><td>Paginate to completion, or refuse to derive deletes from truncated snapshots.</td></tr>
+  <tr class="s1"><td class="id">F07</td><td><code>convex/sync.ts:295</code></td><td><code>deleteShelf</code> hard-deletes with no tombstone. A second device still holding the shelf re-upserts it on next edit, resurrecting it everywhere.</td><td>Tombstone shelves (<code>deletedAt</code>) and filter them from <code>listShelves</code>.</td></tr>
+  <tr class="s1"><td class="id">F08</td><td><code>convex/http.ts:46</code></td><td>Webhook dedupe key <code>ls:{subscriptionId}:{status}</code> turns cancel-then-resubscribe into a replay. The second active event is dropped; the user pays and stays cancelled.</td><td>Include the LemonSqueezy event id or created_at in the key.</td></tr>
+  <tr class="s1"><td class="id">F09</td><td><code>convex/billing.ts:208</code></td><td>License activation by order id accepts any non-refunded order as Pro. No variant check, and email match silently skipped when LS omits <code>user_email</code>.</td><td>Validate product/variant and require the email match before granting entitlement.</td></tr>
+  <tr class="s1"><td class="id">F10</td><td><code>convex/model.ts:68</code></td><td>New in this diff. <code>storageBytesUsed</code> scans the global shelfItems table (<code>take(1000)</code>), filters in JS, wraps in a silent <code>catch {}</code>. No writer populates the byte fields, so the result is always zero while adding an O(table) scan to every overview read.</td><td>Revert until a <code>by_createdBy</code> index and a real byte-count producer exist.</td></tr>
+  <tr class="s1"><td class="id">F11</td><td><code>src/main/services/systemUtils.ts:64</code>, <code>shortcutRecorder.tsx:54</code></td><td>A modifier-less global shortcut ("A") passes recorder and validator end to end, hijacking a plain letter keystroke system-wide.</td><td>Require at least one modifier in <code>validateGlobalShortcut</code> and in the recorder.</td></tr>
+</table>
+
+<h2>S2 findings, fix in the next cycle</h2>
+<table>
+  <tr><th>ID</th><th>Location</th><th>Problem</th><th>Fix</th></tr>
+  <tr class="s2"><td class="id">F12</td><td><code>clipboardStore.ts:193</code>, <code>payloads.ts:193</code></td><td>Image dedup can never fire: each capture writes an asset named by a fresh uuid, so path comparison always differs. Same screenshot twice means duplicate entries and up to 25 MB of duplicate files.</td><td>Dedup images by PNG byte hash, or length plus mtime.</td></tr>
+  <tr class="s2"><td class="id">F13</td><td><code>clipboardStore.ts:83</code></td><td><code>restoreHistory</code> replaces history without pruning. A restored set can exceed <code>historyLimit</code> and keep entries past the 30-day cutoff indefinitely.</td><td>Run <code>applyPrune()</code> after replace.</td></tr>
+  <tr class="s2"><td class="id">F14</td><td><code>ClipboardView.tsx:58</code></td><td>Undo after Clear restores the pre-clear snapshot via whole-history replace, discarding anything captured during the 5 s undo window.</td><td>Merge snapshots instead of replacing.</td></tr>
+  <tr class="s2"><td class="id">F15</td><td><code>nativeAgent.ts:429</code>, <code>index.ts:414</code></td><td><code>clipboard.changed</code> params reach the monitor raw while <code>shakeDetected</code> is zod-validated. A missing or mistyped <code>formats</code> array throws inside capture and kills the pipeline.</td><td>Validate with a zod schema like the shake path.</td></tr>
+  <tr class="s2"><td class="id">F16</td><td><code>src/shared/schema.ts:160</code></td><td>Restore schema accepts arbitrary strings for id and capturedAt, no length caps, unbounded <code>thumbnailDataUri</code>. Thousands of multi-MB blobs would persist to state.json and broadcast to every window.</td><td>Constrain uuid, ISO date, uri length; keep <code>.max(2000)</code>.</td></tr>
+  <tr class="s2"><td class="id">F17</td><td><code>src/main/services/clipboard/writer.ts:77</code></td><td>Writes <code>file://{path}</code> without percent-encoding. Spaces, #, % in paths produce invalid file URLs on the pasteboard.</td><td>Use <code>pathToFileURL(path)</code>.</td></tr>
+  <tr class="s2"><td class="id">F18</td><td><code>src/shared/ipc.ts:161</code> vs <code>ipcSchemas.ts:79</code></td><td>Two exports named <code>clipboardHistoryRestoreInputSchema</code>. The ipc.ts copy lacks <code>.max(2000)</code> and has no importer.</td><td>Delete the ipc.ts copy, import from ipcSchemas.</td></tr>
+  <tr class="s2"><td class="id">F19</td><td><code>src/main/services/state/persister.ts:216</code></td><td>v1/v2/v3 envelope migrations validate old files against current field shapes. Any shape drift quarantines a perfectly good file as corrupt and resets shelves and history. The only realistic data-loss vector found.</td><td>Per-version schemas or per-field fallback-to-default before the next format bump.</td></tr>
+  <tr class="s2"><td class="id">F20</td><td><code>nativeAgent.ts:457</code></td><td>After three consecutive timeouts the breaker logs but keeps writing requests to a hung helper. Every later RPC burns its full 5 s timeout, indefinitely.</td><td>After tripping, kill and restart the helper on the next timeout.</td></tr>
+  <tr class="s2"><td class="id">F21</td><td><code>preferencesSync.ts:119</code></td><td>Main shortcut is unregistered before the replacement is validated or registered. A failure leaves the user with no hotkey at all.</td><td>Register first, then unregister the old one. Restore previous on failure.</td></tr>
+  <tr class="s2"><td class="id">F22</td><td><code>preferencesSync.ts:195</code></td><td>Secondary hotkey loop ignores <code>globalShortcut.register()</code>'s boolean result. A failed registration still lands in <code>lastRegisteredSecondary</code>, no error surfaced. Dead Quick Paste or Peek hotkey until restart.</td><td>Check the return value, report through status like the main path does.</td></tr>
+  <tr class="s2"><td class="id">F23</td><td><code>src/main/index.ts:55</code></td><td>Second-instance loser calls <code>app.quit()</code> but the whenReady bootstrap is registered unconditionally. If ready wins the race, the loser builds windows, spawns the Swift helper, registers shortcuts, then dies.</td><td>Guard all startup wiring behind lock acquisition.</td></tr>
+  <tr class="s2"><td class="id">F24</td><td><code>preferencesSync.ts:91</code></td><td>Login-item toggle writes settings then reads status back immediately. SMAppService applies asynchronously on macOS 13+, so the pill can show a stale "not registered" state.</td><td>Optimistic status from the applied pref, or delayed re-read.</td></tr>
+  <tr class="s2"><td class="id">F25</td><td><code>preferencesSync.ts:97</code></td><td>A thrown <code>setLoginItemSettings</code> is swallowed and the renderer call is fire-and-forget. Toggle shows ON while macOS rejected it. No toast anywhere.</td><td>Propagate failure to renderer, toast on error.</td></tr>
+  <tr class="s2"><td class="id">F26</td><td><code>shelfController.ts:168</code></td><td><code>restoreShelf</code> awaits bookmark refresh then replaces the live shelf using the pre-await snapshot. Items added concurrently during resolution are silently dropped.</td><td>Re-read live items before replace, or merge by id.</td></tr>
+  <tr class="s2"><td class="id">F27</td><td><code>NotchDropoutView.tsx:44</code></td><td>Assumes the sync drag call blocks until the drag ends. <code>webContents.startDrag()</code> returns immediately, so suppression lifts mid-drag and hover-monitor can hide the panel under the drag.</td><td>Release via the main-side cursor-inside hook instead of a renderer finally block.</td></tr>
+  <tr class="s2"><td class="id">F28</td><td><code>shelfWindow.ts:72</code></td><td><code>manualBounds</code> bypasses clamping. After unplugging the display where the shelf was parked, showNear restores off-screen coordinates. Shake's 240&times;296 sizeOverride is silently ignored whenever bounds exist.</td><td>Validate saved bounds against <code>screen.getAllDisplays()</code>; honor sizeOverride.</td></tr>
+  <tr class="s2"><td class="id">F29</td><td><code>assetPathResolver.ts:24</code></td><td>Containment is lexical resolve-plus-prefix. A symlink inside assetsDir pointing anywhere on disk passes the whitelist and gets served over the privileged protocol.</td><td><code>fs.realpath</code> the target, reject if outside roots.</td></tr>
+  <tr class="s2"><td class="id">F30</td><td><code>peekWindow.tsx:13</code>, <code>notchDropout.tsx:13</code>, <code>quickPaste.tsx:12</code></td><td>Three standalone renderer entries mount views with no ErrorBoundary. Any render throw permanently blanks the panel. quickPaste also lacks ToastHost, so error toasts aimed at it vanish.</td><td>Wrap each root view; add ToastHost to quickPaste.</td></tr>
+  <tr class="s2"><td class="id">F31</td><td><code>SyncProvider.tsx:306</code></td><td><code>registerDevice</code> maps every failure, offline included, to quotaReached. Users see quota errors during plain outages.</td><td>Branch on the error; set quotaReached only for actual quota responses.</td></tr>
+  <tr class="s2"><td class="id">F32</td><td><code>SyncProvider.tsx:586</code></td><td><code>refreshSession</code> exists but nothing calls it. Sessions hard-expire at 90 days with no renewal, forcing surprise sign-outs.</td><td>Interval or focus-based refresh honoring the server's 1 h expiry gap.</td></tr>
+  <tr class="s2"><td class="id">F33</td><td><code>convex/auth.ts:243</code></td><td>signOut revokes the session but leaves the devices row, and there is no device-revoke UI. Users hit the free device cap permanently after three installs.</td><td>Add revoke-device mutation plus settings UI.</td></tr>
+  <tr class="s2"><td class="id">F34</td><td><code>convex/http.ts:52</code></td><td><code>claimWebhookEvent</code> marks processed in its own transaction before entitlements apply. If apply throws, the event is consumed and lost.</td><td>Apply first, or make claim-and-apply atomic.</td></tr>
+  <tr class="s2"><td class="id">F35</td><td><code>convex/invitations.ts:15</code></td><td>Invite emails stored raw while lookups match normalized addresses. Case-different invites never appear for the invitee.</td><td>Normalize through <code>normalizeEmail</code> on write.</td></tr>
+  <tr class="s2"><td class="id">F36</td><td><code>convex/teams.ts:158</code></td><td><code>deleteTeam</code> removes members and team but not team shelfItems rows or storage blobs. Permanent orphans.</td><td>Batch-delete items by <code>by_team_shelf</code>, sweep storage.</td></tr>
+  <tr class="s2"><td class="id">F37</td><td><code>convex/sync.ts:748</code>, <code>teamSync.ts:337</code></td><td>Team item pushes upload local filesystem paths, returned verbatim to every member. Leaks usernames and directory structure.</td><td>Strip path fields before push.</td></tr>
+  <tr class="s2"><td class="id">F38</td><td><code>convex/crons.ts:110</code></td><td>Cron clears upload-event rows but never GCs storage blobs from uploads that crashed between upload and record. Billed bytes leak forever.</td><td>Sweep _storage against imageAssets.storageId.</td></tr>
+  <tr class="s2"><td class="id">F39</td><td><code>TeamShelfSyncProvider.tsx:127</code></td><td>Push failures swallowed (no lastError, no toast) while finally bumps syncTick, giving a tight retry loop with zero backoff during outages. A separate <code>.catch(() =&gt; undefined)</code> abandons failed mirrors after baseline advanced, an edit-loss window.</td><td>Add backoff, surface errors, advance baseline only on success.</td></tr>
+  <tr class="s2"><td class="id">F40</td><td><code>SyncProvider.tsx:595</code></td><td><code>syncSelectedShelves</code>: mid-batch failure aborts leaving status stuck at syncing forever. Unconditional preferences patch throws for free users after shelves already synced.</td><td>try/catch around batch, gate prefs push on plan pro.</td></tr>
+  <tr class="s2"><td class="id">F41</td><td><code>convex/auth.ts:52</code></td><td>OTP email fires before the rate-limit check. Rejected requests still send email through Resend, an unbounded cost lever.</td><td>Move send after the rate-limit verdict.</td></tr>
+</table>
+
+<h2>S3 backlog</h2>
+<table>
+  <tr><th>ID</th><th>Location</th><th>Problem</th><th>Fix</th></tr>
+  <tr class="s3"><td class="id">F42</td><td><code>preferencesSync.ts:157</code></td><td>Single shortcutError slot, last writer wins. A peek conflict erases a quick-paste error.</td><td>Collect errors into an array.</td></tr>
+  <tr class="s3"><td class="id">F43</td><td><code>systemUtils.ts:58</code></td><td>Key tokens not case-normalized; "Command+a" and "Command+A" persist as distinct shortcuts.</td><td>Normalize tokens inside normalizeGlobalShortcut.</td></tr>
+  <tr class="s3"><td class="id">F44</td><td><code>commonSchemas.ts:26</code>, <code>ipcSchemas.ts:77</code></td><td>Dead duplicate schemas invite drift; Zod 4 deprecated .email() and .strict() in use.</td><td>Delete dead schemas; migrate to z.email()/strictObject.</td></tr>
+  <tr class="s3"><td class="id">F45</td><td><code>persister.ts:142</code></td><td>Crash between tmp write and rename leaves orphaned tmp files, never swept.</td><td>Sweep stale tmp siblings at startup.</td></tr>
+  <tr class="s3"><td class="id">F46</td><td><code>persister.ts:121</code>, <code>index.ts:141</code></td><td>Sync JSON.stringify of full snapshot (thumbnails included) on main thread per mutation, broadcast to six windows.</td><td>Serialize in async writer step; per-window dirty checks later.</td></tr>
+  <tr class="s3"><td class="id">F47</td><td><code>nativeAgent.ts:164,174</code></td><td>Stderr heuristic flags benign lines ("0 failures"); exit reason reuses stale lastError.</td><td>Tighter match or explicit error-prefix protocol.</td></tr>
+  <tr class="s3"><td class="id">F48</td><td><code>nativeAgent.ts:488</code></td><td>Backpressure adds one no-op drain listener per failed write; listeners accumulate.</td><td>Single shared drain waiter.</td></tr>
+  <tr class="s3"><td class="id">F49</td><td><code>preferencesSync.ts:74</code></td><td>Login-item status only refreshed inside sync(); manual System Settings changes invisible until any pref changes.</td><td>Refresh on preferences window focus.</td></tr>
+  <tr class="s3"><td class="id">F50</td><td><code>useLedgeState.ts:21,74</code></td><td>lastLedge typed any (violates no-any rule); fallback mock casts partial object so dev views read undefined prefs.</td><td>Type properly, align mock with schema defaults.</td></tr>
+  <tr class="s3"><td class="id">F51</td><td><code>OnboardingView.tsx:124,324</code></td><td>CTA labels promise shake/shortcut unlock on steps hard-coded done; hidden steps stay tabbable.</td><td>Fix labels, add inert to hidden steps.</td></tr>
+  <tr class="s3"><td class="id">F52</td><td><code>index.ts:254</code></td><td>Capture fire-and-forget; concurrent snapshots can invert recency under rapid copies; rejections unhandled.</td><td>Queue captures or chain with catch.</td></tr>
+  <tr class="s3"><td class="id">F53</td><td><code>index.ts:452</code></td><td>No prune-on-quit; stale entries survive past 30 days until next append or manual prune.</td><td>Add prune call to before-quit flush.</td></tr>
+  <tr class="s3"><td class="id">F54</td><td><code>clipboardStore.ts</code> remove paths</td><td>Removing entries never deletes image asset files from assetsDir; disk grows unbounded.</td><td>Delete backing asset when last reference goes.</td></tr>
+  <tr class="s3"><td class="id">F55</td><td><code>stateStore.ts</code> broadcast</td><td>Every broadcast serializes full clipboard history including base64 thumbnails to all windows.</td><td>Lazy thumbnail channel instead of broadcast payload.</td></tr>
+  <tr class="s3"><td class="id">F56</td><td><code>schema.ts:180</code>, <code>ClipboardView.tsx:27</code></td><td>Enabled default false in schema, true in stub and view fallback. Banner shows wrong state when unset.</td><td>Pick one default, thread it everywhere.</td></tr>
+  <tr class="s3"><td class="id">F57</td><td><code>clipboardMonitor.ts</code></td><td>Helper recovery re-captures pasteboard already captured by poller; images duplicate (see F12).</td><td>Share change-count state across both sources.</td></tr>
+  <tr class="s3"><td class="id">F58</td><td><code>notchHoverMonitor.ts:66</code></td><td>Cursor exiting during the 50 ms enter debounce leaves the timer armed; panel pops spuriously.</td><td>Clear enterTimer when out of hot zone.</td></tr>
+  <tr class="s3"><td class="id">F59</td><td><code>index.ts:188</code></td><td>icns conversion shells out to sips per request with no cache.</td><td>Memoize by path plus mtime.</td></tr>
+  <tr class="s3"><td class="id">F60</td><td><code>index.ts:148</code></td><td>Dev-only parse assert keyed on NODE_ENV which may be undefined in packaged bundle; full parse could run per broadcast in production.</td><td>Use import.meta.env.PROD or app.isPackaged.</td></tr>
+  <tr class="s3"><td class="id">F61</td><td><code>ShelfView.tsx:479</code></td><td>shelfItemsEqual skips color and code fields; hero shows stale content for those kinds.</td><td>Compare full union payloads.</td></tr>
+  <tr class="s3"><td class="id">F62</td><td><code>ShelfView.tsx:576</code></td><td>ItemSheet header promises remove but rows only move up/down; per-row remove lost in rewrite.</td><td>Add remove button or fix copy.</td></tr>
+  <tr class="s3"><td class="id">F63</td><td><code>tray.ts:40</code></td><td>Empty drop-text bypasses schema on controller path, creates junk item.</td><td>Early-return on empty trim.</td></tr>
+  <tr class="s3"><td class="id">F64</td><td><code>singleInstance.ts:72</code></td><td>Resurface marker cleanup runs at end of boot; signal written during init is deleted unread.</td><td>Check marker immediately after lock acquisition.</td></tr>
+  <tr class="s3"><td class="id">F65</td><td><code>ShelfView.tsx:652</code></td><td>OverflowMenu role=menu without roving focus, initial focus, or focus restore.</td><td>Implement roving focus pattern.</td></tr>
+  <tr class="s3"><td class="id">F66</td><td><code>convex/sync.ts:405</code></td><td>In-flight syncEvents scan takes oldest 500; stale events hide recent ones.</td><td>Filter by createdAt inside index range, sort desc.</td></tr>
+  <tr class="s3"><td class="id">F67</td><td><code>convex/sync.ts:257,826</code></td><td>as-any typed inserts violate repo rule; backfill stamps createdAt as localUpdatedAt.</td><td>Remove casts, stamp real update times.</td></tr>
+  <tr class="s3"><td class="id">F68</td><td><code>convex/billing.ts:44</code></td><td>Downgrade preserves stale license bindings forever when a key moves accounts.</td><td>Clear identifiers on inactive, or document.</td></tr>
+  <tr class="s3"><td class="id">F69</td><td><code>proCheckout.ts:26</code></td><td>Buyer email in checkout URL query; PII in browser history and logs.</td><td>Pass server-side or drop.</td></tr>
+  <tr class="s3"><td class="id">F70</td><td><code>SyncProvider.tsx:157</code></td><td>Heal logic matches error message prose against Convex wrapping; mismatch strands dead tokens.</td><td>Match on error code, not prose.</td></tr>
+</table>
+
+<h2>Verified clean</h2>
+<p>What held up under audit, since these were the likely suspects:</p>
+<ul>
+  <li>All six windows run lockDownWebContents: contextIsolation and sandbox on, popups denied, navigations jailed, permissions denied. URL-encoded traversal blocked by resolve-plus-prefix check.</li>
+  <li>Persister writes genuinely atomic: unique tmp name, pre-rename fsync, directory fsync, corruption quarantine keeping three backups, quit-flush with 1500 ms force-quit timeout.</li>
+  <li>Zod validation at every ipcMain handler; preload surface scoped; subscribe unsubscribe leak-free.</li>
+  <li>Category remove, rename, assign paths atomic and race-free versus async capture.</li>
+  <li>osascript invocation is a static string, no injection path.</li>
+  <li>Notch and peek windows are lazy singletons, never constructed simultaneously despite the flag fallback.</li>
+  <li>Tray rebuild idempotent, no menu leaks; drag IPC validated with uuid checks, 64-id cap, synchronous existence check.</li>
+</ul>
+
+<h2>Fix plan</h2>
+
+<div class="phase">
+<h3>Phase 0, process, half a day</h3>
+<ol>
+  <li>Commit the working tree as logical conventional commits: clipboard history restore, categories UI, sync provider rework, ShelfView restyle, tooling (commitlint, check-install, workspace file). The release script refuses a dirty tree, so nothing else matters until this lands.</li>
+  <li>Hand-write CHANGELOG entries for the historical commits the bot cannot classify ("update worktree/cloudflare computer", "new defense layer", "v2.0"). Already pushed; do not rewrite history.</li>
+  <li>Tick the 21 checkboxes in docs/superpowers/plans/2026-08-11-macos-background-running.md. The work shipped in 53c808e, e9c4f6b, e7ecc8b, 2959cf1.</li>
+  <li>Update docs/bug-log.md: BUG-001 through BUG-004 verified fixed in current source.</li>
+</ol>
+</div>
+
+<div class="phase">
+<h3>Phase 1, P0 blockers, about two days</h3>
+<p>Ordered by blast radius. All eleven S1 findings land here.</p>
+<ol>
+  <li><strong>F05 personal-shelf IDOR.</strong> Ownership assertion in list/upsert/delete shelf items when teamId empty. Backend only, small diff.</li>
+  <li><strong>F09 order-id escalation.</strong> Validate variant against known Pro variant id; require email match.</li>
+  <li><strong>F08 webhook dedupe.</strong> Key by LS event id. One line.</li>
+  <li><strong>F10 storage scan.</strong> Revert storageBytesUsed. Added in this same uncommitted diff, so removal is free now.</li>
+  <li><strong>F01 drag-out dead.</strong> Restore bridge call in ShelfView hero drag path; gate the exporting veil on a real drag session (also fixes its stuck-veil sibling).</li>
+  <li><strong>F02 auto-retract ping.</strong> Re-add interaction pings from pointer/key handlers.</li>
+  <li><strong>F03 quick-paste bundle id.</strong> Pass previousBundleId instead of app name. Two guards come back to life.</li>
+  <li><strong>F11 modifier-less shortcut.</strong> Require one or more modifiers in validator and recorder.</li>
+  <li><strong>F04 category-stripping dedup.</strong> Keep original entry id on dedup, merge category assignments.</li>
+</ol>
+</div>
+
+<div class="phase">
+<h3>Phase 2, P1 data-loss and reliability, two to three days</h3>
+<ol>
+  <li><strong>F06 team truncation deletes.</strong> Highest data-loss risk in the product: paginate getTeamShelfItems and refuse to derive deletes from truncated snapshots.</li>
+  <li><strong>F07 shelf tombstones.</strong> deletedAt field plus listShelves filter to stop resurrection.</li>
+  <li><strong>F19 persister migration fragility.</strong> Do this before the next state format bump, not after the first corrupted user file.</li>
+  <li><strong>F13, F14 restore and undo integrity.</strong> Prune after restore; merge instead of replace on undo.</li>
+  <li><strong>F12 image dedup by content hash.</strong> Fixes both duplicate entries and duplicate asset files.</li>
+  <li><strong>F15 native event validation.</strong> Zod schema for clipboard.changed params, matching the shake path.</li>
+  <li><strong>F16 restore schema bounds.</strong> Cap ids, dates, thumbnail size before bulk restore ships.</li>
+  <li><strong>F21, F22, F23 shortcut and instance guards.</strong> Register-then-unregister, check secondary register results, guard whenReady behind the lock.</li>
+  <li><strong>F26, F27, F28 window races.</strong> Re-read live items before replace; fix notch suppression release; clamp manualBounds against current displays.</li>
+  <li><strong>F29 symlink escape.</strong> realpath check in asset resolver.</li>
+  <li><strong>F30 error boundaries.</strong> Wrap peek, notch, quickPaste entries; add ToastHost to quickPaste.</li>
+  <li><strong>F34, F39, F40 sync failure handling.</strong> Atomic webhook claim-and-apply; backoff and surfaced errors in team push; no stuck syncing status.</li>
+  <li><strong>F31 through F33, F35 account hygiene.</strong> Error branching for device registration, session refresh loop, device revoke UI, invite email normalization.</li>
+  <li><strong>F17 file URL encoding, F18 schema dedup, F36 team cleanup, F37 path stripping, F38 blob GC, F41 OTP ordering.</strong> Small independent fixes, batch them.</li>
+</ol>
+</div>
+
+<div class="phase">
+<h3>Phase 3, P2 hardening and polish, ongoing backlog</h3>
+<ul>
+  <li>Broadcast cost: lazy thumbnails (F55), serialize off main thread (F46), capture queue (F52), prune-on-quit (F53), asset GC (F54).</li>
+  <li>Native helper robustness: timeout kill-and-restart already covered in P1 via F20; stderr protocol (F47), drain listener (F48), recovery dedup (F57).</li>
+  <li>UI polish: ShelfView equality fields (F61), ItemSheet remove affordance (F62), overflow menu keyboard support (F65), onboarding labels and inert steps (F51).</li>
+  <li>Hygiene: schema consolidation and Zod 4 API migration (F44), tmp sweep (F45), sips cache (F59), NODE_ENV assert (F60), error-code based healing (F70), remaining S3 odds and ends.</li>
+</ul>
+</div>
+
+<div class="phase">
+<h3>Release gate, after P0 plus the P1 data-loss items</h3>
+<ol>
+  <li><code>pnpm lint &amp;&amp; pnpm test &amp;&amp; pnpm build</code> green on committed HEAD.</li>
+  <li>Merge dev into main, run <code>pnpm release minor</code> (new user-facing features warrant minor per docs/RELEASING.md versioning).</li>
+  <li>Watch the Release workflow, then run the smoke checklist in docs/RELEASING.md section "Pre-release smoke checklist". Add one item to it: verify drag-out from the shelf works, since that regression shipped silently once already.</li>
+</ol>
+</div>
+
+<footer>
+Generated 2026-08-23 from four parallel source audits of the working tree at 1102179 including uncommitted changes.
+Companion documents: docs/feature-catalog.md (168 stories), docs/bug-log.md, docs/RELEASING.md.
+</footer>
+
+</main>
+</body>
+</html>

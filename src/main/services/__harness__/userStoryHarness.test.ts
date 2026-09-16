@@ -258,6 +258,9 @@ function permissionStatus(): PermissionStatus {
     lastError: '',
     shortcutRegistered: true,
     shortcutError: '',
+    loginItemOpenAtLogin: false,
+    loginItemWasOpenedAtLogin: false,
+    loginItemWasOpenedAsHidden: false,
   }
 }
 
@@ -590,7 +593,7 @@ describe('§3 Shelf item actions', () => {
   })
 
   it('3.12 startNativeDrag accepts existing paths', async () => {
-    const path = '/tmp/ledge-harness-marker.txt'
+    const path = join(tmpdir(), 'ledge-harness-marker.txt')
     await writeFile(path, 'ok')
     expect(pathsExist([path])).toBe(true)
     await rm(path, { force: true })
@@ -1166,6 +1169,9 @@ describe('§10 Native helper & permissions', () => {
       lastError: 'binary missing',
       shortcutRegistered: false,
       shortcutError: '',
+      loginItemOpenAtLogin: false,
+      loginItemWasOpenedAtLogin: false,
+      loginItemWasOpenedAsHidden: false,
     }
     expect(status.nativeHelperAvailable).toBe(false)
     expect(status.lastError).toBe('binary missing')
@@ -1892,6 +1898,11 @@ describe('§11 Persistence — coverage pass 3 (11.3, 11.4, 11.6)', () => {
 })
 
 describe('§12 Web security — coverage pass 3 (12.1, 12.2, 12.4)', () => {
+  async function makeTempAssetsDir(): Promise<{ dir: string; cleanup: () => Promise<void> }> {
+    const dir = await mkdtemp(join(tmpdir(), 'ledge-harness-assets-'))
+    return { dir, cleanup: () => rm(dir, { recursive: true, force: true }) }
+  }
+
   it('12.1 lockDownWebContents is exported and accepts a BrowserWindow', () => {
     expect(typeof lockDownWebContents).toBe('function')
   })
@@ -1904,13 +1915,21 @@ describe('§12 Web security — coverage pass 3 (12.1, 12.2, 12.4)', () => {
     expect(result).toBeNull()
   })
 
-  it('12.2 resolveAllowedAssetPath accepts paths inside assetsDir', () => {
-    const assetsDir = '/tmp/assets-12-2-test'
-    const allowed = resolveAllowedAssetPath(`${assetsDir}/foo.png`, {
-      assetsDir,
-      liveItems: [],
-    })
-    expect(allowed).toBe(`${assetsDir}/foo.png`)
+  it('12.2 resolveAllowedAssetPath accepts paths inside assetsDir', async () => {
+    // The resolver verifies assetsDir containment against REAL paths
+    // (symlink-escape guard), so the file must actually exist.
+    const { dir, cleanup } = await makeTempAssetsDir()
+    try {
+      const file = `${dir}/foo.png`
+      await writeFile(file, 'fake')
+      const allowed = resolveAllowedAssetPath(file, {
+        assetsDir: dir,
+        liveItems: [],
+      })
+      expect(allowed).toBe(file)
+    } finally {
+      await cleanup()
+    }
   })
 
   it('12.4 app.dock.hide is called in main/index.ts startup path', () => {

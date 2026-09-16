@@ -35,16 +35,20 @@ pnpm dev
 
 Cloud sync is optional at runtime. Local shelf behavior works without a backend.
 
+Full setup (D1, R2, email, Lemon Squeezy, deploy) is in [`docs/cf-setup.md`](docs/cf-setup.md).
+
 ```bash
-pnpm convex:dev
-VITE_CONVEX_URL="https://<deployment>.convex.cloud" pnpm dev
+pnpm --filter ledge-cloudflare dev
+VITE_LEDGE_API_URL="https://ledge-api.<your-subdomain>.workers.dev" pnpm dev
 ```
 
-Convex environment variables used by the paid-sync backend:
+Worker env/secrets:
 
-- `RESEND_API_KEY` and `EMAIL_FROM` for email OTP delivery (Resend)
+- `RESEND_API_KEY` — preferred transactional email (Resend free tier)
+- `EMAIL_FROM` — from-address (default test mode: `Ledge <onboarding@resend.dev>`)
 - `LEMON_SQUEEZY_API_KEY` for manual entitlement refresh
 - `LEMON_SQUEEZY_WEBHOOK_SECRET` for webhook signature verification
+- `LEMON_SQUEEZY_PRO_VARIANT_IDS` for Pro variant allowlist (fail-closed when empty)
 
 If Electron does not finish downloading during install, run:
 
@@ -118,6 +122,7 @@ The production build is written to `dist/landing/`.
 - `src/renderer`: React UI for the shelf and preferences windows
 - `src/shared`: shared schemas and IPC contracts
 - `native/DropShelfNativeAgent`: Swift helper for shake detection and bookmark resolution
+- `cloudflare`: Cloudflare Worker (Hono) + D1 + R2 backend
 - `release-video`: release demo video composition and Remotion entrypoint
 - `scripts`: local build helpers for branding and the native agent
 

@@ -18,6 +18,9 @@ final class NativeAgent {
     private var tapReinstallScheduled = false
     private var clipboardTimer: Timer?
     private var lastClipboardChangeCount: Int = NSPasteboard.general.changeCount
+    private let notchRevealGesture = NotchRevealGesture()
+    private var isNotchRevealEnabled = false
+    private var cachedRevealZones: [NotchRevealZone] = []
     // Cached frontmost app between ticks; the quick-paste hotkey reads
     // this synchronously to avoid the race where the palette window
     // itself becomes frontmost before a fresh RPC can resolve it.
@@ -26,6 +29,15 @@ final class NativeAgent {
 
     func run() {
         installEventTapIfNeeded()
+        // A hot-plugged or rearranged display invalidates the cached reveal
+        // zones; rebuild them lazily on the next scroll instead of on a timer.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.cachedRevealZones = []
+        }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.readLoop()
         }
@@ -102,6 +114,18 @@ final class NativeAgent {
             return .bool(true)
         case "clipboard.stopObserving":
             stopClipboardObserver()
+            return .bool(true)
+        case "screen.metrics":
+            return ScreenMetricsProvider.snapshot()
+        case "notch.revealWatch":
+            if let enabled = request.params?["enabled"]?.boolValue {
+                isNotchRevealEnabled = enabled
+            } else {
+                isNotchRevealEnabled = true
+            }
+            if !isNotchRevealEnabled {
+                notchRevealGesture.reset()
+            }
             return .bool(true)
         default:
             throw NSError(domain: "DropShelfNativeAgent", code: -32601, userInfo: [NSLocalizedDescriptionKey: "Unknown method \(request.method)"])
@@ -182,7 +206,11 @@ final class NativeAgent {
         let eventsOfInterest =
             eventMask(for: .leftMouseDown) |
             eventMask(for: .leftMouseDragged) |
-            eventMask(for: .leftMouseUp)
+            eventMask(for: .leftMouseUp) |
+            // Always tapped, gated by `isNotchRevealEnabled` in the handler:
+            // recreating the session tap on every preference flip is how you
+            // end up with a deaf tap after a display change.
+            eventMask(for: .scrollWheel)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -250,11 +278,42 @@ final class NativeAgent {
             emit(events: events)
         case .leftMouseUp:
             emit(events: gestureTracker.handleMouseUp())
+        case .scrollWheel:
+            handleScrollEvent(event)
         default:
             break
         }
 
         return Unmanaged.passUnretained(event)
+    }
+
+    /// Trackpad swipe-down at the top centre: the reveal gesture people try
+    /// when the panel is hidden. Zones are cached (and dropped whenever macOS
+    /// reports a display change) because this runs on every scroll event.
+    private func handleScrollEvent(_ event: CGEvent) {
+        guard isNotchRevealEnabled else { return }
+
+        if cachedRevealZones.isEmpty {
+            cachedRevealZones = NotchRevealZoneMath.zones()
+        }
+
+        let deltaY = CGFloat(event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1))
+        let deltaX = CGFloat(event.getDoubleValueField(.scrollWheelEventPointDeltaAxis2))
+        let phase = event.getIntegerValueField(.scrollWheelEventScrollPhase)
+
+        guard let zone = notchRevealGesture.handleScroll(
+            deltaX: deltaX,
+            deltaY: deltaY,
+            location: event.location,
+            timestamp: eventTimestampInSeconds(event.timestamp),
+            isGestureStart: phase == 1,
+            zones: cachedRevealZones
+        ) else { return }
+
+        sendNotification(method: "notch.revealRequested", params: [
+            "displayId": .int(Int(zone.displayId)),
+            "displayIndex": .int(zone.displayIndex)
+        ])
     }
 
     private func invalidateEventTap() {
@@ -292,10 +351,7 @@ final class NativeAgent {
     }
 
     private func quartzFrame(for screen: NSScreen) -> CGRect {
-        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-        let frame = screen.frame
-        let quartzY = primaryHeight - (frame.origin.y + frame.size.height)
-        return CGRect(x: frame.origin.x, y: quartzY, width: frame.size.width, height: frame.size.height)
+        ScreenCoordinates.quartzFrame(for: screen)
     }
 
     private func displayIndex(for point: CGPoint) -> Int {

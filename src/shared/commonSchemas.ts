@@ -20,6 +20,7 @@ const shelfItemBaseSchema = z.object({
   title: z.string(),
   subtitle: z.string().default(''),
   preview: previewSchema,
+  createdByUser: z.object({ email: z.string() }).optional(),
 });
 
 const preferencesValuesSchema = z.object({

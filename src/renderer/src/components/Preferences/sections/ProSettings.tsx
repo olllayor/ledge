@@ -2,7 +2,7 @@ import type { AppState } from '@shared/schema';
 import { useState } from 'react';
 import { usePlan } from '../../../hooks/usePlan';
 import { useSync } from '../../../providers/SyncProvider';
-import { openProCheckout } from '../../../lib/proCheckout';
+import { isProCheckoutConfigured, openProCheckout } from '../../../lib/proCheckout';
 import { IconLock, IconCheck } from '../../PreferencesIcons';
 import { SettingsGroup, SettingsRow, StatusPill, type ShowToast } from '../primitives';
 
@@ -56,17 +56,25 @@ export function ProSettings({ state, showToast }: { state: AppState; showToast: 
           <p className="pro-copy">Ledge Pro unlocks the full color palette, more recent shelves, cloud sync for all your devices, preferences sync, and auto-close.</p>
           {!plan.isPro && (
             <>
-              <button
-                className="settings-cta pro-cta"
-                type="button"
-                onClick={() => openProCheckout({ email: sync.email, source: 'pro_section' })}
-              >
-                Upgrade to Pro
-              </button>
+              {isProCheckoutConfigured() ? (
+                <button
+                  className="settings-cta pro-cta"
+                  type="button"
+                  onClick={() => openProCheckout({ email: sync.email, source: 'pro_section' })}
+                >
+                  Upgrade to Pro
+                </button>
+              ) : (
+                <button className="settings-cta pro-cta" type="button" disabled>
+                  Checkout not configured
+                </button>
+              )}
               <p className="pro-copy pro-hint">
-                {sync.email
-                  ? `Checkout is pre-filled with ${sync.email}. Pay with that email and Pro unlocks automatically — no license key needed.`
-                  : 'Sign in under Cloud Sync first so your purchase links to your account automatically.'}
+                {!isProCheckoutConfigured()
+                  ? 'Set VITE_PRO_CHECKOUT_URL at build time to enable upgrades.'
+                  : sync.email
+                    ? `Checkout is pre-filled with ${sync.email}. Pay with that email and Pro unlocks automatically — no license key needed.`
+                    : 'Sign in under Cloud Sync first so your purchase links to your account automatically.'}
               </p>
             </>
           )}
@@ -98,7 +106,6 @@ export function ProSettings({ state, showToast }: { state: AppState; showToast: 
           icon={<IconLock />}
           title="License key"
           copy="Only needed if you paid with a different email — paste the key from your Lemon Squeezy receipt."
-          trailing={<span />}
           fullWidth
         >
           <div className="settings-field" style={{ padding: '8px 0 6px' }}>
@@ -113,7 +120,6 @@ export function ProSettings({ state, showToast }: { state: AppState; showToast: 
         <SettingsRow
           title="Order ID"
           copy="Or paste a Lemon Squeezy order ID to refresh entitlements."
-          trailing={<span />}
           fullWidth
         >
           <div className="settings-field" style={{ padding: '6px 0 8px' }}>

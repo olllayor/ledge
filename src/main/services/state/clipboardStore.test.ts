@@ -27,6 +27,7 @@ async function buildStore(): Promise<{
   const persister = new StatePersister({ statePath: layout.statePath })
   const state: PersistedState = {
     liveShelf: null,
+    teamLiveShelves: {},
     recentShelves: [],
     preferences: defaultPreferences(),
     sync: defaultSyncStateRecord(),
@@ -152,6 +153,122 @@ describe('ClipboardStore', () => {
 
     await persister.whenIdle()
   })
+
+  it('dedup keeps the original id and category tags when content is re-copied', async () => {
+    const { clipboard, persister } = await buildStore()
+
+    const category = clipboard.createCategory('Work', 'wave')
+    const first = clipboard.appendEntry({
+      capturedAt: new Date().toISOString(),
+      sourceBundleId: 'app.a',
+      sourceAppName: 'A',
+      item: makeTextItem('same')
+    })
+    clipboard.assignEntryToCategory(first.id, category.id)
+
+    // Re-copy the same text later from another app.
+    const second = clipboard.appendEntry({
+      capturedAt: new Date(Date.now() + 5_000).toISOString(),
+      sourceBundleId: 'app.b',
+      sourceAppName: 'B',
+      item: makeTextItem('same')
+    })
+
+    expect(second.id).toBe(first.id)
+    expect(second.categoryIds).toEqual([category.id])
+    expect(clipboard.getEntries()).toHaveLength(1)
+    expect(clipboard.getEntries()[0]?.sourceBundleId).toBe('app.b')
+
+    await persister.whenIdle()
+  })
+
+  it('image entries with the same content hash dedup even when asset paths differ', async () => {
+    const { clipboard, persister } = await buildStore()
+
+    const mkImage = (path: string) => ({
+      kind: 'imageAsset' as const,
+      id: `img-${Math.random()}`,
+      createdAt: new Date().toISOString(),
+      order: 0,
+      title: 'Screenshot',
+      subtitle: '',
+      preview: { summary: 'Screenshot', detail: '' },
+      mimeType: 'image/png',
+      file: { originalPath: path, resolvedPath: path, bookmarkBase64: '', isStale: false, isMissing: false },
+    })
+
+    const first = clipboard.appendEntry({
+      capturedAt: new Date().toISOString(),
+      sourceBundleId: '',
+      sourceAppName: '',
+      item: mkImage('/assets/aaa.png'),
+      thumbnailDataUri: 'data:image/png;base64,old',
+      imageSha256: 'abc123'
+    })
+    // Same bytes re-copied → payloadToItems wrote a fresh uuid-named file,
+    // so paths differ and path-based dedup would never match.
+    const second = clipboard.appendEntry({
+      capturedAt: new Date(Date.now() + 1_000).toISOString(),
+      sourceBundleId: '',
+      sourceAppName: '',
+      item: mkImage('/assets/bbb.png'),
+      imageSha256: 'abc123'
+    })
+
+    expect(second.id).toBe(first.id)
+    expect(clipboard.getEntries()).toHaveLength(1)
+    // Original item (and its asset file) survives the merge.
+    expect(clipboard.getEntries()[0]?.item).toMatchObject({ file: { resolvedPath: '/assets/aaa.png' } })
+    expect(clipboard.getEntries()[0]?.thumbnailDataUri).toBe('data:image/png;base64,old')
+
+    await persister.whenIdle()
+  })
+
+  it('restoreHistory prunes restored entries past the limit and cutoff', async () => {
+    const { clipboard, persister, state } = await buildStore()
+    state.clipboardSettings.historyLimit = 2
+
+    const now = Date.now()
+    clipboard.restoreHistory([
+      {
+        id: 'fresh-1',
+        capturedAt: new Date(now).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem('f1'),
+        categoryIds: []
+      },
+      {
+        id: 'fresh-2',
+        capturedAt: new Date(now - 60_000).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem('f2'),
+        categoryIds: []
+      },
+      {
+        id: 'over-limit',
+        capturedAt: new Date(now - 120_000).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem('old-but-in-range'),
+        categoryIds: []
+      },
+      {
+        id: 'ancient',
+        capturedAt: new Date(now - 40 * 24 * 60 * 60 * 1000).toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem('ancient'),
+        categoryIds: []
+      }
+    ])
+
+    const entries = clipboard.getEntries()
+    expect(entries.map((e) => e.id)).toEqual(['fresh-1', 'fresh-2'])
+
+    await persister.whenIdle()
+  })
 })
 
 describe('ClipboardStore.prune (regression: BUG-001)', () => {
@@ -186,6 +303,7 @@ describe('ClipboardStore.prune (regression: BUG-001)', () => {
     const reloaded = new StatePersister({ statePath: layout.statePath })
     const { state: onDisk } = reloaded.load({
       liveShelf: null,
+      teamLiveShelves: {},
       recentShelves: [],
       preferences: defaultPreferences(),
       sync: defaultSyncStateRecord(),
@@ -204,6 +322,7 @@ describe('ClipboardStore.prune (regression: BUG-001)', () => {
     const persister = new StatePersister({ statePath: layout.statePath })
     const state: PersistedState = {
       liveShelf: null,
+      teamLiveShelves: {},
       recentShelves: [],
       preferences: defaultPreferences(),
       sync: defaultSyncStateRecord(),
@@ -223,5 +342,55 @@ describe('ClipboardStore.prune (regression: BUG-001)', () => {
     // not enqueue a new write, so it stays null.
     expect((persister as unknown as { pendingSerialized: string | null }).pendingSerialized).toBeNull()
     await persister.whenIdle()
+  })
+})
+
+describe('ClipboardStore pinning', () => {
+  it('toggles pinnedAt and reports state', async () => {
+    const { clipboard } = await buildStore()
+    clipboard.appendEntry({
+      capturedAt: new Date().toISOString(),
+      sourceBundleId: 'app.a',
+      sourceAppName: 'A',
+      item: makeTextItem('a')
+    })
+    const id = clipboard.getEntries()[0]!.id
+
+    expect(clipboard.togglePin(id)).toBe(true)
+    expect(clipboard.getEntries()[0]?.pinnedAt).toBeTruthy()
+    expect(clipboard.togglePin(id)).toBe(false)
+    expect(clipboard.getEntries()[0]?.pinnedAt).toBeUndefined()
+  })
+
+  it('returns false when toggling a missing entry', async () => {
+    const { clipboard } = await buildStore()
+    expect(clipboard.togglePin('nope')).toBe(false)
+  })
+
+  it('keeps pinned entries past the age cutoff and count limit', async () => {
+    const { clipboard, state } = await buildStore()
+
+    // Pin while fresh (prune runs on every append), then backdate it
+    // past the 30-day cutoff and tighten limits.
+    clipboard.appendEntry({ capturedAt: new Date().toISOString(), sourceBundleId: '', sourceAppName: '', item: makeTextItem('old-pinned') })
+    clipboard.togglePin(clipboard.getEntries()[0]!.id)
+    state.clipboardHistory[0]!.capturedAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString()
+    clipboard.updateSettings({ historyLimit: 2 })
+
+    for (const id of ['n1', 'n2', 'n3']) {
+      clipboard.appendEntry({
+        capturedAt: new Date().toISOString(),
+        sourceBundleId: '',
+        sourceAppName: '',
+        item: makeTextItem(id)
+      })
+    }
+
+    const entries = clipboard.getEntries()
+    // The pinned entry survives both the 30-day cutoff and the count cap;
+    // unpinned entries trim to the limit of 2.
+    expect(entries.find((e) => e.item.kind === 'text' && (e.item as { text: string }).text.includes('old-pinned'))).toBeTruthy()
+    const unpinned = entries.filter((e) => !e.pinnedAt)
+    expect(unpinned.length).toBe(2)
   })
 })

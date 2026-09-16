@@ -1,25 +1,28 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../../../convex/_generated/api';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { api, isAuthError, isNetworkError, type PendingInviteDto, type TeamDto } from '../lib/apiClient';
 import { useSync } from './SyncProvider';
+import { useLedgeState } from '../hooks/useLedgeState';
 
-export interface TeamMemberRecord {
-  _id: string;
-  teamId: string;
+export type TeamMemberRecord = {
   userId: string;
+  teamId: string;
   role: 'admin' | 'member';
   joinedAt: number;
-}
+  email?: string;
+};
 
-export interface TeamWithRole {
-  _id: string;
-  _creationTime: number;
-  name: string;
-  createdBy: string;
-  createdAt: number;
-  updatedAt: number;
-  myRole: 'admin' | 'member';
-}
+export type TeamWithRole = TeamDto;
+
+export type PendingInvitation = PendingInviteDto;
 
 interface TeamsContextValue {
   myTeams: TeamWithRole[];
@@ -28,24 +31,20 @@ interface TeamsContextValue {
   setActiveTeamId(teamId: string | null): void;
   createTeam(name: string): Promise<string>;
   updateTeam(teamId: string, name: string): Promise<string>;
-  updateMemberRole(teamId: string, userId: string, role: 'admin' | 'member'): Promise<string>;
+  updateMemberRole(teamId: string, userId: string, role: 'admin' | 'member'): Promise<void>;
   removeMember(teamId: string, userId: string): Promise<void>;
   deleteTeam(teamId: string): Promise<void>;
   inviteMember(teamId: string, email: string, role: 'admin' | 'member'): Promise<string>;
-  acceptInvitation(token: string): Promise<void>;
-  rejectInvitation(token: string): Promise<void>;
-  revokeInvitation(invitationId: string): Promise<void>;
-  myPendingInvitations: Array<{
-    _id: string;
-    teamId: string;
-    email: string;
-    invitedBy: string;
-    role: 'admin' | 'member';
-    token: string;
-    status: string;
-    expiresAt: number;
-    createdAt: number;
+  acceptInvitation(inviteId: string): Promise<void>;
+  rejectInvitation(inviteId: string): Promise<void>;
+  revokeInvitation(teamId: string, inviteId: string): Promise<void>;
+  myPendingInvitations: PendingInvitation[];
+  refreshTeams(): Promise<void>;
+  getTeamDetail(teamId: string): Promise<{
+    team: { id: string; name: string; createdBy: string; createdAt: number; updatedAt: number };
+    members: TeamMemberRecord[];
   }>;
+  listPendingForTeam(teamId: string): Promise<PendingInvitation[]>;
 }
 
 const noop = async () => '';
@@ -58,7 +57,7 @@ const TeamsContext = createContext<TeamsContextValue>({
   setActiveTeamId: () => {},
   createTeam: noop,
   updateTeam: noop,
-  updateMemberRole: noop,
+  updateMemberRole: noopVoid,
   removeMember: noopVoid,
   deleteTeam: noopVoid,
   inviteMember: noop,
@@ -66,112 +65,192 @@ const TeamsContext = createContext<TeamsContextValue>({
   rejectInvitation: noopVoid,
   revokeInvitation: noopVoid,
   myPendingInvitations: [],
+  refreshTeams: noopVoid,
+  getTeamDetail: async () => ({ team: { id: '', name: '', createdBy: '', createdAt: 0, updatedAt: 0 }, members: [] }),
+  listPendingForTeam: async () => [],
 });
 
 export function useTeams() {
   return useContext(TeamsContext);
 }
 
+const TEAMS_POLL_MS = 30_000;
+
 export function TeamsProvider({ children }: { children: ReactNode }) {
   const { sessionToken } = useSync();
+  const [myTeams, setMyTeams] = useState<TeamWithRole[]>([]);
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
+  const [myPendingInvitations, setMyPendingInvitations] = useState<PendingInvitation[]>([]);
+  const refreshInFlightRef = useRef(false);
 
-  const myTeamsData = useQuery(api.teams.listMyTeams, sessionToken ? { sessionToken } : 'skip') as
-    | TeamWithRole[]
-    | undefined;
+  // Single source of truth is the persisted main-process team state —
+  // a local useState copy would reset to `null` on every app launch
+  // while the main process (and its shelf scoping) restores the last
+  // active team, desyncing the UI from what the shelf panel shows.
+  const { state: persistedActiveTeamId } = useLedgeState(
+    (s) => s.team?.activeTeamId ?? null,
+  );
+  const activeTeamId = persistedActiveTeamId ?? null;
 
-  const userPendingInvites = useQuery(
-    api.invitations.listPendingForEmail,
-    sessionToken ? { sessionToken } : 'skip',
-  ) as TeamsContextValue['myPendingInvitations'] | undefined;
-
-  const createTeamMut = useMutation(api.teams.createTeam);
-  const updateTeamMut = useMutation(api.teams.updateTeam);
-  const updateMemberRoleMut = useMutation(api.teams.updateMemberRole);
-  const removeMemberMut = useMutation(api.teams.removeMember);
-  const deleteTeamMut = useMutation(api.teams.deleteTeam);
-  const inviteMemberMut = useMutation(api.invitations.inviteMember);
-  const acceptInvitationMut = useMutation(api.invitations.acceptInvitation);
-  const rejectInvitationMut = useMutation(api.invitations.rejectInvitation);
-  const revokeInvitationMut = useMutation(api.invitations.revokeInvitation);
-
-  const [activeTeamId, setActiveTeamIdState] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!sessionToken) {
-      setActiveTeamIdState(null);
+  const refreshTeams = useCallback(async () => {
+    if (!sessionToken || refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    try {
+      const [teams, invites] = await Promise.all([
+        api.client.listTeams(sessionToken),
+        api.client.listPendingInvites(sessionToken),
+      ]);
+      setMyTeams(teams);
+      setMyPendingInvitations(invites);
+      setTeamsLoaded(true);
+    } catch (error) {
+      if (isAuthError(error)) {
+        setMyTeams([]);
+        setMyPendingInvitations([]);
+        setTeamsLoaded(true);
+        return;
+      }
+      if (isNetworkError(error)) {
+        // Keep last-known teams while offline.
+        return;
+      }
+      console.error('[teams] refresh failed', error);
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, [sessionToken]);
 
+  useEffect(() => {
+    if (!sessionToken) {
+      setMyTeams([]);
+      setMyPendingInvitations([]);
+      setTeamsLoaded(false);
+      return;
+    }
+    void refreshTeams();
+    const timer = window.setInterval(() => {
+      void refreshTeams();
+    }, TEAMS_POLL_MS);
+    const onFocus = () => {
+      void refreshTeams();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [sessionToken, refreshTeams]);
+
+  useEffect(() => {
+    if (!sessionToken && activeTeamId !== null) {
+      void window.ledge.setTeamState({ activeTeamId: null });
+    }
+  }, [sessionToken, activeTeamId]);
+
+  // The persisted team can disappear (deleted, kicked, left from
+  // another device). Fall back to personal instead of scoping shelves
+  // to a team we're no longer in.
+  useEffect(() => {
+    if (!activeTeamId || !teamsLoaded) {
+      return;
+    }
+    if (!myTeams.some((team) => team.id === activeTeamId)) {
+      void window.ledge.setTeamState({ activeTeamId: null });
+    }
+  }, [activeTeamId, myTeams, teamsLoaded]);
+
   const setActiveTeamId = useCallback(
     async (teamId: string | null) => {
-      setActiveTeamIdState(teamId);
       await window.ledge.setTeamState({ activeTeamId: teamId });
     },
     [],
   );
 
   const createTeam = useCallback(
-    async (name: string) => createTeamMut({ sessionToken: sessionToken!, name }),
-    [createTeamMut, sessionToken],
+    async (name: string) => {
+      const result = await api.client.createTeam(sessionToken, name);
+      await refreshTeams();
+      return result.id;
+    },
+    [sessionToken, refreshTeams],
   );
 
   const updateTeam = useCallback(
-    async (teamId: string, name: string) =>
-      updateTeamMut({ sessionToken: sessionToken!, teamId: teamId as any, name }),
-    [updateTeamMut, sessionToken],
+    async (teamId: string, name: string) => {
+      await api.client.updateTeam(sessionToken, teamId, name);
+      await refreshTeams();
+      return teamId;
+    },
+    [sessionToken, refreshTeams],
   );
 
   const updateMemberRole = useCallback(
-    async (teamId: string, userId: string, role: 'admin' | 'member') =>
-      updateMemberRoleMut({ sessionToken: sessionToken!, teamId: teamId as any, userId: userId as any, role }),
-    [updateMemberRoleMut, sessionToken],
+    async (teamId: string, userId: string, role: 'admin' | 'member') => {
+      await api.client.updateMemberRole(sessionToken, teamId, userId, role);
+    },
+    [sessionToken],
   );
 
   const removeMember = useCallback(
     async (teamId: string, userId: string) => {
-      await removeMemberMut({ sessionToken: sessionToken!, teamId: teamId as any, userId: userId as any });
+      await api.client.removeMember(sessionToken, teamId, userId);
     },
-    [removeMemberMut, sessionToken],
+    [sessionToken],
   );
 
   const deleteTeam = useCallback(
     async (teamId: string) => {
-      await deleteTeamMut({ sessionToken: sessionToken!, teamId: teamId as any });
+      await api.client.deleteTeam(sessionToken, teamId);
+      await refreshTeams();
     },
-    [deleteTeamMut, sessionToken],
+    [sessionToken, refreshTeams],
   );
 
   const inviteMember = useCallback(
-    async (teamId: string, email: string, role: 'admin' | 'member') =>
-      inviteMemberMut({ sessionToken: sessionToken!, teamId: teamId as any, email, role }),
-    [inviteMemberMut, sessionToken],
+    async (teamId: string, email: string, role: 'admin' | 'member') => {
+      const result = await api.client.inviteMember(sessionToken, teamId, email, role);
+      return result.id;
+    },
+    [sessionToken],
   );
 
   const acceptInvitation = useCallback(
-    async (token: string) => {
-      await acceptInvitationMut({ sessionToken: sessionToken!, token });
+    async (inviteId: string) => {
+      await api.client.acceptInvite(sessionToken, inviteId);
+      await refreshTeams();
     },
-    [acceptInvitationMut, sessionToken],
+    [sessionToken, refreshTeams],
   );
 
   const rejectInvitation = useCallback(
-    async (token: string) => {
-      await rejectInvitationMut({ sessionToken: sessionToken!, token });
+    async (inviteId: string) => {
+      await api.client.rejectInvite(sessionToken, inviteId);
+      await refreshTeams();
     },
-    [rejectInvitationMut, sessionToken],
+    [sessionToken, refreshTeams],
   );
 
   const revokeInvitation = useCallback(
-    async (invitationId: string) => {
-      await revokeInvitationMut({ sessionToken: sessionToken!, invitationId: invitationId as any });
+    async (teamId: string, inviteId: string) => {
+      await api.client.revokeInvite(sessionToken, teamId, inviteId);
     },
-    [revokeInvitationMut, sessionToken],
+    [sessionToken],
+  );
+
+  const getTeamDetail = useCallback(
+    async (teamId: string) => api.client.getTeam(sessionToken, teamId),
+    [sessionToken],
+  );
+
+  const listPendingForTeam = useCallback(
+    async (teamId: string) => api.client.listPendingInvitesForTeam(sessionToken, teamId),
+    [sessionToken],
   );
 
   const value = useMemo(
     () => ({
-      myTeams: (myTeamsData ?? []) as TeamWithRole[],
-      teamsLoading: myTeamsData === undefined && !!sessionToken,
+      myTeams,
+      teamsLoading: !teamsLoaded && !!sessionToken,
       activeTeamId,
       setActiveTeamId,
       createTeam,
@@ -183,10 +262,14 @@ export function TeamsProvider({ children }: { children: ReactNode }) {
       acceptInvitation,
       rejectInvitation,
       revokeInvitation,
-      myPendingInvitations: (userPendingInvites ?? []) as TeamsContextValue['myPendingInvitations'],
+      myPendingInvitations,
+      refreshTeams,
+      getTeamDetail,
+      listPendingForTeam,
     }),
     [
-      myTeamsData,
+      myTeams,
+      teamsLoaded,
       sessionToken,
       activeTeamId,
       setActiveTeamId,
@@ -199,7 +282,10 @@ export function TeamsProvider({ children }: { children: ReactNode }) {
       acceptInvitation,
       rejectInvitation,
       revokeInvitation,
-      userPendingInvites,
+      myPendingInvitations,
+      refreshTeams,
+      getTeamDetail,
+      listPendingForTeam,
     ],
   );
 

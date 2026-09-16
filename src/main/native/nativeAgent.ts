@@ -3,9 +3,13 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import {
+  clipboardChangedEventSchema,
   nativeBookmarkResolveSchema,
   nativePermissionStatusSchema,
+  nativeScreenMetricsSnapshotSchema,
+  notchRevealEventSchema,
   shakeDetectedEventSchema,
+  type NativeScreenMetrics,
   type PreferencesRecord,
   type ShakeSensitivity
 } from '@shared/schema'
@@ -73,6 +77,8 @@ interface NativeAgentClientOptions {
   maxRestartDelayMs?: number
   requestTimeoutMs?: number
   scheduleTimeout?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>
+  /** Grace period between SIGTERM and the SIGKILL escalation when disposing a helper. */
+  disposeGraceMs?: number
 }
 
 export class NativeAgentClient extends EventEmitter {
@@ -82,13 +88,17 @@ export class NativeAgentClient extends EventEmitter {
   private readonly maxRestartDelayMs: number
   private readonly requestTimeoutMs: number
   private readonly scheduleTimeout: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>
+  private readonly disposeGraceMs: number
   private child: NativeHelperProcess | null = null
   private nextId = 1
   private stdoutBuffer = ''
+  private static readonly MAX_STDOUT_BUFFER = 1_000_000
+  private consecutiveTimeouts = 0
   private readonly pending = new Map<number, PendingRequest>()
   private gestureEnabled = false
   private lastPreferences: PreferencesRecord | null = null
   private clipboardObserverIntervalMs: number | null = null
+  private lastNotchRevealEnabled: boolean | null = null
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private nextRestartDelayMs: number
   private shouldRestart = false
@@ -107,6 +117,7 @@ export class NativeAgentClient extends EventEmitter {
     this.maxRestartDelayMs = options.maxRestartDelayMs ?? 2_000
     this.requestTimeoutMs = options.requestTimeoutMs ?? 5_000
     this.scheduleTimeout = options.scheduleTimeout ?? setTimeout
+    this.disposeGraceMs = options.disposeGraceMs ?? 500
     this.nextRestartDelayMs = this.baseRestartDelayMs
   }
 
@@ -144,6 +155,10 @@ export class NativeAgentClient extends EventEmitter {
         shakeReady: false,
         lastError: 'Native helper binary not found'
       })
+      // The binary may simply not be built yet (slow first `pnpm dev`,
+      // late-mounted resourcesPath). Keep polling instead of giving up
+      // for the lifetime of the app; the backoff caps at maxRestartDelayMs.
+      this.scheduleRestart()
       return
     }
 
@@ -154,12 +169,19 @@ export class NativeAgentClient extends EventEmitter {
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk) => this.consumeStdout(String(chunk)))
     child.stderr.on('data', (chunk) => {
-      const message = chunk.toString().trim()
-      if (message) {
-        this.updateStatus({
-          lastError: message
-        })
+      const raw = chunk.toString().trim()
+      if (!raw) return
+      // Swift helper may emit non-error logs on stderr; only surface
+      // likely errors to avoid banner pollution. Truncate to first line.
+      const firstLine = raw.split('\n')[0]!.slice(0, 500)
+      const isErrorLike = /error|fail|exception/i.test(firstLine)
+      if (!isErrorLike) {
+        console.warn('[ledge] helper stderr (ignored):', firstLine)
+        return
       }
+      this.updateStatus({
+        lastError: firstLine
+      })
     })
     child.on('exit', () => {
       this.handleChildUnavailable(child, this.status.lastError || 'Native helper exited unexpectedly')
@@ -177,6 +199,10 @@ export class NativeAgentClient extends EventEmitter {
       nativeHelperAvailable: true,
       lastError: ''
     })
+    // Successful launch: reset the restart backoff so the next genuine
+    // failure retries quickly instead of inheriting a long delay from an
+    // earlier outage.
+    this.nextRestartDelayMs = this.baseRestartDelayMs
 
     try {
       const permission = await this.getPermissions()
@@ -198,6 +224,12 @@ export class NativeAgentClient extends EventEmitter {
       // relaunched helper never resumes clipboard.changed notifications.
       if (this.clipboardObserverIntervalMs !== null && child === this.child) {
         await this.startClipboardObserver(this.clipboardObserverIntervalMs)
+      }
+
+      // Same for the reveal gesture: the new helper process starts with it
+      // disarmed, so a restart would silently kill swipe-to-reveal.
+      if (this.lastNotchRevealEnabled !== null && child === this.child) {
+        await this.watchNotchReveal(this.lastNotchRevealEnabled)
       }
     } catch (error) {
       if (child !== this.child) {
@@ -319,6 +351,39 @@ export class NativeAgentClient extends EventEmitter {
     }
   }
 
+  /**
+   * Measured per-display notch metrics. Empty when the helper is unavailable
+   * or the platform reports nothing usable, so callers fall back to
+   * `resolveNotchGeometry`'s own defaults rather than failing.
+   */
+  async getScreenMetrics(): Promise<NativeScreenMetrics[]> {
+    if (!this.child) {
+      return []
+    }
+
+    const result = await this.call('screen.metrics')
+    return nativeScreenMetricsSchemaList(result)
+  }
+
+  /**
+   * Arm/disarm the swipe-down reveal gesture. Best-effort: the panel still
+   * opens on hover and on the hotkey when the helper refuses.
+   */
+  async watchNotchReveal(enabled: boolean): Promise<void> {
+    // Remember the desired state before the call so a crashed helper is
+    // re-armed with it on restart.
+    this.lastNotchRevealEnabled = enabled
+    if (!this.child) {
+      return
+    }
+
+    try {
+      await this.call('notch.revealWatch', { enabled })
+    } catch {
+      // Reveal gestures are a convenience; never surface a failure banner.
+    }
+  }
+
   async createBookmark(path: string): Promise<string> {
     if (!this.child) {
       return ''
@@ -333,11 +398,14 @@ export class NativeAgentClient extends EventEmitter {
     isStale: boolean
     isMissing: boolean
   }> {
+    // No helper or no bookmark: we cannot verify the path. Claiming
+    // "present" makes open/preview/drag fail later with no Relink
+    // affordance — report missing so the UI can offer recovery.
     if (!this.child || !bookmarkBase64) {
       return {
         resolvedPath: originalPath,
-        isStale: false,
-        isMissing: false
+        isStale: true,
+        isMissing: true
       }
     }
 
@@ -350,6 +418,12 @@ export class NativeAgentClient extends EventEmitter {
 
   private consumeStdout(chunk: string): void {
     this.stdoutBuffer += chunk
+    if (this.stdoutBuffer.length > NativeAgentClient.MAX_STDOUT_BUFFER) {
+      console.error('[ledge] helper stdout buffer overflow — reset')
+      this.stdoutBuffer = ''
+      this.updateStatus({ lastError: 'Helper protocol error: stdout overflow' })
+      return
+    }
 
     while (this.stdoutBuffer.includes('\n')) {
       const newlineIndex = this.stdoutBuffer.indexOf('\n')
@@ -380,6 +454,8 @@ export class NativeAgentClient extends EventEmitter {
         return
       }
 
+      // Successful reply clears timeout circuit.
+      this.consecutiveTimeouts = 0
       if (message.error) {
         request.reject(new Error(message.error.message))
         return
@@ -408,8 +484,24 @@ export class NativeAgentClient extends EventEmitter {
       this.emit('dragEnded', message.params ?? {})
     }
 
+    if (message.method === 'notch.revealRequested') {
+      const parsed = notchRevealEventSchema.safeParse(message.params)
+      if (parsed.success) {
+        this.emit('notchRevealRequested', parsed.data)
+      } else {
+        console.warn('[ledge] nativeAgent: malformed notch.revealRequested params, ignoring.', parsed.error.flatten())
+      }
+    }
+
     if (message.method === 'clipboard.changed') {
-      this.emit('clipboardChanged', message.params ?? {})
+      // Validate like the shake path: a missing or mistyped `formats`
+      // array used to throw inside the capture pipeline and kill it.
+      const parsed = clipboardChangedEventSchema.safeParse(message.params)
+      if (parsed.success) {
+        this.emit('clipboardChanged', parsed.data)
+      } else {
+        console.warn('[ledge] nativeAgent: malformed clipboard.changed params, ignoring.', parsed.error.flatten())
+      }
     }
   }
 
@@ -437,13 +529,38 @@ export class NativeAgentClient extends EventEmitter {
         pending.reject(new Error(`Native helper request timed out: ${method}`))
 
         if (child === this.child) {
-          this.handleChildUnavailable(child, `Native helper request timed out: ${method}`)
+          this.consecutiveTimeouts += 1
+          // Circuit breaker: don't kill + restart on every single timeout
+          // if we're in a storm. After 3 consecutive timeouts, stop
+          // restarting — but still dispose the hung helper and mark it
+          // unavailable so the TS clipboard poller takes over. Leaving
+          // the child alive freezes capture until app restart.
+          if (this.consecutiveTimeouts < 3) {
+            this.handleChildUnavailable(child, `Native helper request timed out: ${method}`)
+          } else {
+            console.warn('[ledge] helper timeout circuit-breaker tripped, not restarting')
+            this.child = null
+            this.stdoutBuffer = ''
+            this.disposeChild(child)
+            this.rejectPending(helperUnavailableError(`Helper timeout circuit breaker: ${method}`))
+            this.shouldRestart = false
+            if (this.restartTimer) {
+              clearTimeout(this.restartTimer)
+              this.restartTimer = null
+            }
+            this.updateStatus({
+              nativeHelperAvailable: false,
+              accessibilityTrusted: false,
+              lastError: `Helper timeout (${this.consecutiveTimeouts}×): ${method}`
+            })
+          }
         }
       }, this.requestTimeoutMs)
 
       this.pending.set(id, {
         resolve: (value) => {
           clearTimeout(timeout)
+          this.consecutiveTimeouts = 0
           resolve(value)
         },
         reject: (reason) => {
@@ -453,7 +570,13 @@ export class NativeAgentClient extends EventEmitter {
       })
 
       try {
-        child.stdin.write(`${JSON.stringify(payload)}\n`)
+        const ok = child.stdin.write(`${JSON.stringify(payload)}\n`)
+        if (!ok) {
+          // Backpressure: wait for drain before considering write done.
+          // We don't block the caller; the helper will still reply via
+          // stdout when it drains.
+          child.stdin.once?.('drain' as never, () => undefined)
+        }
       } catch (error) {
         const pending = this.pending.get(id)
         this.pending.delete(id)
@@ -488,6 +611,12 @@ export class NativeAgentClient extends EventEmitter {
    * otherwise keep streaming stdout notifications (double-reporting every
    * clipboard change and shake next to its replacement) and clobbering
    * `lastError` via stderr.
+   *
+   * SIGTERM alone is not enough: a stuck helper ignores it, survives
+   * alongside its replacement, and duplicates every event. Escalate to
+   * SIGKILL after a short grace period. Listeners are already detached,
+   * so we cannot observe an early exit — killing an already-dead process
+   * is a harmless no-op, and the timer is one-shot.
    */
   private disposeChild(child: NativeHelperProcess): void {
     child.stdout.removeAllListeners()
@@ -495,7 +624,16 @@ export class NativeAgentClient extends EventEmitter {
     child.stdin.removeAllListeners()
     child.removeAllListeners()
     try {
-      child.kill?.()
+      const signaled = child.kill?.('SIGTERM')
+      if (signaled !== false) {
+        this.scheduleTimeout(() => {
+          try {
+            child.kill?.('SIGKILL')
+          } catch {
+            // Already dead.
+          }
+        }, this.disposeGraceMs)
+      }
     } catch {
       // Already dead.
     }
@@ -563,6 +701,16 @@ function resolveNativeBinary(): string | null {
   }
 
   return null
+}
+
+/**
+ * Tolerate an older helper that predates `screen.metrics` (or a snapshot that
+ * lost a field): metrics are advisory, so a parse failure downgrades to the
+ * fallback geometry instead of throwing into the caller.
+ */
+function nativeScreenMetricsSchemaList(result: unknown): NativeScreenMetrics[] {
+  const parsed = nativeScreenMetricsSnapshotSchema.safeParse(result)
+  return parsed.success ? parsed.data.screens : []
 }
 
 export function sensitivityThresholds(sensitivity: ShakeSensitivity): {

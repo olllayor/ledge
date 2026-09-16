@@ -1,10 +1,11 @@
 import { memo, useCallback, useState } from 'react'
-import type { ShelfColor } from '@shared/schema'
+import type { ClipboardCategory, ShelfColor } from '@shared/schema'
 
 const COLORS: ShelfColor[] = ['ember', 'wave', 'forest', 'sand']
 
 interface CategoryFormProps {
   onCreate: (name: string, color: ShelfColor) => void
+  categories?: ClipboardCategory[]
 }
 
 /**
@@ -12,7 +13,7 @@ interface CategoryFormProps {
  * sidebar. Owns its own draft state so the parent doesn't have to
  * plumb a 6th prop pair through.
  */
-function CategoryFormImpl({ onCreate }: CategoryFormProps) {
+function CategoryFormImpl({ onCreate, categories = [] }: CategoryFormProps) {
   const [draftName, setDraftName] = useState('')
   const [draftColor, setDraftColor] = useState<ShelfColor>('ember')
 
@@ -21,11 +22,16 @@ function CategoryFormImpl({ onCreate }: CategoryFormProps) {
       event.preventDefault()
       const trimmed = draftName.trim()
       if (!trimmed) return
+      const dup = categories.some((c) => c.name.trim().toLowerCase() === trimmed.toLowerCase())
+      if (dup) {
+        window.ledge?.showToast(`Category "${trimmed}" already exists`, 'error')
+        return
+      }
       onCreate(trimmed, draftColor)
       setDraftName('')
       setDraftColor('ember')
     },
-    [draftName, draftColor, onCreate],
+    [categories, draftName, draftColor, onCreate],
   )
 
   return (

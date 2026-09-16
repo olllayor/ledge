@@ -8,9 +8,9 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'convex/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'scripts/**/*.test.mjs'],
     environment: 'node',
-    // Most tests run in node (main process, shared, convex). Renderer
+    // Most tests run in node (main process, shared). Renderer
     // hook/component tests that touch the DOM opt into happy-dom via a
     // per-file pragma (`// @vitest-environment happy-dom`).
   },

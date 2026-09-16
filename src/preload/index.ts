@@ -8,16 +8,19 @@ import {
   clipboardCopyInputSchema,
   clipboardEntryAssignInputSchema,
   clipboardEntryRemoveInputSchema,
+  clipboardEntryTogglePinInputSchema,
   clipboardEntryUnassignInputSchema,
   clipboardQuickPastePasteInputSchema,
   clipboardSettingsUpdateInputSchema,
   clipboardStartItemDragInputSchema,
   syncSessionSchema,
+  teamShelfItemsPatchSchema,
   toastPayloadSchema,
   type LedgeAPI,
   type StateListener,
   type ToastKind,
 } from '@shared/ipc';
+import { clipboardHistoryRestoreInputSchema } from '@shared/ipcSchemas';
 import {
   appStateSchema,
   createShelfInputSchema,
@@ -25,6 +28,7 @@ import {
   clipboardEntrySchema,
   clipboardSettingsSchema,
   ingestPayloadSchema,
+  notchGeometrySchema,
   permissionStatusSchema,
   preferencePatchSchema,
   preferencesRecordSchema,
@@ -55,6 +59,9 @@ const api: LedgeAPI = {
   async closeShelf() {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.closeShelf));
   },
+  async toggleShelfPin() {
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.toggleShelfPin));
+  },
   async getPreferences() {
     return preferencesRecordSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.getPreferences));
   },
@@ -73,6 +80,9 @@ const api: LedgeAPI = {
   },
   async applyRemoteShelf(shelf) {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.applyRemoteShelf, shelfRecordSchema.parse(shelf)));
+  },
+  async removeSyncedShelf(shelfId) {
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.removeSyncedShelf, shelfId));
   },
   async relinkItem(itemId) {
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.relinkItem, itemId));
@@ -208,8 +218,19 @@ const api: LedgeAPI = {
     const parsed = clipboardEntryRemoveInputSchema.parse(payload);
     await ipcRenderer.invoke(IPC_CHANNELS.clipboardEntryRemove, parsed);
   },
+  async clipboardEntryTogglePin(payload) {
+    const parsed = clipboardEntryTogglePinInputSchema.parse(payload);
+    return ipcRenderer.invoke(IPC_CHANNELS.clipboardEntryTogglePin, parsed);
+  },
   async clipboardEntryClearAll() {
     await ipcRenderer.invoke(IPC_CHANNELS.clipboardEntryClearAll);
+  },
+  async clipboardHistoryRestore(entries) {
+    // Canonical bounded schema (array cap + thumbnail size cap). The
+    // unbounded base schema let the renderer serialize multi-hundred-MB
+    // restore payloads before main's stricter parse rejected them.
+    const parsed = clipboardHistoryRestoreInputSchema.parse(entries);
+    await ipcRenderer.invoke(IPC_CHANNELS.clipboardHistoryRestore, parsed);
   },
   async clipboardPruneNow() {
     await ipcRenderer.invoke(IPC_CHANNELS.clipboardPruneNow);
@@ -278,6 +299,10 @@ const api: LedgeAPI = {
     const parsed = teamStateSchema.partial().parse(patch);
     return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.setTeamState, parsed));
   },
+  async applyTeamShelfItems(patch) {
+    const parsed = teamShelfItemsPatchSchema.parse(patch);
+    return appStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.applyTeamShelfItems, parsed));
+  },
   // ---- Secure cloud-sync session ----
   async getSyncSession() {
     return syncSessionSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.syncSessionGet));
@@ -311,6 +336,23 @@ const api: LedgeAPI = {
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.notchDropoutStateChanged, wrapped);
     };
+  },
+  onNotchDropoutGeometry(listener) {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+      const parsed = notchGeometrySchema.safeParse(payload);
+      if (!parsed.success) return;
+      listener(parsed.data);
+    };
+    ipcRenderer.on(IPC_CHANNELS.notchDropoutGeometry, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.notchDropoutGeometry, wrapped);
+    };
+  },
+  async notchDropoutGeometry() {
+    const result = await ipcRenderer.invoke(IPC_CHANNELS.notchDropoutGeometryGet);
+    if (result === null || result === undefined) return null;
+    const parsed = notchGeometrySchema.safeParse(result);
+    return parsed.success ? parsed.data : null;
   },
 };
 

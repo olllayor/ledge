@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260811T101225429Z-97612-f875ec3e0df5",
+  "runId": "20260811T101225429Z-97612-f875ec3e0df5",
+  "runStatus": "completed",
+  "coverage": {
+    "status": "complete",
+    "reasons": []
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "21c190454e4ba983a6bd5c82b59d478a376db740",
+  "diffHash": "95ece1126ac9158a5f4f851a9019a353739856b582d13e2080db0efd3410ce17",
+  "rulesVersion": "unavailable",
+  "sessionHash": "96bbc89dfd124bef5bf10d45d4d873f0afc4b1a31b1fc6777d793270fc848910",
+  "reportRef": ".mimosa/reports/task-review-sess_cec1e68b-5ac0-45a2-9447-7e4ca5badcab-20260811T101225429Z-97612-f875ec3e0df5.json",
+  "events": [],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "src/renderer/src/components/Preferences/sections/GeneralSettings.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/renderer/src/components/Preferences/primitives.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/renderer/src/components/Preferences/sections/CloudSyncSettings.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/renderer/src/components/Preferences/sections/ProSettings.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/renderer/src/components/Preferences/sections/TeamSettings.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-08-11T10:12:25.698Z"
+}

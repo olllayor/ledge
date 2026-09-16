@@ -18,6 +18,7 @@ import type {
  */
 export interface PersistedState {
   liveShelf: ShelfRecord | null
+  teamLiveShelves: Record<string, ShelfRecord>
   recentShelves: ShelfRecord[]
   preferences: PreferencesRecord
   sync: SyncState

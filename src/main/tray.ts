@@ -17,11 +17,15 @@ interface TrayCallbacks {
 }
 
 export class TrayController {
-  private readonly tray: Tray
+  private tray: Tray
   private snapshot: AppState | null = null
 
   constructor(private readonly callbacks: TrayCallbacks) {
     this.tray = new Tray(createTrayImage())
+    this.attach()
+  }
+
+  private attach(): void {
     this.tray.setIgnoreDoubleClickEvents(true)
     this.tray.setToolTip('Ledge')
     this.tray.on('click', () => {
@@ -36,6 +40,16 @@ export class TrayController {
     this.tray.on('drop-text', (_event, text) => {
       this.callbacks.onDropText(text)
     })
+  }
+
+  /**
+   * macOS can drop status items across sleep/display reconfiguration.
+   * Cheap and idempotent: destroy + rebuild from the same icon path.
+   */
+  reassert(): void {
+    this.tray.destroy()
+    this.tray = new Tray(createTrayImage())
+    this.attach()
   }
 
   update(snapshot: AppState): void {
@@ -123,9 +137,13 @@ function createRestoreMenuItem(shelf: ShelfRecord, onRestore: (id: string) => vo
 }
 
 function createTrayImage() {
-  const resourcesDir = join(__dirname, '..', '..', 'build')
+  // Packaged icons ship via extraResources; dev loads from the repo build/.
+  const resourcesDir = app.isPackaged
+    ? join(process.resourcesPath, 'icons')
+    : join(app.getAppPath(), 'build')
 
-  // 1. Prefer the dedicated menubar icon (monochrome, pixel-fitted for 16 px)
+  // 1. Prefer the dedicated menubar icon (monochrome, pixel-fitted for 16 px).
+  // createFromPath auto-picks tray-icon@2x.png on Retina when it sits beside the 1x.
   const trayPath = join(resourcesDir, 'tray-icon.png')
   const trayImage = nativeImage.createFromPath(trayPath)
   if (!trayImage.isEmpty()) {
@@ -133,7 +151,7 @@ function createTrayImage() {
     return trayImage
   }
 
-  // 2. Fallback to the generic app icon (only during transition)
+  // 2. Fallback to the generic app icon
   const fallbackPath = join(resourcesDir, 'icon.png')
   const fallback = nativeImage.createFromPath(fallbackPath)
   if (!fallback.isEmpty()) {

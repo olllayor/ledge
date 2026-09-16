@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import type { ClipboardEntry } from '@shared/schema'
+import { isSafeImageDataUri } from '@shared/fileUtils'
 
 function fileExtensionOf(item: ClipboardEntry['item']): string {
   if (item.kind !== 'file' && item.kind !== 'imageAsset') return ''
@@ -24,7 +25,7 @@ export function formatRelativeTime(iso: string): string {
 const CardPreviewImpl = ({ entry }: { entry: ClipboardEntry }) => {
   const item = entry.item
   if (item.kind === 'imageAsset') {
-    if (entry.thumbnailDataUri) {
+    if (entry.thumbnailDataUri && isSafeImageDataUri(entry.thumbnailDataUri)) {
       return <img src={entry.thumbnailDataUri} alt="" draggable={false} />
     }
     return <span>🖼</span>

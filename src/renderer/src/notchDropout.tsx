@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NotchDropoutView } from './components/NotchDropoutView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastHost } from './components/ToastHost';
 import './styles.css';
 
@@ -12,7 +13,9 @@ if (!container) {
 
 createRoot(container).render(
   <StrictMode>
-    <NotchDropoutView />
+    <ErrorBoundary>
+      <NotchDropoutView />
+    </ErrorBoundary>
     <ToastHost />
   </StrictMode>,
 );
