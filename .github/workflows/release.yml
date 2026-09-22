@@ -53,6 +53,18 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # electron-builder re-downloads the dist zip into these caches, and
+      # the lockfile pins the electron version so the key stays accurate.
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
