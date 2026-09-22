@@ -1,11 +1,17 @@
 name: CI
 
 on:
+  # PR coverage comes from pull_request, so push CI is only for direct main
+  # commits. This keeps the same SHA from being verified twice.
   push:
     branches:
       - main
-      - dev
   pull_request:
+
+# Drop superseded runs when a PR is updated or a branch is force-pushed.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
@@ -30,6 +36,9 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
+        # lint/test/electron-vite do not need the Electron.app binary.
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: pnpm install --frozen-lockfile
 
       - name: Lint
